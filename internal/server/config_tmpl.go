@@ -1,196 +1,214 @@
 package server
 
-// The Config page's own markup and styles.
+// The Config page.
 //
-// Kept apart from templates.go for the same reason the About page is: this one
-// is mostly explanation, and mixing prose into the templates that project the
-// ledger makes both harder to change without breaking the other.
+// The version before this one explained every setting at length, in place, and
+// showed forty of them — most read-only. The result was a page you scrolled
+// past rather than used, with the two or three controls that actually do
+// something buried among the prose.
+//
+// So: what you can change is at the top and is short. What you cannot change
+// from here is folded away, present and findable but not competing. And the
+// explanation of a setting sits behind it rather than in front of it — one
+// line, on the row, saying what goes wrong at the wrong value.
 
 const configPageCSS = `
-.cfg-note{color:var(--dim);font-size:13px;max-width:84ch;margin:0 0 11px}
-.cfg-note b{color:var(--ink);font-weight:600}
-.cfg-lv{display:grid;gap:9px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-bottom:8px}
-.cfg-lv .l{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:12px 14px}
-.cfg-lv .l.on{border-color:var(--accent)}
-.cfg-lv .l .hd{display:flex;gap:7px;align-items:baseline;margin-bottom:6px;flex-wrap:wrap}
-.cfg-lv .l .hd b{font-family:ui-monospace,Consolas,monospace}
-.cfg-lv .l p{margin:0 0 6px;font-size:13px}
-.cfg-lv .l p.adv{color:var(--dim);font-size:12px;margin:0}
-.cfg-k{white-space:nowrap;font-family:ui-monospace,Consolas,monospace;font-size:12px}
-.cfg-v{font-family:ui-monospace,Consolas,monospace;font-size:12px}
-.cfg-m{color:var(--dim);font-size:13px}
-.cfg-ctl{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0}
-.cfg-ctl label{display:flex;gap:5px;align-items:center;color:var(--dim);font-size:12px;white-space:nowrap}
-@media (max-width:760px){.cfg-lv{grid-template-columns:1fr}}
+.cfg{display:grid;gap:9px;margin-bottom:20px}
+.cfg .box{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:13px 15px}
+.cfg .box>h3{margin:0 0 2px;font-size:14px;font-weight:600}
+.cfg .box>.sub2{color:var(--dim);font-size:12px;margin-bottom:10px}
+.cfg form{display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end}
+.fld{display:flex;flex-direction:column;gap:3px}
+.fld label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.fld select,.fld input{min-width:104px}
+.fld label{display:flex;align-items:center}
+select{background:#0c1114;border:1px solid var(--line);color:var(--ink);border-radius:3px;
+padding:6px 9px;font:inherit;font-size:13px}
+.lanes td{padding:5px 11px}
+.lanes .nm{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.lanes form{display:flex;gap:5px;align-items:center;margin:0}
+.lanes input[type=number]{width:64px;padding:3px 6px}
+.lanes button{padding:3px 9px;font-size:12px}
+.levels{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:9px}
+.lvl{border:1px solid var(--line);border-radius:4px;padding:9px 11px;font-size:12px}
+.lvl.on{border-color:var(--accent)}
+.lvl b{display:block;font-size:13px;margin-bottom:3px}
+.lvl .d{color:var(--dim)}
+details.ref2{background:var(--card);border:1px solid var(--line);border-radius:5px;
+padding:0;margin-bottom:8px}
+details.ref2>summary{padding:11px 15px;cursor:pointer;font-weight:600;font-size:13px;
+list-style:none;display:flex;gap:9px;align-items:baseline}
+details.ref2>summary::-webkit-details-marker{display:none}
+details.ref2>summary::before{content:"▸";color:var(--dim);font-size:11px}
+details.ref2[open]>summary::before{content:"▾"}
+details.ref2>summary .c{color:var(--dim);font-weight:400;font-size:12px;margin-left:auto}
+details.ref2 .in{padding:0 15px 13px}
+.kv{display:grid;grid-template-columns:auto auto 1fr;gap:4px 14px;font-size:13px;align-items:baseline}
+.kv .k{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--dim)}
+.kv .v{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.kv .m{color:var(--dim);font-size:12px}
+@media (max-width:820px){.levels{grid-template-columns:1fr}.kv{grid-template-columns:1fr}}
 `
 
 const configPageHTML = `
 {{if eq .Page "config"}}{{with .Body}}
-<div class="banner calm">Two kinds of setting live here. <b>Lanes are editable from this page</b> and take
-effect on the next tick. Everything else is edited in
-{{if .HasPath}}<span class="mono">{{.Path}}</span>{{else}}the config file{{end}} and takes effect
-when the fleet next loads it — it is shown anyway, with its value and its consequence, because a policy
-you cannot see is one you cannot review.</div>
 
-<h2>Lanes <span class="sub">the schedule — pause one, or change how often it fires</span></h2>
-<p class="cfg-note">A lane is a timer that picks up work of one kind and dispatches it. Saving here rewrites
-the config file and takes effect <b>on that lane's next tick</b> — no restart, and nothing already in flight
-is interrupted. The floor is {{.CadenceFloor}} seconds: below that a lane spends more time starting runs than
-running them. <b>Max per tick</b> is how many dispatches one firing may make, so it is the ceiling on how
-fast this lane can spend money.</p>
-<div class="wrap"><table>
-  <tr><th>lane</th><th>status</th><th>scope</th><th>last fired</th>
-      <th class="num">ticks</th><th class="num">dispatched</th><th style="width:330px">cadence and pause</th></tr>
-  {{range .Lanes}}<tr>
-    <td class="mono">{{.Name}}<div class="cfg-m small" style="max-width:34ch">{{.Note}}</div></td>
-    <td><span class="pill {{verdictClass .Status}}">{{.Status}}</span></td>
-    <td class="dim mono small">{{.Scope}}</td>
-    <td class="dim">{{.Since}}</td>
-    <td class="num dim">{{.Ticks}}</td>
-    <td class="num dim">{{.Dispatches}}</td>
-    <td><form class="cfg-ctl" method="post" action="/loop">
-      <input type="hidden" name="name" value="{{.Name}}">
-      <label><input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}}> running</label>
-      <label>every <input type="number" name="every" value="{{.EverySeconds}}" min="15"
-        title="seconds between firings; 15 is the floor"> s</label>
-      <label>max <input type="number" name="max" value="{{.MaxPerTick}}" min="1"
-        title="dispatches this lane may make in one firing"> per tick</label>
-      <button type="submit" class="sec">Save</button>
-    </form></td>
-  </tr>{{else}}<tr><td colspan="7" class="dim">No lanes are declared, so nothing is scheduled. Work only moves
-    when somebody runs a dispatch by hand.</td></tr>{{end}}
-</table></div>
+<h2>What you can change here</h2>
+<div class="cfg">
 
-<h2>The console <span class="sub">how much of what it drafts it may actually do — file-only{{if .HasPath}}, in {{.Path}}{{end}}</span></h2>
-{{with .Console}}
-<p class="cfg-note">The console is the panel that lets you drive this fleet by talking to it. It is
-<b>{{if .Enabled}}on{{else}}off{{end}}</b>, running as <span class="mono">{{.Worker}}</span>, at authority
-<b class="mono">{{.Authority}}</b>{{if not .Known}} <span class="pill bad">not a level this build knows — it would
-execute nothing</span>{{end}}. Each turn is a real agent run: it costs money, it is bounded at
-{{.Timeout}}s, and it is replayed the last {{.History}} turns because the agent has no memory between
-invocations. Changing the level means editing <span class="mono">console.authority</span> in the file —
-there is deliberately no control for it here, because a surface that can widen what agents may do from a
-browser is one nobody can review.</p>
-<div class="cfg-lv">
-  {{range .Levels}}<div class="l{{if .Current}} on{{end}}">
-    <div class="hd"><b>{{.Name}}</b>
-      {{if .Current}}<span class="pill ok">current</span>{{end}}
-      <span class="pill mute">executes {{.Executes}}</span></div>
-    <p>{{.Gives}}</p>
-    <p class="adv">{{.Advice}}</p>
-  </div>{{end}}
+  <div class="box">
+    <h3>Lanes<span class="tip" data-tip="A lane is a timer that picks up one kind of work. Saving rewrites the config and takes effect on that lane&#39;s next tick — no restart, and nothing already in flight is interrupted. The cadence floor is 15 seconds; below that a lane spends more time starting runs than doing them.">?</span></h3>
+    {{if .AllDark}}<div class="sub2">Every lane reads NEVER RUN because the scheduler is not
+      running. Start it with <span class="mono">adlc schedule run</span>.</div>{{end}}
+    <div class="wrap"><table class="lanes">
+      <tr><th>lane</th><th>drains</th><th>status</th><th>last fired</th>
+        <th class="num">ticks<span class="tip" data-tip="Every firing writes a tick, including the ones that found nothing to do. That is what makes a silent lane detectable: no ticks means the lane stopped, not that there was no work.">?</span></th>
+        <th class="num">dispatched</th><th>cadence · max per tick</th></tr>
+      {{range .Lanes}}<tr>
+        <td class="nm">{{.Name}}</td>
+        <td class="dim small mono">{{.Scope}}</td>
+        <td><span class="pill {{verdictClass .Status}}">{{.Status}}</span></td>
+        <td class="dim small">{{.Since}}</td>
+        <td class="num dim">{{.Ticks}}</td><td class="num dim">{{.Dispatches}}</td>
+        <td><form method="post" action="/loop">
+          <input type="hidden" name="name" value="{{.Name}}">
+          <input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}} title="running">
+          <input type="number" name="every" value="{{.EverySeconds}}" min="15" title="seconds between firings">s
+          <input type="number" name="max" value="{{.MaxPerTick}}" min="1" title="most dispatches per firing">max
+          <button type="submit">Save</button>
+        </form></td>
+      </tr>{{end}}
+    </table></div>
+  </div>
+
+  <div class="box">
+    <h3>Safety<span class="tip" data-tip="A blast radius is how far a change reaches if it is wrong. Every work item declares one, and these four settings decide what has to happen before a change that size is applied to anything real.">?</span></h3>
+    <form method="post" action="/config/blast">
+      <div class="fld"><label>apply unattended up to<span class="tip" data-tip="The widest change the fleet applies with nobody watching. Anything above this stops on the Approvals page. Raising it trades a person&#39;s attention for speed, and the thing you lose is the last checkpoint before something real changes.">?</span></label>
+        <select name="auto_apply_max">{{range .Radii}}<option value="{{.}}"
+          {{if eq . $.Body.Blast.AutoApplyMax}}selected{{end}}>{{.}}</option>{{end}}</select></div>
+      <div class="fld"><label>one named approver from<span class="tip" data-tip="From this radius up, an approval has to carry a person&#39;s name. Below it, an approval can be recorded without one — fine for a change that touches only source, useless as an audit trail for anything else.">?</span></label>
+        <select name="named_approver_min">{{range .Radii}}<option value="{{.}}"
+          {{if eq . $.Body.Blast.NamedApproverMin}}selected{{end}}>{{.}}</option>{{end}}</select></div>
+      <div class="fld"><label>two approvers from<span class="tip" data-tip="From this radius up, two distinct people have to approve. It has to be at or above the one-approver setting, or the wider change would ask for less than the narrower one.">?</span></label>
+        <select name="two_approvals_min">{{range .Radii}}<option value="{{.}}"
+          {{if eq . $.Body.Blast.TwoApprovalsMin}}selected{{end}}>{{.}}</option>{{end}}</select></div>
+      <div class="fld"><label>approval lasts (minutes)<span class="tip" data-tip="How long an approval stays good. Past it the apply is refused even on the same plan, because an approval given a week ago was given about a system that has since moved.">?</span></label>
+        <input type="number" name="ttl" value="{{.Blast.ApprovalTTLMinutes}}" min="1"></div>
+      <button type="submit">Save safety</button>
+    </form>
+    <div class="wrap" style="margin-top:11px"><table>
+      <tr><th>radius</th><th>what it reaches</th><th>before it is applied</th></tr>
+      {{range .Radii2}}<tr>
+        <td class="mono">{{.Radius}}</td><td class="dim">{{.Reaches}}</td>
+        <td><span class="pill {{.Class}}">{{.Requires}}</span></td>
+      </tr>{{end}}
+    </table></div>
+  </div>
+
+  <div class="box">
+    <h3>Money<span class="tip" data-tip="Caps refuse a dispatch once recorded spend passes them. Blank or zero means unlimited, and is reported as unlimited everywhere — never as a cap of nothing, because &#39;no budget set&#39; and &#39;budget exhausted&#39; must not look alike.">?</span></h3>
+    {{if .Money.Unpriced}}<div class="sub2"><b>{{.Money.Unpriced}} finished run(s) used a model with
+      no price entry.</b> Their cost is unknown rather than zero, and is not in the figure below.</div>{{end}}
+    <form method="post" action="/config/budget">
+      <div class="fld"><label>$ per run<span class="tip" data-tip="Refuses a single run whose recorded usage would exceed this. Catches a runaway agent before it finishes rather than after.">?</span></label>
+        <input type="text" name="per_run" value="{{.CapRun}}" placeholder="unlimited"></div>
+      <div class="fld"><label>$ per day<span class="tip" data-tip="Once the day&#39;s recorded spend passes this, nothing more dispatches. The fleet stops rather than slows.">?</span></label>
+        <input type="text" name="per_day" value="{{.CapDay}}" placeholder="unlimited"></div>
+      <div class="fld"><label>$ per deliverable<span class="tip" data-tip="The same, scoped to one deliverable — so one runaway piece of work cannot spend the whole day&#39;s budget.">?</span></label>
+        <input type="text" name="per_segment" value="{{.CapSegment}}" placeholder="unlimited"></div>
+      <div class="fld"><label>default model<span class="tip" data-tip="Recorded on a run that did not name its own model, and used to price it. A model missing from the table below reports UNPRICED rather than free.">?</span></label>
+        <input type="text" name="model" value="{{.Money.DefaultModel}}"></div>
+      <button type="submit">Save caps</button>
+    </form>
+    <div class="dim small" style="margin-top:9px">Spent in the last 24 hours: <b>{{.Money.SpentToday}}</b>
+      against a daily cap of {{.Money.DayCap}}.</div>
+    <div class="wrap" style="margin-top:9px"><table>
+      <tr><th>model</th><th>rate from<span class="tip left" data-tip="A rate you set is one somebody here checked. A default is one that shipped in this binary and may be out of date. Unpriced means neither, and a run on that model reports its cost as unknown rather than as zero.">?</span></th>
+        <th class="num">input</th><th class="num">output</th>
+        <th class="num">cache read</th><th class="num">cache write</th><th>set your own</th></tr>
+      {{range .Money.Prices}}<tr>
+        <td class="mono">{{.Model}}{{if .Default}} <span class="pill live">default model</span>{{end}}</td>
+        <td><span class="pill {{if .Unpriced}}bad{{else if .FromDefaults}}warn{{else}}ok{{end}}">{{.Source}}</span></td>
+        <td class="num">{{.In}}</td><td class="num">{{.Out}}</td>
+        <td class="num dim">{{.CacheRead}}</td><td class="num dim">{{.CacheWrite}}</td>
+        <td><form method="post" action="/config/price" class="lanes">
+          <input type="hidden" name="model" value="{{.Model}}">
+          <input type="number" step="0.01" name="in" placeholder="in" style="width:70px">
+          <input type="number" step="0.01" name="out" placeholder="out" style="width:70px">
+          <button type="submit">Set</button>
+        </form></td>
+      </tr>{{end}}
+    </table></div>
+    <div class="dim small" style="margin-top:6px">Dollars per million tokens.
+      {{if .OnDefaults}}These are the rates that shipped in the binary — nobody here has confirmed
+      them against your provider. Setting one replaces it with yours.{{end}}</div>
+  </div>
+
+  <div class="box">
+    <h3>The console<span class="tip" data-tip="The panel on every page. It drafts actions from what you ask for; this setting decides how many of them it may carry out on its own. The three gates a person owns — signing off an idea, answering a blocking question, approving something irreversible — are only pressed by the console at full.">?</span></h3>
+    <form method="post" action="/config/console">
+      <div class="fld"><label>panel</label>
+        <span><input type="checkbox" name="enabled" {{if .Console.Enabled}}checked{{end}}> on</span></div>
+      <div class="fld"><label>authority</label>
+        <select name="authority">{{range .Console.Levels}}<option value="{{.Name}}"
+          {{if .Current}}selected{{end}}>{{.Name}}</option>{{end}}</select></div>
+      <button type="submit">Save console</button>
+      <span class="dim small">runs as <a href="/roles/{{.Console.Worker}}">{{.Console.Worker}}</a></span>
+    </form>
+    <div class="levels">
+      {{range .Console.Levels}}<div class="lvl{{if .Current}} on{{end}}">
+        <b>{{.Name}}{{if .Current}} <span class="pill warn">current</span>{{end}}</b>
+        <div class="d">{{.Gives}}</div>
+      </div>{{end}}
+    </div>
+  </div>
+
+  <div class="box">
+    <h3>Limits</h3>
+    <form method="post" action="/config/dispatch">
+      <div class="fld"><label>rework attempts<span class="tip" data-tip="How many times an item may be sent back before it escalates to a person instead of looping. An item that fails the same way five times is not going to pass on the sixth.">?</span></label>
+        <input type="number" name="attempts" value="{{.Attempts}}" min="1"></div>
+      <div class="fld"><label>run timeout (s)<span class="tip" data-tip="How long one agent may run. A run killed at this limit is recorded as UNKNOWN rather than failed, because nobody knows how it was going — which is accurate, and why setting this too low is expensive.">?</span></label>
+        <input type="number" name="timeout" value="{{.Timeout}}" min="60"></div>
+      <div class="fld"><label>page refresh (s)<span class="tip" data-tip="How often this dashboard reloads itself. It is also how quickly a console answer appears, since the panel has no JavaScript. 0 stops it refreshing.">?</span></label>
+        <input type="number" name="refresh" value="{{.Refresh}}" min="0"></div>
+      <button type="submit">Save limits</button>
+    </form>
+  </div>
 </div>
-<p class="cfg-note">The three gates a person owns are: signing off an idea, answering a blocking question,
-and approving something irreversible. At <span class="mono">act</span> the console drafts those and leaves
-them for you; at <span class="mono">full</span> it presses them itself, and the record says so on every one.</p>
-{{end}}
 
-<h2>Safety policy <span class="sub">what stops a change reaching a real machine unattended — file-only{{if .HasPath}}, in {{.Path}}{{end}}</span></h2>
-<p class="cfg-note">A <b>blast radius</b> is how far a change reaches if it is wrong: none touches only
-source, global touches everything. Every work item declares one, and these four settings decide what has to
-happen before a change of that size is applied. The table below is what your current policy actually does —
-not the settings, but their effect.</p>
-<div class="wrap"><table>
-  <tr><th>radius</th><th>what it reaches</th><th>before it is applied</th></tr>
-  {{range .Radii}}<tr>
-    <td class="mono">{{.Radius}}</td>
-    <td class="cfg-m">{{.Reaches}}</td>
-    <td><span class="pill {{.Class}}">{{.Requires}}</span></td>
-  </tr>{{end}}
-</table></div>
-<p class="cfg-note">{{.Approval}}</p>
-<div class="wrap"><table>
-  <tr><th style="width:190px">setting</th><th style="width:110px">value</th><th>what you give up by moving it</th></tr>
-  {{range .Blast}}<tr><td class="cfg-k">{{.Key}}</td><td class="cfg-v">{{.Value}}</td>
-    <td class="cfg-m">{{.Means}}</td></tr>{{end}}
-</table></div>
+<h2>Everything else <span class="sub">edited in {{.Path}}, then <span class="mono">adlc config check</span></span></h2>
 
-<h2>Money <span class="sub">the caps that refuse work, and the table that prices it — file-only{{if .HasPath}}, in {{.Path}}{{end}}</span></h2>
-{{with .Money}}
-{{if not .AnyPrices}}<div class="banner bad"><b>No model prices are configured.</b> Every run therefore reports
-UNPRICED — cost unknown, not zero — so the daily cap can never be reached and the fleet has no throttle at
-all. Set <span class="mono">budget.price_micros_per_mtok</span> before running this unattended.</div>
-{{else if not .DefaultPriced}}<div class="banner bad">The default model
-<span class="mono">{{.DefaultModel}}</span> has <b>no price entry</b>, so runs on it report UNPRICED rather
-than a number. That is cost unknown, not cost nothing, and it is not counted against any cap.</div>{{end}}
-<div class="grid">
-  <div class="card"><div class="n">{{if .SpentToday}}{{.SpentToday}}{{else}}—{{end}}</div>
-    <div class="l">spent, last 24h</div></div>
-  <div class="card"><div class="n">{{.DayCap}}</div><div class="l">daily cap</div></div>
-  <div class="card"><div class="n" style="font-size:15px;padding-top:6px">{{.DefaultModel}}</div>
-    <div class="l">default model{{if not .DefaultPriced}} — UNPRICED{{end}}</div></div>
-</div>
-{{if .Unpriced}}<p class="cfg-note"><b>{{plural .Unpriced "finished run" "finished runs"}}</b> used a model with
-no price entry, so their cost is unknown and is not in the figure above. First one:
-<span class="mono"><a href="/run/{{.UnpricedRun}}">{{.UnpricedRun}}</a></span>.</p>{{end}}
-<div class="wrap"><table>
-  <tr><th style="width:190px">cap</th><th style="width:110px">value</th><th>what it does at that value</th></tr>
-  {{range .Caps}}<tr><td class="cfg-k">{{.Key}}</td>
-    <td class="cfg-v">{{if .Unlimited}}<span class="pill warn">unlimited</span>{{else}}{{.Value}}{{end}}</td>
-    <td class="cfg-m">{{.Means}}</td></tr>{{end}}
-</table></div>
-{{if .Prices}}
-<p class="cfg-note">Dollars per <b>million tokens</b>. A model absent from this table is not free — it reports
-<b>UNPRICED</b>, its spend never counts against a cap, and the runs that used it are listed separately on the
-Overview. These are a shipped default, not a fact: confirm them against your provider before you trust a
-cost report.</p>
-<div class="wrap"><table>
-  <tr><th>model</th><th class="num">input</th><th class="num">output</th>
-      <th class="num">cache read</th><th class="num">cache write</th></tr>
-  {{range .Prices}}<tr>
-    <td class="mono">{{.Model}}{{if .Default}} <span class="pill ok">default</span>{{end}}</td>
-    <td class="num">{{.In}}</td><td class="num">{{.Out}}</td>
-    <td class="num dim">{{.CacheRead}}</td><td class="num dim">{{.CacheWrite}}</td>
-  </tr>{{end}}
-</table></div>
-{{end}}
-{{end}}
+<details class="ref2">
+  <summary>Checks <span class="c">{{len .Checks}} declared</span></summary>
+  <div class="in">
+    <p class="dim small">Not editable here on purpose: a check is a command line, and a browser form
+    that writes argv into something the control plane executes is a remote shell with extra steps.</p>
+    <div class="wrap"><table>
+      <tr><th>check</th><th>runs</th><th>verdict is</th><th>gates</th></tr>
+      {{range .Checks}}<tr>
+        <td class="mono">{{.ID}}</td>
+        <td class="mono small dim">{{.Command}}</td>
+        <td><span class="pill {{if .ExitDriven}}mute{{else}}live{{end}}">{{if .ExitDriven}}the exit code{{else}}the output{{end}}</span>
+          <span class="dim small">{{.Verdict}}</span></td>
+        <td class="dim small">{{if .Ungated}}<span class="pill warn">nothing</span>{{else}}{{join .Gates}}{{end}}</td>
+      </tr>{{end}}
+    </table></div>
+  </div>
+</details>
 
-<h2>Checks <span class="sub">what the control plane runs itself, and which channel it reads the answer from — file-only{{if .HasPath}}, in {{.Path}}{{end}}</span></h2>
-<p class="cfg-note">These are run by the control plane, never by an agent, and an agent's account of one is
-judged in the <b>same channel</b> the control plane read it in. That is the distinction the verdict rule
-carries: for some commands the exit code is the answer, and for others the exit code says nothing at all and
-the <b>output</b> is the answer. Read the wrong one and a truthful report gets refused while a doctored one
-gets in.</p>
-<div class="wrap"><table>
-  <tr><th>check</th><th>what it runs</th><th>the verdict is</th><th>gates</th></tr>
-  {{range .Checks}}<tr>
-    <td class="mono">{{.ID}}
-      <div class="cfg-m small">{{.Kind}}{{if .Binds}} · binds artifact{{end}} · timeout {{.Timeout}}</div>
-      <div class="cfg-m small" style="max-width:30ch">{{.KindMeans}}</div></td>
-    <td class="mono small">{{.Command}}{{if .Dir}}<div class="cfg-m small">in {{.Dir}}</div>{{end}}</td>
-    <td style="max-width:44ch">
-      <span class="pill {{if .ExitDriven}}live{{else}}warn{{end}}">{{if .ExitDriven}}the exit code{{else}}the output{{end}}</span>
-      <span class="mono small">{{.Verdict}}</span>
-      {{if .Detail}}<div class="mono small dim">{{.Detail}}</div>{{end}}
-      <div class="cfg-m small">{{.Means}}</div></td>
-    <td class="dim mono small">{{range .Gates}}{{.}}<br>{{end}}
-      {{if .Ungated}}<span class="pill warn">gates nothing</span>
-      <div class="cfg-m small" style="max-width:26ch">It runs on demand but no lifecycle edge requires it, so
-        nothing is stopped when it fails.</div>{{end}}</td>
-  </tr>{{else}}<tr><td colspan="4" class="dim">No checks are declared, which means the gate reports green over
-    nothing. The config loader refuses this, so seeing it here is a defect.</td></tr>{{end}}
-</table></div>
-
-<h2>Everything else <span class="sub">the rest of the declared surface, and what each value costs you</span></h2>
-<p class="cfg-note">None of this is editable from a browser, deliberately: this file is the fleet's policy, and
-a surface that can rewrite policy from a page with no authentication is a surface that can quietly widen what
-agents may do. Edit {{if .HasPath}}<span class="mono">{{.Path}}</span>{{else}}the config file{{end}}, then run
-<span class="mono">adlc config check</span> — it validates the file and names, in words, anything that would
-leave work sitting.</p>
 {{range .Groups}}
-<h2>{{.Title}} <span class="sub">{{.Sub}}</span></h2>
-<div class="wrap"><table>
-  <tr><th style="width:210px">setting</th><th style="width:190px">value</th><th>what it does</th></tr>
-  {{range .Rows}}<tr><td class="cfg-k">{{.Key}}</td><td class="cfg-v">{{.Value}}</td>
-    <td class="cfg-m">{{.Means}}</td></tr>{{end}}
-</table></div>
+<details class="ref2">
+  <summary>{{.Title}} <span class="c">{{.Sub}}</span></summary>
+  <div class="in"><div class="kv">
+    {{range .Rows}}<span class="k">{{.Key}}</span><span class="v">{{.Value}}</span><span class="m">{{.Means}}</span>{{end}}
+  </div></div>
+</details>
 {{end}}
 
-<h2>Mandatory clauses <span class="sub">text every role prompt must carry verbatim; the gate refuses a commit that drops one</span></h2>
-<div class="card">{{if .Clauses}}<ul style="margin:0;padding-left:18px">
-  {{range .Clauses}}<li class="mono small">{{.}}</li>{{end}}
-</ul>{{else}}<span class="dim">None declared. Nothing stops a run editing a safety clause out of its own
-instructions, because there is nothing it is required to keep.</span>{{end}}</div>
+<p class="dim small">Roles and area routing are structure rather than policy, so they live in the
+file next to the prompt files they name — see <a href="/roles">Roles</a> for what is declared and
+what each one is given.</p>
 {{end}}{{end}}
 `

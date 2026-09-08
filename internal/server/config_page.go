@@ -21,6 +21,8 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,9 +47,28 @@ type configView struct {
 
 	Console cfgConsole
 
-	Radii    []cfgRadiusRow
-	Blast    []cfgSetting
+	// Radii2 is the derived table of what each radius means under the current
+	// policy; Radii is the bare list the selects are built from.
+	Radii2   []cfgRadiusRow
+	Radii    []config.Radius
+	BlastRaw []cfgSetting
 	Approval string
+
+	// The live values the editable controls are populated from. Rendered
+	// straight rather than through a formatter, because a form that shows a
+	// prettified value and posts a raw one is a form that silently changes
+	// something you did not touch.
+	Blast      config.BlastPolicy
+	CapRun     string
+	CapDay     string
+	CapSegment string
+	Attempts   int
+	Timeout    int
+	Refresh    int
+	OnDefaults bool
+	// AllDark is true when no lane has ever fired, which almost always means
+	// the scheduler is simply not running.
+	AllDark bool
 
 	Money cfgMoney
 
@@ -138,6 +159,12 @@ type cfgPrice struct {
 	CacheRead  string
 	CacheWrite string
 	Default    bool
+	// Source is where the rate came from: the operator's table, the built-in
+	// defaults, or nowhere. Three values, because a rate somebody checked and a
+	// rate that shipped in the binary deserve different degrees of trust.
+	Source       string
+	FromDefaults bool
+	Unpriced     bool
 }
 
 type cfgCheck struct {
@@ -170,12 +197,39 @@ func (s *Server) configPageV2(*http.Request) (string, any, error) {
 	}
 	v.Lanes = s.cfgLanes()
 	v.Console = s.cfgConsole()
-	v.Radii, v.Blast, v.Approval = s.cfgSafety()
+	v.Radii2, v.BlastRaw, v.Approval = s.cfgSafety()
 	v.Money = s.cfgMoney()
 	v.Checks = s.cfgChecks()
 	v.Groups = s.cfgGroups()
 	v.Clauses = s.Cfg.Prompts.MandatoryClauses
+
+	v.Radii = config.Radii()
+	v.Blast = s.Cfg.Blast
+	v.CapRun = cfgDollars(s.Cfg.Budget.PerRunMicros)
+	v.CapDay = cfgDollars(s.Cfg.Budget.PerDayMicros)
+	v.CapSegment = cfgDollars(s.Cfg.Budget.PerSegmentMicros)
+	v.Attempts = s.Cfg.Dispatch.MaxAttempts
+	v.Timeout = s.Cfg.Dispatch.TimeoutSeconds
+	v.Refresh = s.Cfg.Server.RefreshSeconds
+	v.OnDefaults = s.Cfg.Budget.UsesDefaultPricing()
+	v.AllDark = true
+	for _, l := range v.Lanes {
+		if l.Ticks > 0 {
+			v.AllDark = false
+			break
+		}
+	}
 	return "Config", v, nil
+}
+
+// cfgDollars renders a micros cap for a text box. Zero comes back empty rather
+// than as "0", because the box means unlimited when it is blank and a literal
+// zero would read as a cap of nothing.
+func cfgDollars(micros int64) string {
+	if micros <= 0 {
+		return ""
+	}
+	return strconv.FormatFloat(float64(micros)/1e6, 'f', -1, 64)
 }
 
 func (s *Server) cfgLanes() []cfgLane {
@@ -338,16 +392,42 @@ func (s *Server) cfgMoney() cfgMoney {
 		makeCap("per_segment_micros", b.PerSegmentMicros,
 			"The same cap, per deliverable, so one runaway deliverable cannot spend the whole day's budget."),
 	}
-	for _, model := range b.PricedModels() {
-		t := b.PriceMicrosPerMTok[model]
-		m.Prices = append(m.Prices, cfgPrice{
-			Model:      model,
-			In:         spend.Micros(t[config.PriceInput]).String(),
-			Out:        spend.Micros(t[config.PriceOutput]).String(),
-			CacheRead:  spend.Micros(t[config.PriceCacheRead]).String(),
-			CacheWrite: spend.Micros(t[config.PriceCacheWrite]).String(),
-			Default:    model == b.DefaultModel,
-		})
+	// Every model the fleet could actually price, from either table — not just
+	// the operator's. Showing only the configured ones renders an empty table
+	// on exactly the project that most needs to see what it is being charged,
+	// and leaves the operator unable to tell "no rates" from "no models".
+	seen := map[string]bool{}
+	models := append([]string{}, b.PricedModels()...)
+	for _, m := range models {
+		seen[m] = true
+	}
+	for model := range config.DefaultPricing() {
+		if !seen[model] {
+			models = append(models, model)
+		}
+	}
+	if b.DefaultModel != "" && !seen[b.DefaultModel] {
+		if _, src := b.PriceFor(b.DefaultModel); src == config.PriceUnpriced {
+			// An unpriced default model is the one row an operator must not be
+			// able to miss, so it is listed even though nothing can price it.
+			models = append(models, b.DefaultModel)
+		}
+	}
+	sort.Strings(models)
+	for _, model := range models {
+		t, src := b.PriceFor(model)
+		row := cfgPrice{Model: model, Default: model == b.DefaultModel,
+			Source: string(src), FromDefaults: src == config.PriceDefaulted}
+		if t == nil {
+			row.In, row.Out, row.CacheRead, row.CacheWrite = "—", "—", "—", "—"
+			row.Unpriced = true
+		} else {
+			row.In = spend.Micros(t[config.PriceInput]).String()
+			row.Out = spend.Micros(t[config.PriceOutput]).String()
+			row.CacheRead = spend.Micros(t[config.PriceCacheRead]).String()
+			row.CacheWrite = spend.Micros(t[config.PriceCacheWrite]).String()
+		}
+		m.Prices = append(m.Prices, row)
 	}
 	if rep, err := spend.Summarise(s.Led, b, s.now()); err == nil {
 		m.SpentToday = rep.Today.String()

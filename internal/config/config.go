@@ -506,6 +506,17 @@ func (ch *Check) compile() error {
 	return nil
 }
 
+// Compile prepares a check's verdict rule and reports what the rule needs and
+// does not have.
+//
+// It is exported for the benefit of anything that BUILDS a check rather than
+// loading one — `adlc config init` turning a -check spec into a declaration.
+// Without it the only way to find out that count_min has no count_pattern was
+// to hand the half-built check to the scaffold, which refuses it and says the
+// scaffold has a defect. The person who typed the spec then reads an accusation
+// against the tool instead of the name of the parameter they left out.
+func (ch *Check) Compile() error { return ch.compile() }
+
 // Pattern returns the compiled expectation, if any.
 func (ch *Check) Pattern() *regexp.Regexp { return ch.compiled }
 

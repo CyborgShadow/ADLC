@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/CyborgShadow/ADLC/internal/config"
@@ -155,7 +156,7 @@ func cmdConfigInit(args []string) int {
 	var roots stringList
 	fs.Var(&roots, "source-root", "a directory the fleet's guards are scoped to (repeatable)")
 	var checks stringList
-	fs.Var(&checks, "check", "a check as id:verdict:command (repeatable), e.g. test:go_test_json:go test -json ./...")
+	fs.Var(&checks, "check", checkFlagHelp)
 	agentsDir := fs.String("agents", "agents", "where the role prompts live")
 	command := fs.String("agent-command", "", "argv that starts an agent, with {{prompt}} and {{envelope}}")
 	radius := fs.String("auto-apply-max", "none", "the widest blast radius applied without a person: none|host|fleet|region|global")
@@ -224,28 +225,80 @@ func cmdConfigInit(args []string) int {
 	return exitOK
 }
 
-// parseCheckSpec reads id:verdict:command.
+// checkRuleParams names the parameters each verdict rule reads.
+//
+// One table, so the flag's help, the message that names a parameter somebody
+// left out, and the parser that fills the fields cannot drift apart. A rule
+// this build knows but that is absent here is refused rather than half-built:
+// handing the scaffold a check it will reject is what made a missing
+// count_pattern read as a defect in the tool.
+var checkRuleParams = map[config.VerdictRule]struct{ required, optional []string }{
+	config.VerdictExitZero:       {},
+	config.VerdictExitIn:         {required: []string{"allowed_exits"}},
+	config.VerdictOutputEmpty:    {},
+	config.VerdictOutputNonEmpty: {},
+	config.VerdictOutputMatches:  {required: []string{"expect_pattern"}},
+	config.VerdictOutputNotMatch: {required: []string{"expect_pattern"}},
+	config.VerdictGoTestJSON:     {},
+	config.VerdictCountMin:       {required: []string{"count_pattern"}, optional: []string{"min_count"}},
+}
+
+// checkFlagHelp is the -check flag's own description. It carries an example of
+// the parameterised form because the rule that needs it most — count_min over a
+// test runner's own count — is the one a project cannot express any other way
+// through this command.
+const checkFlagHelp = `a check as id:verdict:command (repeatable), e.g. test:go_test_json:go test -json ./...
+a rule that reads parameters takes them in brackets after its name:
+  tests:count_min[count_pattern="numTotalTests":(\d+)]:npm test
+  plan:exit_in[allowed_exits=0,2]:terraform plan -detailed-exitcode
+  lint:output_matches[expect_pattern=^0 problems]:npx eslint .
+two parameters are separated by a semicolon: count_min[count_pattern=…;min_count=20]`
+
+// parseCheckSpec reads id:verdict:command, where the verdict may carry the
+// parameters its rule reads as verdict[key=value;key=value].
 //
 // The command keeps its colons — a Windows path or a URL has them and splitting
 // on every one would mangle exactly the commands people are most likely to
-// declare.
+// declare. The bracketed field is read the same way, by scanning to the bracket
+// that closes it rather than to the first colon inside it, because the pattern
+// that counts a JavaScript suite's tests ("numTotalTests":(\d+)) contains one.
+//
+// Nothing half-built is returned. The check is put through the same compile the
+// loader uses, so a parameter a rule needs and has not got is named here, next
+// to the spec that was typed.
 func parseCheckSpec(spec string) (config.Check, error) {
-	parts := strings.SplitN(spec, ":", 3)
-	if len(parts) != 3 {
-		return config.Check{}, fmt.Errorf(
-			"check %q is not id:verdict:command — e.g. test:go_test_json:go test -json ./...", spec)
+	id, rest, ok := strings.Cut(spec, ":")
+	if !ok {
+		return config.Check{}, checkShapeError(spec)
 	}
-	id, verdict, command := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+	id = strings.TrimSpace(id)
+	field, command, err := cutVerdictField(rest)
+	if err != nil {
+		return config.Check{}, fmt.Errorf("check %q: %w", spec, err)
+	}
+	command = strings.TrimSpace(command)
 	if id == "" || command == "" {
 		return config.Check{}, fmt.Errorf("check %q needs an id and a command", spec)
 	}
-	rule := config.VerdictRule(verdict)
+
+	name, params, err := splitVerdictField(field)
+	if err != nil {
+		return config.Check{}, fmt.Errorf("check %s: %w", id, err)
+	}
+	rule := config.VerdictRule(name)
 	if !rule.Known() {
 		return config.Check{}, fmt.Errorf(
 			"check %s: %q is not a verdict rule this build knows. The rules are: %s",
-			id, verdict, strings.Join(config.VerdictRules(), ", "))
+			id, name, strings.Join(config.VerdictRules(), ", "))
 	}
-	return config.Check{
+	takes, declared := checkRuleParams[rule]
+	if !declared {
+		return config.Check{}, fmt.Errorf(
+			"check %s: this command cannot declare %q yet, so it will not write a config that only half-declares it. Add the check to %s by hand and run `adlc config check`",
+			id, name, flagConfig)
+	}
+
+	ch := config.Check{
 		ID: id, Kind: config.KindSource, Command: strings.Fields(command), Verdict: rule,
 		// Gating the edges work actually crosses. A check declared against no
 		// edge runs nowhere, which is the same as not declaring it.
@@ -255,5 +308,202 @@ func parseCheckSpec(spec string) (config.Check, error) {
 			"judging->ready_for_validation",
 			"merging->merged",
 		},
-	}, nil
+	}
+	for _, p := range params {
+		if !allowedParam(takes.required, takes.optional, p.key) {
+			return config.Check{}, fmt.Errorf(
+				"check %s: %s does not read %q. %s", id, rule, p.key, readsWhat(rule))
+		}
+		if err := applyCheckParam(&ch, p.key, p.value); err != nil {
+			return config.Check{}, fmt.Errorf("check %s: %w", id, err)
+		}
+	}
+	// The loader's own compile, not a second opinion of it. Two definitions of
+	// what a rule needs is how a spec came to be accepted here and refused three
+	// lines later.
+	if err := ch.Compile(); err != nil {
+		if missing := firstMissing(&ch, takes.required); missing != "" {
+			return config.Check{}, fmt.Errorf(
+				"%w. Declare it after the rule: %s:%s[%s=…]:%s", err, id, rule, missing, command)
+		}
+		return config.Check{}, err
+	}
+	return ch, nil
+}
+
+func checkShapeError(spec string) error {
+	return fmt.Errorf(
+		"check %q is not id:verdict:command — e.g. test:go_test_json:go test -json ./...", spec)
+}
+
+// cutVerdictField splits the verdict field from the command.
+//
+// The field ends at its closing bracket when it has one and at the next colon
+// when it does not, which is what lets a parameter hold a colon and a command
+// hold one too.
+func cutVerdictField(rest string) (field, command string, err error) {
+	colon := strings.IndexByte(rest, ':')
+	open := strings.IndexByte(rest, '[')
+	if open < 0 || (colon >= 0 && colon < open) {
+		if colon < 0 {
+			return "", "", fmt.Errorf("there is no command after the verdict rule")
+		}
+		return strings.TrimSpace(rest[:colon]), rest[colon+1:], nil
+	}
+	end := matchBracket(rest, open)
+	if end < 0 {
+		return "", "", fmt.Errorf("the [ after the verdict rule is never closed")
+	}
+	after := rest[end+1:]
+	if !strings.HasPrefix(after, ":") {
+		return "", "", fmt.Errorf("the command must follow the verdict rule's ] after a colon")
+	}
+	return strings.TrimSpace(rest[:end+1]), after[1:], nil
+}
+
+// matchBracket returns the index of the ] that closes the [ at open, counting
+// nesting so that a character class inside a pattern does not end the field.
+func matchBracket(s string, open int) int {
+	depth := 0
+	for i := open; i < len(s); i++ {
+		switch s[i] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+type checkParam struct{ key, value string }
+
+// splitVerdictField reads rule and rule[key=value;key=value].
+//
+// Semicolon separates parameters rather than comma because a list of allowed
+// exit codes is written with commas and a repetition count inside a pattern
+// often is too.
+func splitVerdictField(field string) (name string, params []checkParam, err error) {
+	open := strings.IndexByte(field, '[')
+	if open < 0 {
+		return field, nil, nil
+	}
+	name = strings.TrimSpace(field[:open])
+	body := field[open+1 : len(field)-1]
+	if strings.TrimSpace(body) == "" {
+		return name, nil, fmt.Errorf("%s[] declares no parameter. %s", name, readsWhat(config.VerdictRule(name)))
+	}
+	for _, part := range splitTop(body, ';') {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			return "", nil, fmt.Errorf("parameter %q is not key=value", strings.TrimSpace(part))
+		}
+		params = append(params, checkParam{key: strings.TrimSpace(k), value: strings.TrimSpace(v)})
+	}
+	return name, params, nil
+}
+
+// splitTop splits on sep only outside brackets, so a pattern that contains one
+// stays whole.
+func splitTop(s string, sep byte) []string {
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case sep:
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, s[start:])
+}
+
+func applyCheckParam(ch *config.Check, key, value string) error {
+	switch key {
+	case "expect_pattern":
+		ch.ExpectPattern = value
+	case "count_pattern":
+		ch.CountPattern = value
+	case "min_count":
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("min_count %q is not a positive whole number — it is how many units the run must have found to have run at all", value)
+		}
+		ch.MinCount = n
+	case "allowed_exits":
+		for _, f := range strings.Split(value, ",") {
+			f = strings.TrimSpace(f)
+			if f == "" {
+				continue
+			}
+			n, err := strconv.Atoi(f)
+			if err != nil {
+				return fmt.Errorf("allowed_exits %q is not a comma-separated list of exit codes", value)
+			}
+			ch.AllowedExits = append(ch.AllowedExits, n)
+		}
+		if len(ch.AllowedExits) == 0 {
+			return fmt.Errorf("allowed_exits is empty, so no exit code would count as a pass")
+		}
+	default:
+		return fmt.Errorf("%q is not a check parameter this build knows", key)
+	}
+	return nil
+}
+
+func allowedParam(required, optional []string, key string) bool {
+	for _, k := range append(append([]string{}, required...), optional...) {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+// readsWhat says which parameters a rule reads, for the message somebody gets
+// when they name one it does not.
+func readsWhat(rule config.VerdictRule) string {
+	takes, ok := checkRuleParams[rule]
+	if !ok {
+		return ""
+	}
+	all := append(append([]string{}, takes.required...), takes.optional...)
+	if len(all) == 0 {
+		return fmt.Sprintf("%s reads no parameters", rule)
+	}
+	return fmt.Sprintf("%s reads %s", rule, strings.Join(all, " and "))
+}
+
+// firstMissing names the required parameter that is still unset, so the error
+// points at the thing to type rather than at the rule.
+func firstMissing(ch *config.Check, required []string) string {
+	for _, k := range required {
+		switch k {
+		case "expect_pattern":
+			if ch.ExpectPattern == "" {
+				return k
+			}
+		case "count_pattern":
+			if ch.CountPattern == "" {
+				return k
+			}
+		case "allowed_exits":
+			if len(ch.AllowedExits) == 0 {
+				return k
+			}
+		}
+	}
+	return ""
 }

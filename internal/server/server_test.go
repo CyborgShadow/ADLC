@@ -159,7 +159,7 @@ func TestEveryPageRendersOverARealLedger(t *testing.T) {
 		"/about":              "The guards, and what each one prevents",
 		"/roles":              "performer",
 		"/roles/performer":    "performer",
-		"/config":             "Safety policy",
+		"/config":             "apply unattended up to",
 		"/history?tab=runs":   "p-1",
 		"/history?tab=ledger": "segment.created",
 		"/item/S1-001":        "Single-use reset token",

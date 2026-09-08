@@ -133,6 +133,19 @@ tr:last-child td{border-bottom:none}
 .bad{background:#331915;color:var(--bad)}.live{background:#12262e;color:var(--live)}
 .mute{background:var(--line);color:var(--dim)}
 .dim{color:var(--dim)}.small{font-size:12px}
+.tip{position:relative;display:inline-flex;align-items:center;justify-content:center;
+width:14px;height:14px;border-radius:50%;border:1px solid var(--line);color:var(--dim);
+font-size:10px;font-weight:600;cursor:help;vertical-align:middle;margin-left:4px;flex:none}
+.tip:hover{border-color:var(--accent);color:var(--accent)}
+.tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 7px);left:50%;
+transform:translateX(-50%);background:#0b1013;border:1px solid var(--accent);border-radius:4px;
+padding:8px 10px;width:max-content;max-width:280px;color:var(--ink);font-size:12px;font-weight:400;
+line-height:1.5;text-align:left;white-space:normal;opacity:0;visibility:hidden;
+transition:opacity .12s;z-index:60;box-shadow:0 6px 18px rgba(0,0,0,.55);pointer-events:none}
+.tip:hover::after{opacity:1;visibility:visible}
+.tip.up::after{bottom:auto;top:calc(100% + 7px)}
+.tip.left::after{left:auto;right:0;transform:none}
+tr:nth-last-child(-n+3) .tip::after{bottom:auto;top:calc(100% + 7px)}
 .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
 .bar>i{display:block;height:100%;background:var(--ok)}
 form.inline{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:9px}
