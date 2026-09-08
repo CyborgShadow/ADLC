@@ -4,7 +4,7 @@
 // The record already answers "what happened" in the sense a machine needs.
 // This package answers it in the sense a person asks it three weeks later:
 // what was this run given, what did it do, what did the control plane observe,
-// what did it decide, and — the question that is usually the point — why
+// what did it decide, and â the question that is usually the point â why
 // did any of it matter to the product.
 //
 // That last one is a chain, not a field: a run advanced an item, the item
@@ -62,7 +62,19 @@ type Run struct {
 	// Abandoned is why this run was closed by something other than itself,
 	// when it was. Present means the evidence is on the record rather than in
 	// somebody's log file.
-	Abandoned      *ledger.RunAbandoned
+	Abandoned *ledger.RunAbandoned
+	// Reported is what the agent said it did, in its own words.
+	//
+	// A run's product was retained and readable from the command line and shown
+	// on no page at all â so a fifteen-minute research run finished and the only
+	// way to find out what it had concluded was to know that
+	// `adlc run envelope` existed. The account is a CLAIM, not a verdict, and it
+	// is labelled as one wherever it appears.
+	Reported      string
+	ReportedNotes []string
+	// ReportedMD is the longer written account a run may leave — an approach, a
+	// set of findings — which is the actual product of a research run.
+	ReportedMD     string
 	PromptRetained bool
 	EnvRetained    bool
 	// Reproducible reports whether this run's decision can be re-derived. It
@@ -86,6 +98,15 @@ func OfRun(l *ledger.Ledger, cfg *config.Config, runID string) (*Run, error) {
 	}
 	if ab, ok, aerr := l.Abandonment(runID); aerr == nil && ok {
 		s.Abandoned = &ab
+	}
+	if l.HasBlob(r.EnvelopeSHA) {
+		if raw, berr := l.Blob(r.EnvelopeSHA); berr == nil {
+			if env, perr := envelope.Parse(raw); perr == nil {
+				s.Reported = strings.TrimSpace(env.Summary)
+				s.ReportedNotes = env.Outputs.Deferred
+				s.ReportedMD = strings.TrimSpace(env.Outputs.Notes)
+			}
+		}
 	}
 	s.PromptRetained = l.HasBlob(r.PromptSHA)
 	s.EnvRetained = l.HasBlob(r.EnvelopeSHA)
@@ -122,14 +143,14 @@ func OfRun(l *ledger.Ledger, cfg *config.Config, runID string) (*Run, error) {
 func purpose(it ledger.Item, sg ledger.Segment) []string {
 	var out []string
 	if it.ID != "" {
-		line := fmt.Sprintf("Work item %s — %s", it.ID, it.Title)
+		line := fmt.Sprintf("Work item %s â %s", it.ID, it.Title)
 		if it.Rationale != "" {
 			line += ". " + it.Rationale
 		}
 		out = append(out, line)
 	}
 	if sg.ID != "" {
-		line := fmt.Sprintf("Deliverable %s — %s", sg.ID, sg.Title)
+		line := fmt.Sprintf("Deliverable %s â %s", sg.ID, sg.Title)
 		if sg.Rationale != "" {
 			line += ". " + sg.Rationale
 		} else if sg.Brief != "" {
@@ -149,21 +170,21 @@ func headline(s *Run) string {
 	switch {
 	// An agent inside its timeout is working. Saying it "never recorded an end"
 	// about a run three minutes into a thirty-minute budget describes a failure
-	// that has not happened — and reads as one.
+	// that has not happened â and reads as one.
 	//
 	// Only when a timeout is declared. With nothing to measure against there is
 	// no evidence either way, and UNKNOWN is the honest answer rather than a
 	// cheerful guess that it is fine.
 	// Closed by the fleet rather than by itself, and the record says why. The
-	// verdict stays UNKNOWN — nobody can say what the agent did — but WHY nobody
+	// verdict stays UNKNOWN â nobody can say what the agent did â but WHY nobody
 	// can say is known, and printing a bare "unknown" threw that away.
 	case s.Abandoned != nil:
 		return s.Abandoned.Why
 	case s.Timeout > 0 && r.StandingAt(time.Now(), s.Timeout) == ledger.StandingWorking:
-		return fmt.Sprintf("%s is running. It started %s ago and has not reported yet — an absent verdict here means not finished, not failed.",
+		return fmt.Sprintf("%s is running. It started %s ago and has not reported yet â an absent verdict here means not finished, not failed.",
 			who, time.Since(time.UnixMilli(r.StartedMS)).Round(time.Second))
 	case !r.Finished():
-		return fmt.Sprintf("%s started and never recorded an end. That is an UNKNOWN, not a failure and not a pass — nobody knows what it did.", who)
+		return fmt.Sprintf("%s started and never recorded an end. That is an UNKNOWN, not a failure and not a pass â nobody knows what it did.", who)
 	case len(s.Proposals) > 0 && s.Proposals[0].Admitted:
 		return fmt.Sprintf("%s moved %s from %s to %s.", who, r.ItemID, s.Proposals[0].From, s.Proposals[0].To)
 	case len(s.Proposals) > 0:
@@ -194,7 +215,7 @@ func steps(s *Run) []Step {
 		}
 		detail := fmt.Sprintf("the control plane ran the checks itself over %s", shortSHA(g.TreeSHA))
 		if g.Dirty {
-			detail += " — and the tree carried uncommitted changes"
+			detail += " â and the tree carried uncommitted changes"
 		}
 		out = append(out, Step{At: at(g.TsMS), Kind: "gate", Verdict: v,
 			Title: fmt.Sprintf("Gate %s on %s", g.Status, g.Edge), Detail: detail})
@@ -214,7 +235,7 @@ func steps(s *Run) []Step {
 			Title: "Raised a question", Detail: q.Text})
 	}
 	for _, p := range s.Proposals {
-		v, title := "ok", fmt.Sprintf("Advanced %s → %s", p.From, p.To)
+		v, title := "ok", fmt.Sprintf("Advanced %s â %s", p.From, p.To)
 		if !p.Admitted {
 			v = "bad"
 			title = fmt.Sprintf("Refused: %s", p.Reason)
@@ -246,7 +267,7 @@ type Replay struct {
 // Rederive re-runs a past decision from the record and compares.
 //
 // It replays the DECISION, not the agent. Re-invoking a language model does
-// not reproduce anything and claiming otherwise would be dishonest — but
+// not reproduce anything and claiming otherwise would be dishonest â but
 // everything the control plane did is a pure function of recorded inputs, and
 // that part reproduces exactly. So this re-parses the retained envelope,
 // re-runs the declared checks against the commit the run named, and puts the
@@ -321,7 +342,7 @@ func Rederive(ctx context.Context, l *ledger.Ledger, cfg *config.Config, repo, r
 	rp.GateNow = string(gres.Status)
 	if s.Run.BaseSHA != "" && gres.TreeSHA != s.Run.HeadSHA {
 		rp.Notes = append(rp.Notes, fmt.Sprintf(
-			"the checks ran against %s, not the %s this run described — the tree has moved since, so a gate difference is expected and a decision difference is not",
+			"the checks ran against %s, not the %s this run described â the tree has moved since, so a gate difference is expected and a decision difference is not",
 			shortSHA(gres.TreeSHA), shortSHA(s.Run.HeadSHA)))
 	}
 
@@ -398,7 +419,7 @@ func shortSHA(s string) string {
 // rederiveGeneration re-runs the item-admission rules over the same proposals.
 //
 // A planning run's decision is not a transition, it is a set of admit/refuse
-// calls — one per proposed work item — and those are just as much a pure
+// calls â one per proposed work item â and those are just as much a pure
 // function of recorded inputs as anything else here. Re-deriving them answers
 // a question worth asking: would the same breakdown be accepted by today's
 // rules?
@@ -470,5 +491,5 @@ func detailSuffix(d string) string {
 	if d == "" {
 		return ""
 	}
-	return " — " + d
+	return " â " + d
 }

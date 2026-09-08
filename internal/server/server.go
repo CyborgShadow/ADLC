@@ -56,6 +56,10 @@ type Server struct {
 	// show one as it happens. It is a view of work in flight and never a
 	// source of truth; see live.go.
 	live liveStore
+	// decoders turn each running agent's output into something readable. One
+	// per run, because a decoder carries state across lines.
+	decoders map[string]*streamDecoder
+	decMu    sync.Mutex
 
 	// The conversational runner, built once from console.command.
 	sess     *sessionRunner
@@ -127,6 +131,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/console/ask", s.ask)
 	mux.HandleFunc("/console/toggle", s.toggleDock)
 	mux.HandleFunc("/console/do", s.consoleDo)
+	mux.HandleFunc("/live", s.consoleLive)
 	mux.HandleFunc("/console/live", s.consoleLive)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		rep, err := s.Led.Verify()

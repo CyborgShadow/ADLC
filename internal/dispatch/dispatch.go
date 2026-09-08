@@ -82,6 +82,9 @@ type Dispatcher struct {
 	Led    *ledger.Ledger
 	Lib    *prompt.Library
 	Leases *lease.Store
+	// Watch, when set, is told about a run's output as it happens. It is a view
+	// for whoever is waiting, never an input: see watch.go.
+	Watch  Watcher
 	Runner Runner
 	Repo   string
 	Actor  string
@@ -436,6 +439,30 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	d.releaseRunID(runID)
 	d.log("DISPATCH %s  %s  %s", runID, c.Worker, c.Why)
 
+	// A deliverable that an agent is working on says so.
+	//
+	// The roadmap declares researching, planning and validating, names them in
+	// its reading order, and drains them with the same capability as the state
+	// before — and nothing put a deliverable into one. So it jumped signed_off
+	// straight to researched, and for the whole time a researcher was actually
+	// working the roadmap showed a deliverable sitting still. Every "where is
+	// the work" surface then reported zero while the fleet was busy.
+	//
+	// Safe to leave behind if this run dies: the -ing states are drained by the
+	// same lane as the states before them, so a deliverable stuck in one is
+	// picked up again rather than stranded.
+	if c.Kind == KindSegment {
+		if to, moved := authority.SegmentPickedUp(authority.SegmentState(c.Segment.State)); moved {
+			if _, err := d.Led.Append(d.Actor, ledger.KindSegmentAdvanced, c.Segment.ID, ledger.SegmentAdvanced{
+				SegmentID: c.Segment.ID, From: c.Segment.State, To: string(to), RunID: runID,
+				Why: c.Worker + " is working on it",
+			}); err != nil {
+				return TickResult{}, false, err
+			}
+			d.log("ROADMAP %s  %s -> %s  (%s is working on it)", c.Segment.ID, c.Segment.State, to, c.Worker)
+		}
+	}
+
 	res := TickResult{Dispatched: true, RunID: runID, ItemID: c.Item.ID, Worker: c.Worker}
 	timeout := time.Duration(d.Cfg.Dispatch.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
@@ -458,6 +485,13 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	})
 	defer hb.done()
 
+	// Whoever is waiting on this run can watch it happen. Opened next to the
+	// heartbeat because they answer the same question from two sides: the beat
+	// says somebody is still waiting, this says what they are waiting on.
+	w := d.watch()
+	w.Open(runID, c.Worker, c.Item.ID)
+	defer w.Close(runID)
+
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -472,6 +506,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		PromptPath: promptPath, PromptText: asm.Text,
 		WorkDir: ws.Dir, EnvelopePath: ws.EnvelopePath, Timeout: timeout,
 		LedgerPath: d.Led.Path(),
+		OnOutput:   func(line string) { w.Line(runID, line) },
 	})
 	d.limit().leave()
 

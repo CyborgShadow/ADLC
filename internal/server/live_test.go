@@ -297,3 +297,47 @@ func TestTypingIsMeasuredAgainstWhatLoaded(t *testing.T) {
 		}
 	}
 }
+
+// A lane's run streams to the dashboard the same way a console turn does.
+//
+// Until this, the record had exactly one thing to say about a nine-minute run:
+// that it was dispatched. The mechanism already existed for the console; the
+// fleet was simply never wired to it.
+func TestALaneRunIsWatchableWhileItHappens(t *testing.T) {
+	s := &Server{}
+	var w dispatch.Watcher = s // the Server IS the fleet's watcher
+	w.Open("r-1", "researcher", "S1")
+	w.Line("r-1", `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",`+
+		`"input":{"command":"go test ./..."}}]}}`)
+
+	lt := s.live.get("r-1")
+	if lt == nil {
+		t.Fatal("no buffer for a run that is producing output")
+	}
+	chunk, _, done, _ := lt.read(0)
+	if done {
+		t.Fatal("the stream ended before the run did")
+	}
+	// Decoded, not raw: a page full of protocol JSON is not insight.
+	if !strings.Contains(chunk, "Bash(go test ./...)") {
+		t.Fatalf("the run's output was not decoded: %q", chunk)
+	}
+
+	w.Close("r-1")
+	if _, _, done, _ := lt.read(0); !done {
+		t.Fatal("closing the run did not end its stream, so the page waits forever")
+	}
+}
+
+// A run this process did not open still shows something rather than nothing.
+// Its output cannot be decoded — no decoder was ever started for it — and raw
+// beats silent.
+func TestOutputFromAnUnopenedRunIsStillShown(t *testing.T) {
+	s := &Server{}
+	s.live.open("r-2")
+	s.Line("r-2", "something happened")
+	chunk, _, _, _ := s.live.get("r-2").read(0)
+	if !strings.Contains(chunk, "something happened") {
+		t.Fatalf("got %q", chunk)
+	}
+}

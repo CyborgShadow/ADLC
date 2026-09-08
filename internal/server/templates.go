@@ -204,7 +204,7 @@ max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
 ` + aboutCSS + consoleCSS + historyPageCSS + roadmapPageCSS +
 	itemPageCSS + gatesCSS + rolesPageCSS + configPageCSS + aboutDataCSS +
-	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + tileCSS + `
+	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + tileCSS + saidCSS + `
 </style></head><body>
 <header>
   <h1>{{.Project}}</h1>
@@ -407,7 +407,21 @@ const unregisteredRunHTML = `
 `
 
 const runHTML = `
-{{if eq .Page "run"}}{{with .Body}}{{with .Registered}}
+{{if eq .Page "run"}}{{with .Body}}
+{{with .Live}}<h2>Happening now <span class="sub">the agent's own account, as it works</span></h2>
+<div class="card">{{template "live" .}}</div>
+<p class="dim small">This is what the agent is doing, not what it has earned. Nothing here is
+on the record: the envelope it writes at the end is a claim, and the gate runs the declared checks
+itself before any of it counts.</p>{{end}}
+{{with .Registered}}
+{{if .Reported}}<h2>What this run reported <span class="sub">the agent's own account — a claim, not a verdict</span></h2>
+<div class="card said">
+  <div class="body">{{.Reported}}</div>
+  {{if .ReportedMD}}<details><summary>The longer write-up it left</summary><pre>{{.ReportedMD}}</pre></details>{{end}}
+  {{if .ReportedNotes}}<div class="sub">Deferred:</div><ul>{{range .ReportedNotes}}<li>{{.}}</li>{{end}}</ul>{{end}}
+  <p class="dim small">This is what the agent said it did. What it EARNED is below: the gate ran the
+  declared checks itself, and the authority decided the move — neither of them reads this text.</p>
+</div>{{end}}
 <div class="card">
   <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
     <b class="mono">{{.Run.RunID}}</b>

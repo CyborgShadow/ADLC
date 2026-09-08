@@ -48,6 +48,13 @@ func cmdServe(e *env, args []string) int {
 		Runner: &dispatch.ExecRunner{Command: e.cfg.Dispatch.Command},
 		Log:    func(s string) { fmt.Println(nowUTC().Format("15:04:05") + "  " + s) }}
 
+	// The dashboard watches the fleet's runs. Attached after the server exists,
+	// and only in the process that is actually dispatching — a page cannot show
+	// output from an agent some other process is running.
+	if dispatching && sched.D != nil {
+		sched.D.Watch = s
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 

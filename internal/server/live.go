@@ -163,7 +163,12 @@ func (s *Server) consoleLive(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	id := strings.TrimSpace(r.URL.Query().Get("turn"))
+	// id is a console turn or a run. One buffer store serves both, because
+	// "show me this thing while it happens" is the same question either way.
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	if id == "" {
+		id = strings.TrimSpace(r.URL.Query().Get("turn"))
+	}
 	lt := s.live.get(id)
 	if lt == nil {
 		// Not running here: it finished before the page connected, this process
@@ -208,3 +213,58 @@ func liveDone(w http.ResponseWriter, fl http.Flusher) {
 	fmt.Fprint(w, "event: done\ndata: \"\"\n\n")
 	fl.Flush()
 }
+
+// The Server is the fleet's watcher: a lane's run streams to the same buffers
+// the console's turns do, so one page mechanism serves both.
+//
+// Decoding happens here, per run, because a decoder carries state across lines
+// and each run needs its own. The dispatcher hands over raw lines and knows
+// nothing about any agent's output format.
+
+// Open starts a buffer for a run that is about to produce output.
+func (s *Server) Open(runID, worker, item string) {
+	s.live.open(runID)
+	s.decMu.Lock()
+	if s.decoders == nil {
+		s.decoders = map[string]*streamDecoder{}
+	}
+	s.decoders[runID] = &streamDecoder{}
+	s.decMu.Unlock()
+}
+
+// Line delivers one line of a run's output.
+func (s *Server) Line(runID, line string) {
+	s.decMu.Lock()
+	d := s.decoders[runID]
+	s.decMu.Unlock()
+	if d == nil {
+		// A run this process did not open — another control plane's, or one
+		// that started before the watcher was attached. Showing it raw beats
+		// showing nothing.
+		s.live.write(runID, line+"\n")
+		return
+	}
+	s.live.write(runID, d.Line(line))
+}
+
+// Close ends the stream, however the run ended.
+func (s *Server) Close(runID string) {
+	s.live.finish(runID)
+	s.decMu.Lock()
+	delete(s.decoders, runID)
+	s.decMu.Unlock()
+}
+
+// livePane is what the "live" fragment needs: an id to stream and how long it
+// has been going. A console turn and a lane's run are both watchable and share
+// nothing else, so this is the whole of the contract between them.
+type livePane struct {
+	LiveID string
+	Waited string
+}
+
+// LiveID lets a console row satisfy the same fragment as a run.
+func (r consoleRow) LiveID() string { return r.TurnID }
+
+// LiveID lets a panel row satisfy it too.
+func (t dockTurn) LiveID() string { return t.TurnID }

@@ -26,9 +26,8 @@ color:var(--dim);scrollbar-width:thin}
 // fragment is used by the Home page, the console page and the dock, and those
 // carry three different row types that agree on exactly these two fields.
 const liveHTML = `
-{{define "live"}}<div class="live" data-live="{{.TurnID}}">
-  <div class="livewait">Working — {{.Waited}} so far. A turn is a full agent run, and you are
-    watching it as it happens.</div>
+{{define "live"}}<div class="live" data-live="{{.LiveID}}">
+  <div class="livewait">Working — {{.Waited}} so far. You are watching it as it happens.</div>
   <pre class="livetext">connecting…</pre>
   <a class="liveready" href="" hidden>The turn finished — open the answer.
     <span class="livehint">Not loaded automatically because you are part-way through typing.</span></a>
@@ -94,7 +93,7 @@ const liveScript = `<script>
     var wait = node.querySelector(".livewait");
     var started = false, since = Date.now();
     var es;
-    try { es = new EventSource("/console/live?turn=" + encodeURIComponent(id)); }
+    try { es = new EventSource("/live?id=" + encodeURIComponent(id)); }
     catch (e) { return; }
     // The elapsed time was rendered by the server and frozen at page load, so
     // it went on claiming the same figure for as long as the page stayed up.
@@ -152,4 +151,15 @@ const liveScript = `<script>
 const tileCSS = `
 .livetile{border-left:3px solid var(--live)}
 .tilenote{display:block;margin:-2px 0 16px;color:var(--dim);font-size:12.5px;line-height:1.5}
+`
+
+// saidCSS renders an agent's own account so it does not read as a finding.
+const saidCSS = `
+.said{border-left:3px solid var(--line)}
+.said .body{white-space:pre-wrap;word-break:break-word;line-height:1.6}
+.said details{margin-top:10px}
+.said summary{cursor:pointer;color:var(--accent);font-size:13px}
+.said pre{white-space:pre-wrap;word-break:break-word;background:#0d1214;border:1px solid var(--line);
+border-radius:4px;padding:10px 12px;font-size:12.5px;line-height:1.55;margin-top:8px;max-height:420px;overflow:auto}
+.said ul{margin:6px 0 0;padding-left:20px;font-size:13px}
 `

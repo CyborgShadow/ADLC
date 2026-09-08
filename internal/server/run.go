@@ -52,13 +52,23 @@ type runMention struct {
 type runPage struct {
 	Registered   *story.Run
 	Unregistered *unregisteredRun
+	// Live is set while this run is still producing output, so the page can
+	// show the agent working instead of one line saying it was dispatched.
+	Live *livePane
 }
 
 func (s *Server) run(r *http.Request) (string, any, error) {
 	id := strings.TrimPrefix(r.URL.Path, "/run/")
 	st, err := story.OfRun(s.Led, s.Cfg, id)
 	if err == nil {
-		return "Run " + id, &runPage{Registered: st}, nil
+		p := &runPage{Registered: st}
+		if !st.Run.Finished() {
+			if lt := s.live.get(id); lt != nil {
+				p.Live = &livePane{LiveID: id,
+					Waited: s.now().Sub(time.UnixMilli(st.Run.StartedMS)).Round(time.Second).String()}
+			}
+		}
+		return "Run " + id, p, nil
 	}
 	if !errors.Is(err, ledger.ErrNotFound) {
 		return "", nil, err
