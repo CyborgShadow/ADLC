@@ -165,15 +165,30 @@ func awaitingApproval(l *ledger.Ledger, items []ledger.Item) string {
 	for _, it := range waiting {
 		fmt.Fprintf(&b, "  %-14s radius %-7s plan %s\n", it.ID, it.Radius, shortHash(it.PlanDigest))
 		fmt.Fprintf(&b, "  %-14s %s\n", "", truncate(it.Title, 92))
+		open := 0
 		aps, err := l.Approvals(it.ID)
 		if err == nil {
 			for _, ap := range aps {
-				if !ap.Decided() {
-					fmt.Fprintf(&b, "  %-14s open request %s: %s\n", "", ap.ID, truncate(ap.Summary, 80))
+				if ap.Decided() {
+					continue
 				}
+				open++
+				fmt.Fprintf(&b, "  %-14s open request %s: %s\n", "", ap.ID, truncate(ap.Summary, 80))
+				// The command as this binary dispatches it, keyed on the approval
+				// id rather than the item's: `approval decide` answers one request,
+				// and an item can carry more than one. A report that prints a
+				// command nobody can run sends the operator looking for the tool's
+				// documentation at the exact moment the fleet is stopped waiting
+				// for them.
+				fmt.Fprintf(&b, "  %-14s approve with: adlc approval decide -id %s -verdict approve -approver <you> -note \"...\"\n",
+					"", ap.ID)
 			}
 		}
-		fmt.Fprintf(&b, "  %-14s approve with: adlc approve %s --approver <you> --note \"...\"\n\n", "", it.ID)
+		if open == 0 {
+			fmt.Fprintf(&b, "  %-14s no open approval request is recorded against it — raise one with `adlc approval request -id <id> -item %s`\n",
+				"", it.ID)
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }

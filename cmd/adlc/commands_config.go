@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/prompt"
 )
 
 // The config commands exist so that nothing has to hand-assemble JSON and hope.
@@ -103,7 +104,39 @@ func cmdConfigCheck(args []string) int {
 			fmt.Printf("  - %s\n", w)
 		}
 	}
+	reportAbsentPrompts(cfg)
 	return exitOK
+}
+
+// reportAbsentPrompts names the prompt files the config's roles resolve through
+// that are not on disk.
+//
+// It lives here rather than in the validator on purpose. config.validate() is
+// the declaration's own check and reads no files: prompts.dir is relative to a
+// working directory the config knows nothing about, so a filesystem test inside
+// Load would refuse the config anywhere it is read from elsewhere — and would
+// refuse `config init`'s own output, which is written before the prompts exist
+// because writing them is the next step it tells you to take. So the question
+// is asked by the commands that are already standing in the project: reported
+// here, and refused by `adlc prompt check`, which is what CI runs.
+func reportAbsentPrompts(cfg *config.Config) {
+	inv := prompt.Survey(cfg.Prompts, cfg.Workers)
+	if inv.Missing == 0 {
+		return
+	}
+	fmt.Println("\nThese are declared and not on disk. A role whose prompt is absent cannot be dispatched:")
+	if inv.DirErr != "" {
+		fmt.Printf("  - %s is not there yet; `adlc prompt list` names every prompt these roles want\n", inv.Dir)
+		return
+	}
+	for _, p := range inv.Prompts {
+		if p.Missing() {
+			fmt.Printf("  - no prompt %q in %s, named by %s\n", p.ID, inv.Dir, strings.Join(p.Roles, ", "))
+		}
+	}
+	if inv.PreambleFile != "" && !inv.PreamblePresent {
+		fmt.Printf("  - the shared preamble %s is not there, so no role can be assembled\n", inv.PreambleFile)
+	}
 }
 
 func dedupe(v []string) []string {

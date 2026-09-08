@@ -184,6 +184,13 @@ type historyView struct {
 	Kind    string
 	Total   int
 	Showing int
+
+	// Makeup answers "why does a system that has done nothing have this many
+	// events?" — most of them are setup and liveness, not work.
+	Setup    int
+	Ticks    int
+	Work     int
+	ConsoleN int
 }
 
 type kindCount struct {
@@ -218,6 +225,18 @@ func (s *Server) historyPage(r *http.Request) (string, any, error) {
 	counts := map[string]int{}
 	for _, e := range evs {
 		counts[string(e.Kind)]++
+	}
+	for _, e := range evs {
+		switch e.Kind {
+		case ledger.KindWorkerRegistered:
+			view.Setup++
+		case ledger.KindLoopTicked:
+			view.Ticks++
+		case ledger.KindConsoleAsked, ledger.KindConsoleReplied, ledger.KindConsoleActed:
+			view.ConsoleN++
+		default:
+			view.Work++
+		}
 	}
 	kinds := make([]string, 0, len(counts))
 	for k := range counts {

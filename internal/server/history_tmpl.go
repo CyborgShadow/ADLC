@@ -57,10 +57,16 @@ const historyPageHTML = `
 
 {{if eq .Tab "ledger"}}
 <div class="banner calm">Every event, newest first. Each row is hash-linked to the one before it, so
-this is the record itself rather than a summary of it — the tables everywhere else in this
-dashboard are derived from these rows and can be rebuilt from them.
-<br><br>Open a row for what it actually recorded. Text an agent wrote is shown indented, because it
-is worth knowing which words are the tool's and which are an agent's.</div>
+this is the record itself rather than a summary of it — every table elsewhere in this dashboard is
+derived from these rows and can be rebuilt from them. Open a row for what it recorded; text an agent
+wrote is indented, because it is worth knowing which words are the tool's and which are an agent's.
+<br><br><b>{{.Total}} events, and most of them are not work.</b>
+{{.Setup}} registered a role — that is what makes a role that has <i>never</i> run countable, since a
+worker that never runs contributes no rows of its own.
+{{.Ticks}} are lane firings, written whether or not the lane found anything to do, so a lane that
+quietly stopped is a stale timestamp rather than an absence nobody notices.
+{{if .ConsoleN}}{{.ConsoleN}} are console conversation. {{end}}
+That leaves <b>{{.Work}}</b> that are work: items, transitions, gate results, runs, and the refusals.</div>
 
 <div class="kindbar">
   <a href="/history?tab=ledger" class="{{if not .Kind}}on{{end}}">all<span class="n">{{.Total}}</span></a>

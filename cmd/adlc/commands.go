@@ -779,6 +779,17 @@ func printVerify(rep *ledger.Report) {
 // ---------------------------------------------------------------- prompt
 
 func cmdPrompt(e *env, args []string) int {
+	if len(args) == 0 {
+		return fail("prompt needs a subcommand: list | show | check | assemble")
+	}
+	// list is answered before the library is loaded, because the project it is
+	// most useful on is the one that has not written its prompts yet — and
+	// loading a library refuses that project over the first absent file. Every
+	// other subcommand assembles text an agent is given, so it needs a library
+	// that loaded.
+	if args[0] == "list" {
+		return promptList(e)
+	}
 	if e.lib == nil {
 		lib, err := prompt.Load(e.cfg.Prompts)
 		if err != nil {
@@ -786,18 +797,7 @@ func cmdPrompt(e *env, args []string) int {
 		}
 		e.lib = lib
 	}
-	if len(args) == 0 {
-		return fail("prompt needs a subcommand: list | show | check | assemble")
-	}
 	switch args[0] {
-	case "list":
-		for _, id := range e.lib.IDs() {
-			p, _ := e.lib.Get(id)
-			fmt.Printf("%-24s %-6s %s  %s\n", p.ID, p.Version, p.SHA(), p.Path)
-		}
-		fmt.Printf("\npreamble %s  %s\n", e.lib.PreambleSHA(), e.lib.PreamblePath())
-		return exitOK
-
 	case "show":
 		if len(args) < 2 {
 			return fail("prompt show <id>")
@@ -821,20 +821,77 @@ func cmdPrompt(e *env, args []string) int {
 		return exitOK
 
 	case "check":
-		findings := e.lib.CheckClauses(e.cfg.Prompts.MandatoryClauses)
-		if len(findings) == 0 {
-			fmt.Printf("all %d prompt(s) carry every mandatory clause (%d declared)\n",
-				len(e.lib.IDs()), len(e.cfg.Prompts.MandatoryClauses))
-			return exitOK
+		absent := e.lib.MissingFor(e.cfg.Workers)
+		for _, m := range absent {
+			fmt.Fprintf(os.Stderr, "%s names prompt %q, and there is no such prompt in %s\n",
+				strings.Join(m.Roles, ", "), m.ID, e.cfg.Prompts.Dir)
 		}
+		if len(absent) > 0 {
+			fmt.Fprintln(os.Stderr, "\nA role whose prompt file is absent cannot be dispatched at all, and the work")
+			fmt.Fprintln(os.Stderr, "filed for it then sits in the queue looking exactly like work nobody has got")
+			fmt.Fprintln(os.Stderr, "round to. That is the same failure as an area with no owner, so it is refused")
+			fmt.Fprintln(os.Stderr, "here rather than discovered at the first dispatch.")
+		}
+		findings := e.lib.CheckClauses(e.cfg.Prompts.MandatoryClauses)
 		for _, f := range findings {
 			fmt.Fprintf(os.Stderr, "%s (%s) is missing a mandatory clause:\n  %s\n", f.PromptID, f.Path, f.Missing)
 		}
-		fmt.Fprintln(os.Stderr, "\nPrompts are gated artefacts. A run must not be able to delete a safety clause")
-		fmt.Fprintln(os.Stderr, "from its own instructions, so this fails the gate rather than warning.")
-		return exitClauseMissing
+		if len(findings) > 0 {
+			fmt.Fprintln(os.Stderr, "\nPrompts are gated artefacts. A run must not be able to delete a safety clause")
+			fmt.Fprintln(os.Stderr, "from its own instructions, so this fails the gate rather than warning.")
+			// 4 stays the code for a lost clause even when a prompt is also
+			// missing: CI reads it, and the more specific fact is the safety one.
+			return exitClauseMissing
+		}
+		if len(absent) > 0 {
+			return exitUsage
+		}
+		fmt.Printf("all %d prompt(s) carry every mandatory clause (%d declared), and every role's prompt is present\n",
+			len(e.lib.IDs()), len(e.cfg.Prompts.MandatoryClauses))
+		return exitOK
 	}
 	return fail("prompt: unknown subcommand %q", args[0])
+}
+
+// promptList reports every prompt the config's roles are dispatched through and
+// says which of them are not there.
+//
+// `adlc config init` closes by telling a new project that this command says
+// which prompts are missing. Listing only the files that exist cannot say that:
+// what is absent produces no line, and an absent line reads as nothing wrong.
+func promptList(e *env) int {
+	inv := prompt.Survey(e.cfg.Prompts, e.cfg.Workers)
+	if inv.DirErr != "" {
+		fmt.Printf("%s could not be read: %s\n\n", inv.Dir, inv.DirErr)
+	}
+	for _, p := range inv.Prompts {
+		switch {
+		case p.Present && len(p.Roles) == 0:
+			fmt.Printf("%-24s %-6s %s  %s  (no role names it)\n", p.ID, p.Version, p.SHA, p.Path)
+		case p.Present:
+			fmt.Printf("%-24s %-6s %s  %s\n", p.ID, p.Version, p.SHA, p.Path)
+		default:
+			fmt.Printf("%-24s %-6s %-64s  named by %s\n",
+				p.ID, "-", "MISSING", strings.Join(p.Roles, ", "))
+		}
+	}
+	if inv.PreambleFile != "" {
+		if inv.PreamblePresent {
+			fmt.Printf("\npreamble %s  %s\n", inv.PreambleSHA, inv.PreambleFile)
+		} else {
+			// Reported, not fatal. The shared preamble is one missing thing among
+			// the others here, and refusing over it is what stopped this command
+			// answering the question it exists for.
+			fmt.Printf("\npreamble MISSING  %s\n", inv.PreambleFile)
+		}
+	}
+	if inv.Missing == 0 {
+		fmt.Printf("\n%d prompt(s); every role's prompt is present.\n", len(inv.Prompts))
+		return exitOK
+	}
+	fmt.Printf("\n%d of the files this config depends on are not in %s. A role whose prompt is\n", inv.Missing, inv.Dir)
+	fmt.Println("absent cannot be dispatched, so this exits non-zero until they are written.")
+	return exitUsage
 }
 
 // ---------------------------------------------------------------- helpers
