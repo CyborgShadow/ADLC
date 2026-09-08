@@ -183,6 +183,14 @@
     },
 
     {
+      "_comment": "The console is the only role with no place in the lifecycle: it advances nothing on its own, and everything it proposes goes through the same authority as everything else. It exists so a person can drive this tool by talking to it.",
+      "type": "console",
+      "layer": "platform",
+      "description": "Answers an operator in the dashboard and drafts actions from what they asked for. Advances no work item on its own.",
+      "prompt": "console",
+      "capabilities": ["converse"]
+    },
+    {
       "type": "operator",
       "layer": "platform",
       "description": "The build environment, dependencies, CI — and the apply step, after an approval that named the plan.",
@@ -298,6 +306,15 @@
     "_comment": "Loopback only. This surface writes to the ledger and has no authentication; those two facts have to stay welded together.",
     "addr": "127.0.0.1:8099",
     "refresh_seconds": 15
+  },
+
+  "console": {
+    "_comment": "authority is propose | act | full. 'act' lets it do anything the control plane could do on its own, each through the same authority as everything else, and leaves the three gates a person owns as drafts you press. 'full' lets it press those too, which removes the only human checkpoint in the system — the record still says the agent did it.",
+    "enabled": true,
+    "authority": "act",
+    "worker": "console",
+    "timeout_seconds": 180,
+    "history_turns": 20
   },
 
   "blast": {

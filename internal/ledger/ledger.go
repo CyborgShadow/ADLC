@@ -61,6 +61,9 @@ const (
 	KindItemProposed       Kind = "item.proposed"
 	KindLoopTicked         Kind = "loop.ticked"
 	KindSegmentAdvanced    Kind = "segment.advanced"
+	KindConsoleAsked       Kind = "console.asked"
+	KindConsoleReplied     Kind = "console.replied"
+	KindConsoleActed       Kind = "console.acted"
 )
 
 // KnownKinds is the set this build can project. Verify reports an event kind
@@ -75,6 +78,7 @@ var KnownKinds = map[Kind]bool{
 	KindQuestionAnswered: true, KindApprovalRequested: true, KindApprovalDecided: true,
 	KindPromptPinned: true, KindWorkerRegistered: true, KindNoteRecorded: true,
 	KindItemProposed: true, KindLoopTicked: true, KindSegmentAdvanced: true,
+	KindConsoleAsked: true, KindConsoleReplied: true, KindConsoleActed: true,
 }
 
 // ---------------------------------------------------------------- payloads

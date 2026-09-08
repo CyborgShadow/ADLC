@@ -33,7 +33,11 @@ func cmdServe(e *env, args []string) int {
 		}
 	}
 	s := &server.Server{Cfg: e.cfg, Led: e.led, Sched: sched, Lib: e.lib,
-		Actor: e.actor, Repo: e.repo, Now: nowUTC}
+		Actor: e.actor, Repo: e.repo, Now: nowUTC,
+		// Given explicitly rather than borrowed from the scheduler, so the console
+		// still works when the scheduler could not be built.
+		Runner: &dispatch.ExecRunner{Command: e.cfg.Dispatch.Command},
+		Log:    func(s string) { fmt.Println(nowUTC().Format("15:04:05") + "  " + s) }}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -81,7 +85,11 @@ func cmdSchedule(e *env, args []string) int {
 				}
 			}
 			s := &server.Server{Cfg: e.cfg, Led: e.led, Sched: sched, Lib: e.lib,
-				Actor: e.actor, Repo: e.repo, Now: nowUTC}
+				Actor: e.actor, Repo: e.repo, Now: nowUTC,
+				// Given explicitly rather than borrowed from the scheduler, so the console
+				// still works when the scheduler could not be built.
+				Runner: &dispatch.ExecRunner{Command: e.cfg.Dispatch.Command},
+				Log:    func(s string) { fmt.Println(nowUTC().Format("15:04:05") + "  " + s) }}
 			go func() { _ = s.Serve(ctx, ln) }()
 			fmt.Printf("dashboard on http://%s\n", ln.Addr())
 		}

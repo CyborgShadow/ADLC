@@ -75,7 +75,7 @@ var funcs = template.FuncMap{
 var tmpl = template.Must(template.New("page").Funcs(funcs).Parse(strings.Join([]string{
 	pageHTML, overviewHTML, roadmapHTML, progressHTML, questionsHTML, approvalsHTML,
 	rolesHTML, roleHTML, coordinationHTML, configHTML, historyHTML, runHTML, itemHTML,
-	segmentHTML, aboutHTML, endHTML,
+	segmentHTML, aboutHTML, consoleHTML, endHTML,
 }, "")))
 
 const pageHTML = `
@@ -162,7 +162,7 @@ padding:12px 15px;margin-bottom:8px;display:grid;grid-template-columns:150px 1fr
 footer{color:var(--dim);font-size:12px;padding:18px 24px;border-top:1px solid var(--line);
 max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
-` + aboutCSS + `
+` + aboutCSS + consoleCSS + `
 </style></head><body>
 <header>
   <h1>{{.Project}}</h1>

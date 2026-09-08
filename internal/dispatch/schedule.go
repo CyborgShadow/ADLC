@@ -28,7 +28,7 @@ type Scheduler struct {
 // Enabled lists the loops that will actually fire, in firing order.
 func (s *Scheduler) Enabled() []config.LoopDecl {
 	var out []config.LoopDecl
-	for _, l := range s.Cfg.Loops {
+	for _, l := range s.Cfg.LoopList() {
 		if l.Enabled {
 			out = append(out, l)
 		}
@@ -131,7 +131,7 @@ func (s *Scheduler) tick(l config.LoopDecl, dispatched bool, runID, detail strin
 func (s *Scheduler) Run(ctx context.Context) error {
 	// Every DECLARED lane gets a goroutine, not only the enabled ones, so a lane
 	// switched on in the dashboard starts firing without a restart.
-	loops := s.Cfg.Loops
+	loops := s.Cfg.LoopList()
 	if len(loops) == 0 {
 		return fmt.Errorf("no loops are enabled: declare some under \"loops\" in the config, or use `adlc dispatch loop` for a single lane")
 	}
@@ -229,8 +229,9 @@ func (s *Scheduler) Health(now time.Time) ([]ledger.LoopHealth, error) {
 	if grace <= 0 {
 		grace = 3
 	}
-	out := make([]ledger.LoopHealth, 0, len(s.Cfg.Loops)+1)
-	for _, l := range append(append([]config.LoopDecl{}, s.Cfg.Loops...), MergeLane()) {
+	declared := s.Cfg.LoopList()
+	out := make([]ledger.LoopHealth, 0, len(declared)+1)
+	for _, l := range append(declared, MergeLane()) {
 		h := measured[l.Name]
 		h.Loop = l.Name
 		h.Scope = l.Scope()

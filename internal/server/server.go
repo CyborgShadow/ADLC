@@ -41,7 +41,13 @@ type Server struct {
 	Lib   *prompt.Library
 	Actor string
 	Repo  string
-	Now   func() time.Time
+	// Runner invokes the console agent. When it is nil the scheduler's own
+	// runner is used, so a project with a working fleet has a working console
+	// without configuring a second way to start an agent.
+	Runner dispatch.Runner
+	Log    func(string)
+	turns  turnState
+	Now    func() time.Time
 }
 
 func (s *Server) now() time.Time {
@@ -83,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/role/", s.page("role", s.role))
 	mux.HandleFunc("/coordination", s.page("coordination", s.coordination))
 	mux.HandleFunc("/about", s.page("about", s.about))
+	mux.HandleFunc("/console", s.page("console", s.consolePage))
 	mux.HandleFunc("/config", s.page("config", s.configPage))
 	mux.HandleFunc("/history", s.page("history", s.history))
 	mux.HandleFunc("/run/", s.page("run", s.run))
@@ -93,6 +100,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/decide", s.decide)
 	mux.HandleFunc("/loop", s.setLoop)
 	mux.HandleFunc("/signoff", s.signoff)
+	mux.HandleFunc("/console/ask", s.ask)
+	mux.HandleFunc("/console/do", s.consoleDo)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		rep, err := s.Led.Verify()
 		if err != nil {
@@ -151,11 +160,16 @@ type attention struct {
 	Blocked   int
 	DarkLoops int
 	Stuck     int
-	Tampered  bool
+	// ConsolePending are actions the console drafted and left for a person.
+	// They belong in the same count as everything else waiting on you: an
+	// action nobody presses is work the console believes it has handed over.
+	ConsolePending int
+	Tampered       bool
 }
 
 func (a attention) Any() bool {
-	return a.Questions > 0 || a.Approvals > 0 || a.Blocked > 0 || a.DarkLoops > 0 || a.Stuck > 0 || a.Tampered
+	return a.Questions > 0 || a.Approvals > 0 || a.Blocked > 0 ||
+		a.DarkLoops > 0 || a.Stuck > 0 || a.ConsolePending > 0 || a.Tampered
 }
 
 func (s *Server) page(name string, fn func(*http.Request) (string, any, error)) http.HandlerFunc {
@@ -214,6 +228,16 @@ func (s *Server) shell(page, title string, body any) (*pageData, error) {
 			}
 		}
 	}
+	if s.Cfg.Console.Enabled {
+		turns, _ := s.Led.ConsoleHistory(s.sessionID(), s.Cfg.Console.HistoryTurns)
+		for _, t := range turns {
+			for _, a := range t.Actions {
+				if a.Outcome == ledger.ActionPending {
+					attn.ConsolePending++
+				}
+			}
+		}
+	}
 	if s.Sched != nil {
 		if hs, err := s.Sched.Health(s.now()); err == nil {
 			for _, h := range hs {
@@ -233,6 +257,7 @@ func (s *Server) shell(page, title string, body any) (*pageData, error) {
 		{Href: "/roles", Label: "Roles"},
 		{Href: "/config", Label: "Config", Count: attn.DarkLoops, Alarm: attn.DarkLoops > 0},
 		{Href: "/history", Label: "History"},
+		{Href: "/console", Label: "Console", Count: attn.ConsolePending, Alarm: attn.ConsolePending > 0},
 		{Href: "/about", Label: "About the ADLC"},
 	}
 	for i := range nav {
@@ -608,7 +633,7 @@ func (s *Server) configPage(*http.Request) (string, any, error) {
 			}
 		}
 	}
-	for _, l := range s.Cfg.Loops {
+	for _, l := range s.Cfg.LoopList() {
 		h := health[l.Name]
 		row := loopRow{LoopDecl: l, Health: h, Status: "live", Since: "—"}
 		switch {

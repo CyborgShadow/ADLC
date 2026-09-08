@@ -176,5 +176,5 @@ func (s *Server) about(*http.Request) (string, any, error) {
 		Lanes      int
 		StateCount int
 	}{stages, roadmap, guards, roster, s.Cfg.Project,
-		len(s.Cfg.Checks), len(s.Cfg.Workers), len(s.Cfg.Loops), len(authority.AllStates())}, nil
+		len(s.Cfg.Checks), len(s.Cfg.Workers), len(s.Cfg.LoopList()), len(authority.AllStates())}, nil
 }

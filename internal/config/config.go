@@ -26,6 +26,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,8 +61,15 @@ type Config struct {
 	Prompts  PromptPolicy      `json:"prompts"`
 	Loops    []LoopDecl        `json:"loops,omitempty"`
 	Server   ServerPolicy      `json:"server"`
+	Console  ConsolePolicy     `json:"console,omitempty"`
 
 	path string
+	// mu guards Loops, which is the only part of a loaded config that changes
+	// while the process runs. The dashboard edits a cadence, the scheduler reads
+	// one every tick, and a console turn can edit one from a background
+	// goroutine — three writers and readers of the same struct, which is a data
+	// race however carefully each one behaves on its own.
+	mu sync.RWMutex
 }
 
 // Check is one executable verification step.
@@ -443,12 +451,18 @@ func (c *Config) validate() error {
 		if lp.Worker != "" && c.Worker(lp.Worker) == nil {
 			return fmt.Errorf("loop %s: worker %q is not declared", lp.Name, lp.Worker)
 		}
+		if lp.Capability == CapConverse {
+			return fmt.Errorf("loop %s drains %q work, which no lane can do: a console turn exists because somebody asked a question, and a timer has nothing to ask", lp.Name, CapConverse)
+		}
 		if lp.Capability != "" && len(c.WorkersWith(lp.Capability)) == 0 {
 			return fmt.Errorf("loop %s drains %q work and no declared worker holds that capability, so it would fire forever and find nothing", lp.Name, lp.Capability)
 		}
 	}
 	if c.Blast.ApprovalTTLMinutes <= 0 {
 		c.Blast.ApprovalTTLMinutes = 24 * 60
+	}
+	if err := c.validateConsole(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -579,12 +593,17 @@ const (
 	CapOperate = "operate"
 	// CapImprove records what was learned and raises self-improvements.
 	CapImprove = "improve"
+	// CapConverse answers an operator in the console and drafts actions from
+	// what they asked for. It is the only capability with no place in the
+	// lifecycle: it advances nothing on its own, and everything it proposes goes
+	// through the same authority as everything else.
+	CapConverse = "converse"
 )
 
 func knownCapability(c string) bool {
 	switch c {
 	case CapResearch, CapPlan, CapImplement, CapTest, CapJudge,
-		CapValidate, CapCurate, CapArbitrate, CapOperate, CapImprove:
+		CapValidate, CapCurate, CapArbitrate, CapOperate, CapImprove, CapConverse:
 		return true
 	}
 	return false
@@ -599,6 +618,16 @@ func (c *Config) Can(workerType, capability string) bool {
 	if w == nil {
 		return false
 	}
+	for _, x := range w.Capabilities {
+		if x == capability {
+			return true
+		}
+	}
+	return false
+}
+
+// Can reports whether this worker holds a capability.
+func (w *WorkerDecl) Can(capability string) bool {
 	for _, x := range w.Capabilities {
 		if x == capability {
 			return true
@@ -710,14 +739,29 @@ type ServerPolicy struct {
 	RefreshSeconds int `json:"refresh_seconds,omitempty"`
 }
 
-// Loop returns a declared loop by name.
+// Loop returns a COPY of a declared loop, or nil.
+//
+// A copy rather than a pointer into the slice: a caller holding a pointer into
+// live config reads a half-written struct the moment somebody changes a
+// cadence, and the value it reads then is one that never existed.
 func (c *Config) Loop(name string) *LoopDecl {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	for i := range c.Loops {
 		if c.Loops[i].Name == name {
-			return &c.Loops[i]
+			cp := c.Loops[i]
+			return &cp
 		}
 	}
 	return nil
+}
+
+// LoopList is a snapshot of every declared loop, safe to range over while
+// somebody else is editing one.
+func (c *Config) LoopList() []LoopDecl {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]LoopDecl(nil), c.Loops...)
 }
 
 // OwnerFor resolves which worker should take a piece of work.
@@ -817,16 +861,26 @@ func Save(c *Config) error {
 
 // SetLoop updates the two fields the dashboard may change, and persists.
 func (c *Config) SetLoop(name string, enabled bool, everySeconds, maxPerTick int) error {
-	l := c.Loop(name)
-	if l == nil {
-		return fmt.Errorf("no loop named %q is declared", name)
-	}
 	if everySeconds < 15 {
 		return fmt.Errorf("a cadence of %ds would spend more time starting runs than doing them; 15s is the floor", everySeconds)
 	}
 	if maxPerTick < 1 {
 		maxPerTick = 1
 	}
-	l.Enabled, l.EverySeconds, l.MaxPerTick = enabled, everySeconds, maxPerTick
+	c.mu.Lock()
+	found := false
+	for i := range c.Loops {
+		if c.Loops[i].Name == name {
+			c.Loops[i].Enabled = enabled
+			c.Loops[i].EverySeconds = everySeconds
+			c.Loops[i].MaxPerTick = maxPerTick
+			found = true
+			break
+		}
+	}
+	c.mu.Unlock()
+	if !found {
+		return fmt.Errorf("no loop named %q is declared", name)
+	}
 	return Save(c)
 }

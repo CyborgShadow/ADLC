@@ -232,6 +232,7 @@ CREATE INDEX IF NOT EXISTS adlc_run_item   ON adlc_run(item_id);
 CREATE INDEX IF NOT EXISTS adlc_run_worker ON adlc_run(worker_type);
 CREATE INDEX IF NOT EXISTS adlc_prop_item  ON adlc_proposal(item_id);
 CREATE INDEX IF NOT EXISTS adlc_item_seg   ON adlc_item(segment_id);
+CREATE INDEX IF NOT EXISTS adlc_event_kind ON adlc_event(kind, subject, seq);
 `
 
 // projectionTables are rebuilt from the chain by Replay and are the tables
@@ -270,4 +271,5 @@ var migrations = []string{
 	`ALTER TABLE adlc_segment ADD COLUMN rank INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE adlc_item ADD COLUMN rationale TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE adlc_run ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
+	`CREATE INDEX IF NOT EXISTS adlc_event_kind ON adlc_event(kind, subject, seq)`,
 }
