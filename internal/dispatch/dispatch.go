@@ -820,7 +820,19 @@ func (d *Dispatcher) Refresh() (int, error) {
 	if moved > 0 {
 		d.log("READY %d item(s) became dispatchable", moved)
 	}
-	return moved, nil
+
+	// The other two states nothing polls for. A lane drains a state its
+	// capability answers for; these two are answered by a person, and until
+	// this pass existed the work simply stopped there.
+	resumed, err := d.resumeBlocked(items)
+	if err != nil {
+		return moved, err
+	}
+	reworked, err := d.routeRework(items)
+	if err != nil {
+		return moved + resumed, err
+	}
+	return moved + resumed + reworked, nil
 }
 
 // claimForWork records the waiting -> working edge before a run starts.

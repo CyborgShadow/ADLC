@@ -187,10 +187,11 @@ Usage: adlc [global flags] <command> [args]
   question raise|answer|list        the decisions an agent could not make for itself
   approval request|list|decide      the approval gate in front of anything irreversible
   report   fleet|segment            deterministic projections of the ledger
-  ledger   verify|events|head       walk the chain; integrity and knowledge are answered separately
+  ledger   verify|rebuild|events|head  walk the chain; integrity and knowledge are answered separately
   prompt   list|show|check|assemble the versioned prompt library
   dispatch once|loop|plan           select work, invoke an agent, put the result to the authority
   schedule run|once|status         the scheduled lanes, and their derived liveness
+  config   init|check|show          create a config by answering flags, and validate one
   serve                             the operator dashboard on loopback
 
 Global flags:

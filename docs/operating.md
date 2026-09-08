@@ -52,7 +52,7 @@ It is not a shortcut past anything. An item it raises goes through the same admi
 planner's proposals face; a state change goes through the same transition authority a lane's work
 does. What it removes is having to assemble the flags.
 
-What it does with a proposal rather than handing it to you is one setting.
+One setting decides which of its proposals it carries out and which it hands to you.
 
 | `console.authority` | what it executes |
 |---|---|
@@ -60,11 +60,26 @@ What it does with a proposal rather than handing it to you is one setting.
 | `act` | anything the control plane could do on its own. The three gates a person owns, it drafts |
 | `full` | those three as well |
 
-The three are signing off a deliverable, answering a blocking question, and deciding an approval.
-They are not gated because they are the most dangerous — cancelling an item is arguably worse.
-They are gated because each one *is* the checkpoint, and an agent that clears its own checkpoint
-has removed it. At `full` there is no human checkpoint left in the pipeline; the record still
-says, on every one of them, that the console pressed it.
+The vocabulary is closed — an action the tool cannot classify is one it cannot decide about, and a
+refusal has to be able to say what it refused.
+
+| action | what it does |
+|---|---|
+| Add something to the roadmap | Creates a deliverable as a theory. Nothing is spent until it is signed off |
+| Raise a piece of work | Proposes one item, against the admission rules a planner's proposals face |
+| Send work back for another attempt | Returns a rejected item to a builder. Refused once it has used its attempts |
+| Withdraw a piece of work | Closes an item without doing it, with the reason on the record |
+| Pause a lane, or change how often it runs | Takes effect on the lane's next tick, not on a restart |
+| Write something down on the record | A note against an item or deliverable. Changes no state |
+| **Agree an idea is worth pursuing** | The sign-off gate |
+| **Answer a question that stopped an agent** | Unblocks the item; the answer is recorded in your words |
+| **Approve or refuse something irreversible** | Clears a change that reaches something real |
+
+The three in bold are the ones `act` will only draft. They are not held back because they are the
+most dangerous — cancelling an item is arguably worse. They are held back because each one *is*
+the checkpoint, and an agent that clears its own checkpoint has removed it. At `full` there is no
+human checkpoint left in the pipeline; the record still says, on every one of them, that the
+console pressed it.
 
 An unrecognised authority level is refused at load rather than treated as the safest one, because
 a console that silently does less than you configured is one you would not notice was wrong.
@@ -254,3 +269,11 @@ did not commit before reporting.
 **A run shows as UNKNOWN forever.** Its process died without recording an end. The item is
 untouched and will be picked up again; the run stays in the record as an unknown, which is the
 honest thing for it to be.
+
+**Verify says STALE PROJECTION after an upgrade.** A derived table was written by the previous
+build. `adlc ledger rebuild`. If you had not just upgraded, find out which of the two causes it
+was before rebuilding — the other one is a write that went round the chain.
+
+**The console answers nothing.** The panel names the reason itself: the console is off in the
+config, no agent runner is configured so a turn has nothing to invoke, or the console prompt is
+missing from the library.
