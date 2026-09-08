@@ -39,7 +39,8 @@ review because there is no agent breakdown to check.
 
 `-why` is the rationale a run cites when explaining why its work mattered.
 
-States: `drafted`, `researching`, `planned`, `approved`, `building`, `delivered`, `paused`.
+States: `theory`, `roadmap`, `signed_off`, `researching`, `researched`, `planning`, `planned`,
+`validating`, `ready`, `building`, `delivered`, `paused`.
 
 ## item — the work
 
@@ -77,7 +78,7 @@ adlc run finish -id … [-envelope path]
 ## gate
 
 ```bash
-adlc gate run [-workdir .] [-from in_progress -to verifying] [-artifact sha256:…]
+adlc gate run [-workdir .] [-from in_progress -to ready_for_testing] [-artifact sha256:…]
 ```
 
 Runs the declared checks here and reports what was observed. With `-from`/`-to`, only the checks
@@ -89,7 +90,7 @@ Exits 6 if red, 7 if it could not be run.
 
 ```bash
 adlc transition table
-adlc transition propose -item S1-001 -to verifying [-run …] [-worker …] [-pm] [-envelope path] [-reason "…"]
+adlc transition propose -item S1-001 -to ready_for_testing [-run …] [-worker …] [-pm] [-envelope path] [-reason "…"]
 ```
 
 `table` prints all 35 edges with who may propose each and what must be true. Everything not on it

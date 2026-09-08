@@ -23,7 +23,7 @@ Criteria:
 Decide whether this item is genuinely finished — against its criteria, the project's
 invariants, and the safety posture. Be hard to convince.
 
-**Re-derive the safety-critical claims yourself.** Do not accept "the verifier says so"
+**Re-derive the safety-critical claims yourself.** Do not accept "the judge says so"
 for anything that would be dangerous if wrong. Reading code and agreeing with it gives the
 right answer on work that is right and misses everything about work that is subtly wrong — a
 flag that is a no-op while the log line says it was used, a guard that permits on error, a

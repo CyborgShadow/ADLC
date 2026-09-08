@@ -25,7 +25,7 @@ A check is a command, the channel its verdict is read from, and the lifecycle ed
   "kind": "source",
   "command": ["gofmt", "-l", "./cmd", "./internal"],
   "verdict": "output_empty",
-  "required_for": ["in_progress->verifying", "verifying->validating"]
+  "required_for": ["in_progress->ready_for_testing", "testing->ready_for_review"]
 }
 ```
 
@@ -70,7 +70,7 @@ that exits 2 for "there are changes" is a success.
   "verdict": "count_min",
   "count_pattern": "([0-9]+) rules evaluated",
   "min_count": 200,
-  "required_for": ["confirming->done"]
+  "required_for": ["confirming->ready_to_merge"]
 }
 ```
 
@@ -99,16 +99,23 @@ A role declares **capabilities** and, optionally, **areas**.
 
 | capability | what it may do |
 |---|---|
-| `generate` | decompose a brief into proposed work items |
+| `research` | turn an intent into a written approach |
+| `plan` | decompose an approach into proposed work items |
 | `implement` | build one item |
-| `verify` | check an item against its criteria |
-| `validate` | review adversarially; the only capability that can reach `done` |
+| `test` | execute the tests and report what ran |
+| `judge` | check an item against its acceptance criteria |
+| `validate` | review adversarially, and check a plan against its intent. The only capability that can reject |
+| `curate` | the hygiene pass over what landed |
+| `arbitrate` | judge the change against the system rather than against the item |
 | `operate` | perform an apply against a real resource |
+| `improve` | record what a landed item taught, and raise fixes as work |
 
 `low_cadence: true` marks a role expected to run rarely, so the never-run roll call reports it
 without raising it as an alarm.
 
-At least one role must declare `validate`, or nothing can ever finish.
+At least one role must declare `validate`, or nothing can ever finish. More generally, a
+capability nobody declares strands every item that reaches it, so the config is refused rather
+than loaded — a stranded item looks exactly like one nobody has got round to yet.
 
 ## routing
 
@@ -224,6 +231,7 @@ your project's common vocabulary so it does not trigger advisories on every pair
 "dispatch": {
   "command": ["claude", "-p", "@{{prompt}}"],
   "workdir_template": ".adlc/workspaces/{{run_id}}",
+  "trunk": "main",
   "max_attempts": 3,
   "timeout_seconds": 3600,
   "isolation": "worktree"
@@ -236,6 +244,12 @@ guard that keys on the run.
 
 `isolation` is `worktree` (a git worktree per run, the default), `copy` (for a tree that is not a
 repository), or `none` (the shared checkout; correct only for a single lane).
+
+`trunk` is the branch the merge queue lands on; it defaults to `main`. Each run's branch is
+`adlc/<run_id>`, and the queue rebases that onto the trunk, re-runs the checks declared for
+`merging->merged` on the rebased tree, and fast-forwards. Declare no checks for that edge and it
+falls back to whatever gates work leaving the builder — a merge queue with no checks at all
+fast-forwards anything.
 
 `max_attempts` is how many times an item may be reworked before it escalates to a person instead
 of looping.

@@ -23,8 +23,8 @@ Acceptance criteria — these are the specification of record, and you may not c
 
 Make every criterion above plausibly true, with tests for the code you write, and stop
 at the point where somebody else can check it. You are proposing
-`{{state}} -> verifying`, which means "the implementation has landed and the checks are
-green" — not "this is finished".
+`{{state}} -> ready_for_testing`, which means "the implementation has landed and the
+control plane's own run of the checks was green" — not "this is finished".
 
 Work only inside the declared file scope. If the item cannot be done without touching
 something outside it, that is a question, not a decision you make quietly.

@@ -15,7 +15,7 @@ goes back.
 - item `{{work_item_id}}` — *{{title}}*
 - current state: `{{state}}` · your workspace: `{{workdir}}`
 
-The criteria you are verifying, which are the specification of record — not the
+The criteria you are judging against, which are the specification of record — not the
 implementation, and not what the performer said the implementation does:
 
 {{criteria}}

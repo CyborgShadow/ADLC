@@ -8,21 +8,24 @@ run can still say exactly which bytes it was given.
 
 | role | capability | area | what it does |
 |---|---|---|---|
-| `planner` | generate | — | Decomposes a brief into work items with checkable criteria |
+| `researcher` | research | — | Turns an intent into a written approach. Creates no work items |
+| `planner` | plan | — | Decomposes an approach into work items with checkable criteria |
 | `engineer` | implement | *generalist* | Builds anything no specialist claims |
 | `cli-dev` | implement | cli | |
 | `docs-writer` | implement | docs | |
-| `test-author` | implement | testing | Writes tests as work items in their own right |
-| `janitor` | implement | hygiene | Stale docs, dead references, duplicated facts. Low cadence |
-| `judge` | verify | — | Checks items against criteria by executing things |
-| `validator` | validate | *generalist* | Adversarial review; the only role that can say done |
+| `tester` | test | testing | Executes the tests. A suite that matched nothing is a failure |
+| `judge` | judge | — | Checks items against criteria by executing things |
+| `validator` | validate | *generalist* | Adversarial review; the only role that can reject |
 | `security` | validate | security | Reviews for what an attacker would do |
 | `performance` | validate | performance | Reviews for scale and load. Findings need a number |
 | `resilience` | validate | resilience | Reviews for what is left behind when something dies halfway |
+| `janitor` | curate | hygiene | Stale docs, dead references, duplicated facts. Low cadence |
+| `arbiter` | arbitrate | — | Judges the change against the system rather than against the item |
+| `improver` | improve | — | Records what a landed item taught; raises fixes as work. Low cadence |
 | `operator` | operate | platform, ci | Applies changes to real resources. Low cadence |
 
-Nine prompt files back these twelve roles: several implementers share `implementer.md`, and the
-differentiation is the area they are routed work from.
+Thirteen prompt files back these fifteen roles: several implementers share `implementer.md`, and
+the differentiation is the area they are routed work from.
 
 ## The handoff
 
@@ -33,19 +36,33 @@ is arithmetic on recorded state, not a message somebody has to deliver.
 ```
 you            write a deliverable: a title, a brief, how many items to keep in flight
   ↓
-planner        breaks the brief into items with acceptance criteria
+you            sign it off — the one planning gate no machine passes on its own
   ↓
-validator      checks the breakdown against the brief — would these items deliver it?
+researcher     turns the intent into an approach: what exists, the options, which one and why
+  ↓
+planner        breaks the approach into items with acceptance criteria
+  ↓
+validator      checks the breakdown against the intent — would these items deliver it?
   ↓            (on a reject it goes back for decomposition; nothing is built until it passes)
 builder        implements one item, writes tests for what it wrote, stops
   ↓
-judge          checks the item against its criteria by executing commands
+tester         executes the tests
   ↓            (a failure goes back to the builder with the failing output)
-validator      adversarial review; may say done, or send it back with blockers
+judge          checks the item against its criteria by executing commands
   ↓
+validator      adversarial review; may pass it on, or reject it with blockers
+  ↓
+janitor        hygiene pass over what landed
+  ↓
+arbiter        judges the change against the system rather than against the item
+  ↓            (the next two happen only if the change touches something real)
 operator       applies the change, after an approval that named the exact plan
   ↓
 validator      confirms against the applied artifact, not the plan
+  ↓
+merge queue    rebases, re-gates on the rebased tree, fast-forwards — the control plane itself
+  ↓
+improver       records what was learned and raises self-improvements as their own items
 ```
 
 The Coordination page renders this live, with who currently owns each stage and whether their
@@ -150,7 +167,8 @@ Read a prompt. Do the bounded job. Write an envelope. That is the whole contract
 control plane computes the rest from the state the item was in, the capability the run held, and
 the item's blast radius.
 
-Role-specific output goes in `outputs`: `work_items` for a planner, `criteria` for a verifier,
+Role-specific output goes in `outputs`: `approach` for a researcher, `work_items` for a planner
+or an improver, `criteria` for a judge,
 `findings` for a validator, `files_changed` for a builder.
 
 A command the agent honestly could not run is declared `"not_run": true` with a reason, and is

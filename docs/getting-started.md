@@ -41,7 +41,7 @@ gates:
   "verdict": "count_min",
   "count_pattern": "\"numTotalTests\":(\\d+)",
   "min_count": 1,
-  "required_for": ["in_progress->verifying", "verifying->validating"]
+  "required_for": ["in_progress->ready_for_testing", "testing->ready_for_review"]
 }
 ```
 
@@ -115,13 +115,20 @@ Every declared lane starts on its own cadence and the dashboard comes up on
 
 What happens, in order:
 
-1. The **plan** lane dispatches a planner. It proposes work items; each is admitted or refused
-   against the same kind of rules a transition faces.
-2. The deliverable moves to `planned`, and **nothing under it is dispatched yet**.
-3. The **review** lane dispatches a reviewer to check the breakdown against your brief. On a
-   pass the deliverable becomes `approved` and the work opens.
-4. The **build**, **verify** and **review** lanes drain it, item by item.
-5. Anything with a blast radius above your threshold stops on the Approvals page.
+1. Your deliverable starts as a `theory`. It sits there until you sign it off — the one planning
+   gate no machine passes on its own. Do that on the Roadmap page.
+2. The **research** lane dispatches a researcher, which writes down an approach: what exists,
+   what the options are, which one and why. The deliverable becomes `researched`.
+3. The **plan** lane dispatches a planner. It proposes work items; each is admitted or refused
+   against the same kind of rules a transition faces. The deliverable becomes `planned`, and
+   **nothing under it is dispatched yet**.
+4. The **review** lane checks the breakdown against your intent. On a pass the deliverable
+   becomes `ready` and the work opens; on a reject it goes back for decomposition.
+5. The **build**, **test**, **judge**, **review**, **curate** and **arbitrate** lanes drain it,
+   item by item, each stage done by somebody who did not do the one before it.
+6. Anything with a blast radius above your threshold stops on the Approvals page.
+7. Cleared work goes through the merge queue — the control plane's own step — and then the
+   **improve** lane records what the item taught before marking it done.
 
 Watch it on the Roadmap and Overview pages. If an agent hits something ambiguous it stops and
 asks — the Questions page shows the question with the agent's own recommendation, and answering

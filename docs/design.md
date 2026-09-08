@@ -57,11 +57,15 @@ lane that stops firing stops producing ticks and becomes a derived alarm.
 
 ## Verification is a state, not a schedule
 
-An item cannot leave `verifying` without a verifier, and the verifier cannot be the run that did
-the work. Verification is the next step of an item already in flight rather than a competing job,
-and the dispatcher drains from the finished end — so checking never queues behind building.
+An item cannot leave `testing` without a tester or `judging` without a judge, and neither can be
+the run that did the work. Checking is the next step of an item already in flight rather than a
+competing job, and the dispatcher drains from the finished end — so checking never queues behind
+building.
 
-A lane that both writes and judges its own work will always find it acceptable.
+A lane that both writes and judges its own work will always find it acceptable. The split is also
+why the two are separate stages: executing the tests and deciding whether the passing tests
+establish the criteria are different questions, and one answer routinely gets mistaken for the
+other.
 
 ## A breakdown is reviewed before it is built
 
@@ -71,6 +75,45 @@ builds exactly what the decomposition said, including the parts that do not add 
 asked for — and nobody finds out until the deliverable is finished and wrong.
 
 A deliverable filled in by hand skips this: there is no agent breakdown to review.
+
+## An idea is signed off before anything is spent on it
+
+Research, decomposition and plan validation all cost runs, so the pipeline stops before them and
+waits for a person to say the intent is worth pursuing. It is the only planning gate no machine
+passes on its own, and it is deliberately the cheapest possible thing to ask of somebody: one
+click, before any money is spent, rather than a review of work already done.
+
+## The change is judged against the item, then against the system
+
+Every check before arbitration asks "does this do what it said it would?" and can answer yes about
+a change that makes the system worse — a second mechanism for something the codebase already does
+once, a rule stated here and contradicted there. Those are invisible from inside one diff, so one
+role looks wider than one unit of work, exactly once, at the point where the change is otherwise
+finished.
+
+## One branch lands at a time, re-gated after the rebase
+
+Work happens in isolated worktrees, so a branch cleared to merge was gated against a tree that has
+since moved. The queue rebases it, re-runs the checks on the rebased tree, and fast-forwards under
+a lock held only long enough to read the tip and move it — the gate runs outside the lock, because
+a lock held across a full check run throttles the whole fleet behind one execution and the queue
+then grows faster than it drains. If the tip moved while the gate ran, the attempt is abandoned
+rather than forced.
+
+One guard there is not obvious. A rebase can produce a tree that changes files the branch never
+touched, restoring them to what they were when the branch started — silently reverting work that
+landed in between. Duplicated work is loud, because two agents doing one job collide. Reversion is
+silent, and every check stays green throughout. So the invariant is checked directly: a branch may
+only change files its own commits touch.
+
+## The last step of an item is what it taught
+
+A landed item's own history — every state, every run, every refusal — is read by one more run
+before the item is closed. Anything that would make the next item cheaper is written down as a
+rule somebody could follow, and anything the system itself got wrong is raised as ordinary work
+with acceptance criteria a command can check. Both outputs are allowed to be empty, and often
+should be: a lesson manufactured to fill a field is how a lessons file becomes something nobody
+reads.
 
 ## Nothing irreversible happens without an approval that names the plan
 
@@ -167,6 +210,7 @@ internal/ledger/     hash-chained append-only store, two-tier verification, blob
 internal/authority/  the transition table, state advancement, generation admission, roadmap
 internal/gate/       runs the declared checks; compares claims to observations
 internal/dispatch/   selection, routing, isolation, invocation, the scheduled lanes
+internal/merge/      the merge queue: rebase, re-gate, fast-forward, clobber guard
 internal/server/     the operator dashboard
 internal/story/      run narratives and decision replay
 internal/lease/      ephemeral claims on items and resources

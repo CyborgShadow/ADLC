@@ -68,7 +68,7 @@ rationale — from recorded links rather than from anybody's memory.
 RUN v-20260908T175925Z-01 — validator
 ============================================================
 
-validator moved S2-002 from validating to done.
+validator moved S2-002 from validating to reviewed.
 
 WHY THIS MATTERED
   Work item S2-002 — Cover internal/config with tests
@@ -77,9 +77,9 @@ WHY THIS MATTERED
 
 WHAT HAPPENED, IN ORDER
   1. Dispatched as validator  [17:59:25]
-  2. Gate GREEN on validating->done  [17:59:26]
+  2. Gate GREEN on validating->reviewed  [17:59:26]
   3. Agent reported "pass"  [17:59:26]
-  4. Advanced validating → done  [17:59:26]
+  4. Advanced validating → reviewed  [17:59:26]
 ```
 
 ## Replaying a decision
@@ -96,8 +96,8 @@ and the result goes back through the same authority.
 ```
 REPLAY v-20260908T175925Z-01
 
-  recorded at the time   admitted validating -> done
-  re-derived now         admitted validating -> done
+  recorded at the time   admitted validating -> reviewed
+  re-derived now         admitted validating -> reviewed
   gate against this tree GREEN
 
 The decision reproduces. Given the same recorded inputs, the control plane
