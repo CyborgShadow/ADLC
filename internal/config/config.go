@@ -421,7 +421,7 @@ func (c *Config) validate() error {
 		c.Dispatch.MaxAttempts = 3
 	}
 	if c.Dispatch.MaxConcurrent <= 0 {
-		c.Dispatch.MaxConcurrent = 1
+		c.Dispatch.MaxConcurrent = DefaultMaxConcurrent
 	}
 	if c.Server.Addr == "" {
 		c.Server.Addr = "127.0.0.1:8099"
@@ -691,6 +691,16 @@ func FromChecks(project string, sourceRoots []string, checks []Check) (*Config, 
 	}
 	return c, nil
 }
+
+// DefaultMaxConcurrent is how many agents run at once when nothing says.
+//
+// One serialises an eight-stage pipeline behind a single agent, which is what
+// this defaulted to while the setting was not enforced at all. The other
+// obvious answer — the number of lanes — is a ceiling nobody chose and which
+// scales the burn rate with the roster. Four keeps several stages of different
+// items moving without making the bill a surprise, and it is the one number
+// here worth revisiting for a project with a real budget.
+const DefaultMaxConcurrent = 4
 
 // LoopDecl is one scheduled dispatch lane.
 //

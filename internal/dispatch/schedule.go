@@ -76,19 +76,15 @@ func (s *Scheduler) FireMerge(ctx context.Context) (MergeResult, error) {
 func (s *Scheduler) FireOnce(ctx context.Context, l config.LoopDecl) (TickResult, error) {
 	f := Filter{Capability: l.Capability, Areas: l.Areas, Worker: l.Worker}
 
-	var last TickResult
-	dispatched := 0
-	for i := 0; i < max(1, l.MaxPerTick); i++ {
-		res, err := s.D.TickScoped(ctx, f)
-		if err != nil {
-			s.tick(l, false, "", "error: "+err.Error())
-			return res, err
-		}
-		last = res
-		if !res.Dispatched {
-			break
-		}
-		dispatched++
+	// Dispatched together rather than back to back. Sequential dispatch made
+	// max_per_tick describe how many runs a tick would do one after another,
+	// so a single slow agent held its lane for as long as it ran — with an
+	// hour's timeout, an hour. The fleet-wide ceiling still applies underneath;
+	// this decides how many a lane offers, not how many run.
+	last, dispatched, err := s.fireParallel(ctx, f, l.MaxPerTick)
+	if err != nil {
+		s.tick(l, false, "", "error: "+err.Error())
+		return last, err
 	}
 
 	detail := last.Idle

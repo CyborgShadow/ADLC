@@ -64,6 +64,7 @@ type configView struct {
 	CapSegment string
 	Attempts   int
 	Timeout    int
+	Concurrent int
 	Refresh    int
 	OnDefaults bool
 	// AllDark is true when no lane has ever fired, which almost always means
@@ -210,6 +211,7 @@ func (s *Server) configPageV2(*http.Request) (string, any, error) {
 	v.CapSegment = cfgDollars(s.Cfg.Budget.PerSegmentMicros)
 	v.Attempts = s.Cfg.Dispatch.MaxAttempts
 	v.Timeout = s.Cfg.Dispatch.TimeoutSeconds
+	v.Concurrent = s.Cfg.Dispatch.MaxConcurrent
 	v.Refresh = s.Cfg.Server.RefreshSeconds
 	v.OnDefaults = s.Cfg.Budget.UsesDefaultPricing()
 	v.AllDark = true

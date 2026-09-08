@@ -167,6 +167,8 @@ const configPageHTML = `
   <div class="box">
     <h3>Limits</h3>
     <form method="post" action="/config/dispatch">
+      <div class="fld"><label>agents at once<span class="tip" data-tip="The fleet-wide ceiling on agents running at the same time, across every lane. This is what decides throughput: at 1 an eight-stage pipeline runs one item at a time. Raising it raises the burn rate in direct proportion, so set a daily cap first.">?</span></label>
+        <input type="number" name="concurrent" value="{{.Concurrent}}" min="1" max="32"></div>
       <div class="fld"><label>rework attempts<span class="tip" data-tip="How many times an item may be sent back before it escalates to a person instead of looping. An item that fails the same way five times is not going to pass on the sixth.">?</span></label>
         <input type="number" name="attempts" value="{{.Attempts}}" min="1"></div>
       <div class="fld"><label>run timeout (s)<span class="tip" data-tip="How long one agent may run. A run killed at this limit is recorded as UNKNOWN rather than failed, because nobody knows how it was going — which is accurate, and why setting this too low is expensive.">?</span></label>

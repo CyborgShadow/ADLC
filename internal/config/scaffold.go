@@ -135,14 +135,19 @@ func standardLanes() []LoopDecl {
 		every      int
 		perTick    int
 	}
+	// Per tick: how many this lane will offer at once. Higher where a run is
+	// short and cheap and the queue is where work piles up; lower where a run
+	// is long, expensive, or touches something real. The fleet-wide ceiling
+	// bounds the total regardless, so these are a shape rather than a sum.
 	order := []lane{
 		{"improve", CapImprove, 900, 1},
-		{"arbitrate", CapArbitrate, 300, 1},
+		{"arbitrate", CapArbitrate, 300, 2},
 		{"curate", CapCurate, 900, 1},
-		{"review", CapValidate, 240, 2},
-		{"judge", CapJudge, 180, 2},
-		{"test", CapTest, 180, 2},
-		{"build", CapImplement, 300, 1},
+		{"review", CapValidate, 240, 3},
+		{"judge", CapJudge, 180, 3},
+		{"test", CapTest, 180, 3},
+		{"build", CapImplement, 300, 2},
+		// Applies touch real machines one at a time, whatever the ceiling says.
 		{"apply", CapOperate, 600, 1},
 		{"plan", CapPlan, 1800, 1},
 		{"research", CapResearch, 1800, 1},
@@ -205,7 +210,7 @@ func Scaffold(o ScaffoldOptions) (*Config, error) {
 			Command:         o.AgentCommand,
 			WorkDirTemplate: filepath.ToSlash(filepath.Join(".adlc", "workspaces", "{{run_id}}")),
 			Trunk:           o.Trunk,
-			MaxConcurrent:   1, MaxAttempts: 3, TimeoutSeconds: 3600,
+			MaxConcurrent:   DefaultMaxConcurrent, MaxAttempts: 3, TimeoutSeconds: 3600,
 			Isolation: "worktree",
 		},
 		Prompts: PromptPolicy{

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/CyborgShadow/ADLC/internal/authority"
@@ -75,6 +76,15 @@ type Dispatcher struct {
 	Actor  string
 	Now    func() time.Time
 	Log    func(string)
+
+	// The fleet-wide ceiling on agents running at once, built once from the
+	// config on first use.
+	slots     *slots
+	slotsOnce sync.Once
+
+	// Ids handed out but not yet on the ledger. See mintRunID.
+	mintMu sync.Mutex
+	minted map[string]bool
 }
 
 func (d *Dispatcher) now() time.Time {
@@ -343,6 +353,14 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	if err != nil {
 		return TickResult{}, false, err
 	}
+	// Released once the ledger knows the id, or immediately if this dispatch
+	// never gets that far.
+	started := false
+	defer func() {
+		if !started {
+			d.releaseRunID(runID)
+		}
+	}()
 
 	// Claim before working. A claim taken at the end records a collision instead
 	// of preventing one.
@@ -403,6 +421,8 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	}); err != nil {
 		return TickResult{}, false, err
 	}
+	started = true
+	d.releaseRunID(runID)
 	d.log("DISPATCH %s  %s  %s", runID, c.Worker, c.Why)
 
 	res := TickResult{Dispatched: true, RunID: runID, ItemID: c.Item.ID, Worker: c.Worker}
@@ -420,11 +440,18 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// A slot is held only for as long as an agent is actually running. Taking
+	// it earlier would count selection and bookkeeping against a ceiling that
+	// exists to bound money and machine load, neither of which they spend.
+	if err := d.limit().enter(rctx); err != nil {
+		return TickResult{}, false, err
+	}
 	agentOut, agentErr := d.Runner.Invoke(rctx, Invocation{
 		RunID: runID, WorkerType: c.Worker, ItemID: c.Item.ID, SegmentID: segID,
 		PromptPath: promptPath, PromptText: asm.Text,
 		WorkDir: ws.Dir, EnvelopePath: ws.EnvelopePath, Timeout: timeout,
 	})
+	d.limit().leave()
 
 	raw := agentOut.Envelope
 	if len(raw) == 0 {
@@ -689,20 +716,49 @@ func (d *Dispatcher) admit(runID string, c Candidate, to authority.State, env *e
 }
 
 // mintRunID makes a run's single name, and refuses one already taken.
+// mintRunID gives a run the one name it wears everywhere — its id, its
+// workspace and its lease key.
+//
+// The check and the claim are one critical section, and ids handed out but not
+// yet written to the ledger are remembered until they are. Asking the ledger
+// alone is a check-then-act race: two dispatches in the same second both see
+// the same id free and both take it, and the second one dies on the unique
+// constraint after it has already taken a lease and built a worktree. That
+// never fired while a lane dispatched one at a time, and fires immediately once
+// it does not — which is the shape of most concurrency bugs, and the reason
+// this is a lock rather than a retry.
 func (d *Dispatcher) mintRunID(worker string, now time.Time) (string, error) {
+	d.mintMu.Lock()
+	defer d.mintMu.Unlock()
+	if d.minted == nil {
+		d.minted = map[string]bool{}
+	}
 	prefix := initials(worker)
 	stamp := now.UTC().Format("20060102T150405Z")
 	for n := 1; n <= 99; n++ {
 		id := fmt.Sprintf("%s-%s-%02d", prefix, stamp, n)
+		if d.minted[id] {
+			continue
+		}
 		taken, err := d.Led.RunExists(id)
 		if err != nil {
 			return "", err
 		}
 		if !taken {
+			d.minted[id] = true
 			return id, nil
 		}
 	}
 	return "", fmt.Errorf("could not mint a free run id for %s at %s after 99 attempts", worker, stamp)
+}
+
+// releaseRunID forgets an id once the ledger knows about it, or once the
+// dispatch that reserved it gave up. Holding them all would grow without bound
+// in a long-running scheduler.
+func (d *Dispatcher) releaseRunID(id string) {
+	d.mintMu.Lock()
+	defer d.mintMu.Unlock()
+	delete(d.minted, id)
 }
 
 func initials(worker string) string {

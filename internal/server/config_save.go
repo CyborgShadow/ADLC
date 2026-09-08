@@ -97,11 +97,12 @@ func (s *Server) saveDispatchCfg(w http.ResponseWriter, r *http.Request) {
 	attempts, err1 := strconv.Atoi(strings.TrimSpace(r.FormValue("attempts")))
 	timeout, err2 := strconv.Atoi(strings.TrimSpace(r.FormValue("timeout")))
 	refresh, err3 := strconv.Atoi(strings.TrimSpace(r.FormValue("refresh")))
-	if err1 != nil || err2 != nil || err3 != nil {
-		redirect(w, r, "/config", "attempts, timeout and refresh all have to be numbers", true)
+	concurrent, err4 := strconv.Atoi(strings.TrimSpace(r.FormValue("concurrent")))
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+		redirect(w, r, "/config", "attempts, timeout, refresh and concurrency all have to be numbers", true)
 		return
 	}
-	if err := s.Cfg.SetDispatch(attempts, timeout); err != nil {
+	if err := s.Cfg.SetDispatch(attempts, timeout, concurrent); err != nil {
 		redirect(w, r, "/config", err.Error(), true)
 		return
 	}

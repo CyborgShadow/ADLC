@@ -94,7 +94,14 @@ func (c *Config) SetBudget(perRun, perDay, perSegment int64, defaultModel string
 }
 
 // SetDispatch changes the rework budget and the per-run timeout.
-func (c *Config) SetDispatch(maxAttempts, timeoutSeconds int) error {
+func (c *Config) SetDispatch(maxAttempts, timeoutSeconds, maxConcurrent int) error {
+	if maxConcurrent < 1 {
+		return fmt.Errorf("at least one agent has to be able to run; %d would stop the fleet entirely", maxConcurrent)
+	}
+	if maxConcurrent > 32 {
+		return fmt.Errorf(
+			"%d concurrent agents is past the point where this is a throughput setting and into where it is a way to spend a month's budget in an afternoon; 32 is the ceiling this build accepts", maxConcurrent)
+	}
 	if maxAttempts < 1 {
 		return fmt.Errorf("an item needs at least one attempt; %d would mean nothing is ever built", maxAttempts)
 	}
@@ -105,6 +112,7 @@ func (c *Config) SetDispatch(maxAttempts, timeoutSeconds int) error {
 	c.mu.Lock()
 	c.Dispatch.MaxAttempts = maxAttempts
 	c.Dispatch.TimeoutSeconds = timeoutSeconds
+	c.Dispatch.MaxConcurrent = maxConcurrent
 	c.mu.Unlock()
 	return Save(c)
 }
