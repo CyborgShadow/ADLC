@@ -102,6 +102,14 @@ type ConsolePolicy struct {
 	// HistoryTurns is how much of the conversation is replayed into each turn.
 	// The agent has no memory between invocations; this is the memory.
 	HistoryTurns int `json:"history_turns,omitempty"`
+	// Command is argv for a conversational agent. Unlike a lane's command it may
+	// contain {{session_args}}, which expands to the flags that start or resume
+	// the thread — so the agent keeps the conversation and each turn sends only
+	// what changed.
+	//
+	// Empty falls back to dispatch.command, which is a one-shot: it works, and it
+	// pays for the whole transcript again on every turn.
+	Command []string `json:"command,omitempty"`
 }
 
 // validateConsole fills the defaults and refuses what cannot work.
@@ -119,6 +127,21 @@ func (c *Config) validateConsole() error {
 	}
 	if p.HistoryTurns <= 0 {
 		p.HistoryTurns = 20
+	}
+	if len(p.Command) > 0 {
+		hasSession := false
+		for _, a := range p.Command {
+			if a == "{{session_args}}" {
+				hasSession = true
+			}
+		}
+		if !hasSession {
+			// A console command with no session placeholder starts a new thread
+			// every turn — the one-shot behaviour wearing a session-shaped
+			// config. Said out loud rather than discovered in a bill.
+			return fmt.Errorf(
+				"console.command has no {{session_args}}, so every turn would start a fresh conversation and re-send the whole transcript. Add it, or leave console.command empty to use dispatch.command deliberately as a one-shot")
+		}
 	}
 	if !p.Enabled {
 		return nil

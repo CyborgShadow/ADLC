@@ -82,7 +82,7 @@ const consoleDockHTML = `
         <div class="msg me"><div class="who">{{.AskedBy}}</div><div class="body">{{.Asked}}</div></div>
         <div class="msg">
           <div class="who">console</div>
-          {{if .Running}}<div class="body wait">thinking… this panel refreshes on its own.</div>
+          {{if .Running}}<div class="body wait">Working — {{.Waited}} so far. Checking every two seconds.</div>
           {{else if not .Replied}}<div class="body wait">This turn was interrupted and never answered.</div>
           {{else if .Failure}}<div class="body fail">The turn failed: {{.Failure}}</div>
           {{else}}<div class="body">{{.Reply}}</div>{{end}}
@@ -144,7 +144,7 @@ everything a lane produces. It can do nothing here the rest of the system would 
 <div class="talk">
 {{range .Turns}}<div class="turn">
   <div class="you"><b>{{.AskedBy}} asked</b>{{.Asked}}</div>
-  {{if .Running}}<div class="them wait">thinking… this page refreshes on its own.</div>
+  {{if .Running}}<div class="them wait">Working — {{.Waited}} so far. A full agent run takes thirty to ninety seconds.</div>
   {{else if not .Replied}}<div class="them wait">This turn was interrupted and never answered.
     Nobody knows what it would have said, so nothing was recorded as if they did.</div>
   {{else if .Failure}}<div class="them fail">The turn failed: {{.Failure}}</div>

@@ -73,6 +73,25 @@ func (t *turnState) running(id string) bool {
 	return ok
 }
 
+// since is how long a turn has been running, and any reports whether anything
+// is. Both exist so the page can say how long it has been rather than telling
+// somebody it will be along shortly for the fourth time.
+func (t *turnState) since(id string, now time.Time) time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	started, ok := t.inFlight[id]
+	if !ok {
+		return 0
+	}
+	return now.Sub(started)
+}
+
+func (t *turnState) any() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.inFlight) > 0
+}
+
 // consoleActor is who the record names for anything the console did on its own.
 const consoleActor = "console"
 
@@ -85,6 +104,19 @@ func (s *Server) runner() dispatch.Runner {
 	if s.Runner != nil {
 		return s.Runner
 	}
+	// A conversational command gets a runner that holds one thread across turns.
+	// Built once and kept: rebuilt per turn, every turn would be turn one.
+	if len(s.Cfg.Console.Command) > 0 {
+		s.sessOnce.Do(func() {
+			s.sess = &sessionRunner{Command: s.Cfg.Console.Command,
+				Log: func(m string) {
+					if s.Log != nil {
+						s.Log(m)
+					}
+				}}
+		})
+		return s.sess
+	}
 	if s.Sched != nil && s.Sched.D != nil {
 		return s.Sched.D.Runner
 	}
@@ -95,6 +127,9 @@ func (s *Server) runner() dispatch.Runner {
 type consoleRow struct {
 	ledger.ConsoleTurn
 	Running bool
+	// Waited is how long this turn has been running, so the page can say what
+	// it knows instead of promising it will be along shortly.
+	Waited  string
 	Asked   string
 	Reply   string
 	Actions []consoleActionRow
@@ -119,6 +154,9 @@ func (s *Server) consolePage(*http.Request) (string, any, error) {
 	for _, t := range turns {
 		r := consoleRow{ConsoleTurn: t, Asked: t.Asked, Reply: t.Reply}
 		r.Running = t.Pending() && s.turns.running(t.TurnID)
+		if r.Running {
+			r.Waited = s.turns.since(t.TurnID, s.now()).Round(time.Second).String()
+		}
 		for _, a := range t.Actions {
 			p := a.Outcome == ledger.ActionPending
 			if p {
@@ -179,12 +217,20 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	text := strings.TrimSpace(r.FormValue("text"))
-	who := orDefault(strings.TrimSpace(r.FormValue("who")), s.Actor)
+	who := strings.TrimSpace(r.FormValue("who"))
 	// Back to the page the question was about. An answer that arrives somewhere
 	// else is an answer you have to carry back to the thing you were looking at.
 	back := safeBack(orDefault(r.FormValue("back"), "/console"))
 	if text == "" {
 		redirect(w, r, back, "nothing to ask", true)
+		return
+	}
+	// A name is required rather than defaulted. Under `act` the console executes
+	// on its own, so the record has to be able to say who asked for it — and a
+	// conversation attributed to whatever the process was started as answers
+	// that question with the name of a service.
+	if who == "" {
+		redirect(w, r, back, "say who you are — the record names whoever asked, and a question from nobody cannot be answered for later", true)
 		return
 	}
 	if !s.Cfg.Console.Enabled {
@@ -314,11 +360,20 @@ func (s *Server) consoleInvoke(sid, turnID string, run dispatch.Runner) ([]byte,
 		}
 	}
 
+	// With a session, the agent is already holding the conversation; replaying it
+	// as text pays for the whole history again and hands the model a second,
+	// worse copy of what it already has. Without one, the transcript IS the
+	// memory and has to go.
+	transcript := console.Transcript(history)
+	if len(s.Cfg.Console.Command) > 0 {
+		transcript = "You are holding this conversation, so it is not repeated here. " +
+			"What follows is only what has changed since your last turn."
+	}
 	asm, err := s.Lib.Assemble(s.consolePrompt(), map[string]string{
 		"project":         s.Cfg.Project,
 		"question":        question,
 		"state":           console.Brief(s.Cfg, segs, items, questions, approvals, lanes, s.now()),
-		"transcript":      console.Transcript(history),
+		"transcript":      transcript,
 		"actions":         console.Vocabulary(s.Cfg.Console.Authority),
 		"authority":       string(s.Cfg.Console.Authority),
 		"authority_means": s.Cfg.Console.Authority.Describe(),

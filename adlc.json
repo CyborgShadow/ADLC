@@ -382,6 +382,7 @@
     "enabled": true,
     "authority": "act",
     "worker": "console",
+    "command": ["claude", "-p", "{{session_args}}", "--dangerously-skip-permissions", "--add-dir", "."],
     "timeout_seconds": 180,
     "history_turns": 20
   },
@@ -409,7 +410,7 @@
   },
 
   "dispatch": {
-    "command": ["claude", "-p", "--dangerously-skip-permissions", "@{{prompt}}"],
+    "command": ["claude", "-p", "--dangerously-skip-permissions", "--add-dir", "."],
     "workdir_template": ".adlc/workspaces/{{run_id}}",
     "trunk": "main",
     "_comment": "max_concurrent is the fleet-wide ceiling on agents running at once, and it is now enforced rather than merely declared. Each lane offers max_per_tick dispatches together; this bounds the total across every lane. Raising it raises the burn rate in direct proportion, so set budget.per_day_micros before raising it far.",

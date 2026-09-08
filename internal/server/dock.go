@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/CyborgShadow/ADLC/internal/console"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
@@ -38,6 +39,7 @@ type dockAction struct {
 type dockTurn struct {
 	ledger.ConsoleTurn
 	Running bool
+	Waited  string
 	Actions []dockAction
 }
 
@@ -91,6 +93,9 @@ func (s *Server) dock(r *http.Request) dockData {
 	}
 	for _, t := range turns {
 		row := dockTurn{ConsoleTurn: t, Running: t.Pending() && s.turns.running(t.TurnID)}
+		if row.Running {
+			row.Waited = s.turns.since(t.TurnID, s.now()).Round(time.Second).String()
+		}
 		for _, a := range t.Actions {
 			p := a.Outcome == ledger.ActionPending
 			if p {

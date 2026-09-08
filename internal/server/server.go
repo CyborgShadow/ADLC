@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/CyborgShadow/ADLC/internal/authority"
@@ -46,7 +47,11 @@ type Server struct {
 	Runner dispatch.Runner
 	Log    func(string)
 	turns  turnState
-	Now    func() time.Time
+
+	// The conversational runner, built once from console.command.
+	sess     *sessionRunner
+	sessOnce sync.Once
+	Now      func() time.Time
 }
 
 func (s *Server) now() time.Time {
@@ -288,8 +293,12 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 		nav[i].Active = (page == "home" && nav[i].Href == "/") ||
 			(nav[i].Href != "/" && strings.HasPrefix(nav[i].Href, "/"+page))
 	}
+	refresh := s.Cfg.Server.RefreshSeconds
+	if s.turns.any() && (refresh == 0 || refresh > 2) {
+		refresh = 2
+	}
 	return &pageData{
-		Page: page, Title: title, Refresh: s.Cfg.Server.RefreshSeconds, Project: s.Cfg.Project,
+		Page: page, Title: title, Refresh: refresh, Project: s.Cfg.Project,
 		Verdict: string(rep.Verdict), HeadSeq: seq, Attn: attn, Body: body,
 		Now: s.now().Format("15:04:05"), Nav: nav, Dock: s.dock(r),
 	}, nil

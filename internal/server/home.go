@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/CyborgShadow/ADLC/internal/console"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
@@ -80,6 +81,9 @@ func (s *Server) home(*http.Request) (string, any, error) {
 	for _, t := range turns {
 		row := consoleRow{ConsoleTurn: t, Asked: t.Asked, Reply: t.Reply}
 		row.Running = t.Pending() && s.turns.running(t.TurnID)
+		if row.Running {
+			row.Waited = s.turns.since(t.TurnID, s.now()).Round(time.Second).String()
+		}
 		for _, a := range t.Actions {
 			row.Actions = append(row.Actions, consoleActionRow{
 				ConsoleAction: a, Pressable: a.Outcome == ledger.ActionPending,
