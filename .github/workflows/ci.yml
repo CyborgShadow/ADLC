@@ -2,6 +2,10 @@ name: gate
 
 # The same checks adlc.json declares, so that "CI is green" and "the gate is
 # green" are one claim rather than two that drift apart.
+#
+# The toolchain is pinned to what go.mod declares rather than to whatever is
+# newest. A gate whose verdict changes because the runner picked up a different
+# compiler is a gate nobody can reproduce locally.
 
 on:
   push:
@@ -18,16 +22,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          check-latest: true
 
       # The verdict is the OUTPUT, not the exit code. `gofmt -l` exits 0 whether
       # or not it printed the files it would rewrite, so `run: gofmt -l ./cmd`
       # on its own is a step that can never fail.
+      #
+      # It prints the diff as well as the filenames: a check that says a file is
+      # wrong without saying how sends the reader off to reproduce it locally,
+      # which is exactly what they cannot do when the runner's toolchain differs
+      # from theirs.
       - name: gofmt
         run: |
-          out=197609gofmt -l ./cmd ./internal)
-          if [ -n "" ]; then
-            echo ""
+          out=$(gofmt -l ./cmd ./internal)
+          if [ -n "$out" ]; then
+            echo "$out"
             gofmt -d ./cmd ./internal
             echo "::error::gofmt would rewrite these files"
             exit 1
@@ -47,7 +55,6 @@ jobs:
       - name: prompts still carry every mandatory clause
         run: go run ./cmd/adlc prompt check
 
-
   race:
     # Separate because a host with no C toolchain cannot run the detector at
     # all, and "not run" must never be recorded as "passed".
@@ -59,5 +66,4 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          check-latest: true
       - run: go test -race -count=1 ./...
