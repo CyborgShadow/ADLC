@@ -53,6 +53,12 @@ type beatFile struct {
 	Worker    string `json:"worker"`
 	StartedMS int64  `json:"started_ms"`
 	BeatMS    int64  `json:"beat_ms"`
+	// Workspace and Envelope are where this run's tree and its result were to
+	// be found. Recorded here so that whoever closes the run can look at what
+	// the agent actually left behind instead of only noting that nobody is
+	// waiting on it any more.
+	Workspace string `json:"workspace,omitempty"`
+	Envelope  string `json:"envelope,omitempty"`
 }
 
 // runsDir is where the beats live: beside the leases, and never committed.
@@ -226,9 +232,21 @@ func (d *Dispatcher) closeOrphan(f beatFile) error {
 	if err != nil && err != ledger.ErrNotFound {
 		return err
 	}
+
+	// Gather what is actually known BEFORE concluding anything. The verdict is
+	// UNKNOWN because nobody can say what the agent did — but why nobody can say
+	// is not unknown at all, and recording only the conclusion left a bare
+	// "unknown" on every surface with the evidence sitting in a log file.
+	ev := d.evidence(f)
+	if _, aerr := d.Led.Append(d.actor(), ledger.KindRunAbandoned, f.RunID, ev); aerr != nil {
+		return aerr
+	}
 	if err == nil {
+		// UNKNOWN stands whatever was found. An envelope is a CLAIM: admitting
+		// one whose checks nobody ran is the single thing this control plane
+		// exists to refuse, and it is not made safer by the agent having died.
 		if _, aerr := d.Led.Append(d.actor(), ledger.KindRunFinished, f.RunID, ledger.RunFinished{
-			RunID: f.RunID, Verdict: "unknown",
+			RunID: f.RunID, Verdict: "unknown", EnvelopeSHA: ev.EnvelopeSHA,
 		}); aerr != nil {
 			return aerr
 		}
@@ -238,10 +256,81 @@ func (d *Dispatcher) closeOrphan(f beatFile) error {
 	if d.Leases != nil && f.LeaseKey != "" {
 		_ = d.Leases.Release(f.LeaseKey, f.RunID)
 	}
-	age := d.now().Sub(time.UnixMilli(f.BeatMS)).Round(time.Second)
-	d.log("REAPED %s (%s) — no heartbeat for %s, so the process waiting on it is gone. Recorded UNKNOWN, not a failure: nobody knows what it did. Its claim on %s is released and the work can be picked up again.",
-		f.RunID, f.Worker, age, orNone(f.ItemID))
+	d.log("REAPED %s (%s) — %s Its claim on %s is released and the work can be picked up again.",
+		f.RunID, f.Worker, ev.Why, orNone(f.ItemID))
 	return nil
+}
+
+// evidence is everything the control plane can honestly say about a run it is
+// closing on somebody else's behalf.
+func (d *Dispatcher) evidence(f beatFile) ledger.RunAbandoned {
+	last := f.BeatMS
+	if last == 0 {
+		last = f.StartedMS
+	}
+	cold := d.now().Sub(time.UnixMilli(last))
+	ev := ledger.RunAbandoned{
+		RunID: f.RunID, WorkerType: f.Worker, ItemID: f.ItemID,
+		LastSignMS: last, ColdMS: cold.Milliseconds(),
+		Workspace: f.Workspace, Envelope: "absent",
+	}
+
+	path := f.Envelope
+	if path == "" && f.RunID != "" {
+		path = d.envelopeGuess(f.RunID)
+	}
+	if path != "" {
+		if body, rerr := os.ReadFile(path); rerr == nil {
+			ev.Envelope = "written"
+			// Retained, so the claim can still be READ even though it will
+			// never be admitted. Discarding it would throw away the only
+			// account of what the agent thought it had done.
+			if sha, perr := d.Led.PutBlob(ledger.BlobEnvelope, body); perr == nil {
+				ev.EnvelopeSHA = sha
+			} else {
+				ev.Envelope = "unreadable"
+			}
+		} else if !os.IsNotExist(rerr) {
+			ev.Envelope = "unreadable"
+		}
+	}
+
+	how := "its heartbeat went cold"
+	if f.BeatMS == 0 {
+		how = "it never wrote a heartbeat"
+	}
+	switch ev.Envelope {
+	case "written":
+		ev.Why = fmt.Sprintf(
+			"The process waiting on this run is gone — %s and nothing has touched it for %s. The agent DID leave an envelope, which is retained and readable, but it was never admitted: an envelope is a claim, and nobody ran the declared checks against it. So what this run achieved is UNKNOWN rather than failed.",
+			how, cold.Round(time.Second))
+	case "unreadable":
+		ev.Why = fmt.Sprintf(
+			"The process waiting on this run is gone — %s and nothing has touched it for %s. Something was left where its result should be but could not be read, so what this run achieved is UNKNOWN.",
+			how, cold.Round(time.Second))
+	default:
+		ev.Why = fmt.Sprintf(
+			"The process waiting on this run is gone — %s and nothing has touched it for %s. No envelope was ever written, so the agent did not reach a result. What it changed on the way, if anything, is UNKNOWN.",
+			how, cold.Round(time.Second))
+	}
+	return ev
+}
+
+// envelopeGuess reconstructs where a run was told to write, for a run closed
+// without a heartbeat to say.
+func (d *Dispatcher) envelopeGuess(runID string) string {
+	if d.Cfg == nil {
+		return ""
+	}
+	tmpl := d.Cfg.Dispatch.WorkDirTemplate
+	if tmpl == "" || !strings.Contains(tmpl, "{{run_id}}") {
+		return envelopePath(d.Repo, runID)
+	}
+	dir := strings.ReplaceAll(tmpl, "{{run_id}}", runID)
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(d.Repo, dir)
+	}
+	return envelopePath(dir, runID)
 }
 
 func orNone(s string) string {

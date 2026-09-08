@@ -393,6 +393,9 @@ type recentRun struct {
 	Cost    string
 	Outcome string
 	Class   string
+	// Why is the recorded reason a run ended the way it did, when there is
+	// one. An outcome with no cause is a figure somebody has to go and chase.
+	Why string
 }
 
 func (s *Server) overview(*http.Request) (string, any, error) {
@@ -454,7 +457,14 @@ func (s *Server) overview(*http.Request) (string, any, error) {
 		rr := recentRun{Run: r, Cost: spend.Micros(r.CostMicros).String(),
 			When: time.Since(time.UnixMilli(r.StartedMS)).Round(time.Second).String() + " ago"}
 		limit := time.Duration(s.Cfg.Dispatch.TimeoutSeconds) * time.Second
+		if ab, ok, aerr := s.Led.Abandonment(r.RunID); aerr == nil && ok {
+			// Not a bare "unknown". The verdict is unknown, and the reason is
+			// not — so the reason is what a person reads.
+			rr.Why = ab.Why
+		}
 		switch {
+		case rr.Why != "":
+			rr.Outcome, rr.Class = "abandoned", "warn"
 		case r.StandingAt(s.now(), limit) == ledger.StandingWorking:
 			// An agent inside its timeout is working, not missing.
 			rr.Outcome, rr.Class = "running", "live"

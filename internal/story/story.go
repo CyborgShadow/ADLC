@@ -58,7 +58,11 @@ type Run struct {
 	Duration time.Duration
 	// Timeout is the dispatch budget this run was given, so an unfinished run
 	// can be told apart from one nobody will ever finish.
-	Timeout        time.Duration
+	Timeout time.Duration
+	// Abandoned is why this run was closed by something other than itself,
+	// when it was. Present means the evidence is on the record rather than in
+	// somebody's log file.
+	Abandoned      *ledger.RunAbandoned
 	PromptRetained bool
 	EnvRetained    bool
 	// Reproducible reports whether this run's decision can be re-derived. It
@@ -79,6 +83,9 @@ func OfRun(l *ledger.Ledger, cfg *config.Config, runID string) (*Run, error) {
 	s.Cost = spend.Micros(r.CostMicros)
 	if r.Finished() {
 		s.Duration = time.UnixMilli(r.FinishedMS).Sub(time.UnixMilli(r.StartedMS))
+	}
+	if ab, ok, aerr := l.Abandonment(runID); aerr == nil && ok {
+		s.Abandoned = &ab
 	}
 	s.PromptRetained = l.HasBlob(r.PromptSHA)
 	s.EnvRetained = l.HasBlob(r.EnvelopeSHA)
@@ -147,6 +154,11 @@ func headline(s *Run) string {
 	// Only when a timeout is declared. With nothing to measure against there is
 	// no evidence either way, and UNKNOWN is the honest answer rather than a
 	// cheerful guess that it is fine.
+	// Closed by the fleet rather than by itself, and the record says why. The
+	// verdict stays UNKNOWN — nobody can say what the agent did — but WHY nobody
+	// can say is known, and printing a bare "unknown" threw that away.
+	case s.Abandoned != nil:
+		return s.Abandoned.Why
 	case s.Timeout > 0 && r.StandingAt(time.Now(), s.Timeout) == ledger.StandingWorking:
 		return fmt.Sprintf("%s is running. It started %s ago and has not reported yet — an absent verdict here means not finished, not failed.",
 			who, time.Since(time.UnixMilli(r.StartedMS)).Round(time.Second))

@@ -299,7 +299,8 @@ with no price entry. Their cost is <b>unknown, not zero</b>, and is not in the f
   {{range .Recent}}<tr>
     <td class="mono"><a href="/run/{{.RunID}}">{{.RunID}}</a></td><td class="dim">{{.WorkerType}}</td>
     <td class="mono">{{if .ItemID}}<a href="/item/{{.ItemID}}">{{.ItemID}}</a>{{end}}</td>
-    <td><span class="pill {{.Class}}">{{.Outcome}}</span></td>
+    <td><span class="pill {{.Class}}">{{.Outcome}}</span>
+      {{if .Why}}<div class="dim small" style="margin-top:3px;max-width:52ch">{{.Why}}</div>{{end}}</td>
     <td class="num dim">{{.Usage.InputTokens}}</td><td class="num dim">{{.Usage.OutputTokens}}</td>
     <td class="num">{{.Cost}}</td><td class="dim">{{.When}}</td>
   </tr>{{else}}<tr><td colspan="8" class="dim">No runs yet.</td></tr>{{end}}

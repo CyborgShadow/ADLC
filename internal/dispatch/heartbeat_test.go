@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,5 +166,106 @@ func TestReapLeavesAJustStartedRunAlone(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("reaped %d, want 0 — a run seconds old has not had time to write a beat", n)
+	}
+}
+
+// Reaping records the EVIDENCE, not only the conclusion.
+//
+// The verdict is UNKNOWN because nobody can say what the agent did. But why
+// nobody can say is perfectly well known — the heartbeat went cold at a
+// particular moment, and the agent either did or did not leave a result behind.
+// An earlier version kept the conclusion and put the evidence in a log file, so
+// every surface showed a bare "unknown" that somebody then had to go and chase.
+func TestReapingRecordsWhyAndKeepsWhatWasLeftBehind(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	d := h.D
+
+	runID := "r-evidence-1"
+	if _, err := d.Led.Append("cli", ledger.KindRunStarted, runID, ledger.RunStarted{
+		RunID: runID, WorkerType: "researcher",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The agent got as far as writing an envelope; nobody ever read it.
+	ws := t.TempDir()
+	env := filepath.Join(ws, "envelope.json")
+	body := []byte(`{"envelope_version":"1","status":"pass"}`)
+	if err := os.WriteFile(env, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeBeat(t, d, beatFile{
+		RunID: runID, Worker: "researcher", ItemID: "S1", Workspace: ws, Envelope: env,
+		BeatMS: d.now().Add(-5 * time.Minute).UnixMilli(),
+	})
+
+	if _, err := d.Reap(); err != nil {
+		t.Fatal(err)
+	}
+
+	ab, ok, err := d.Led.Abandonment(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("nothing on the record says why this run was closed; the reason is only in a log")
+	}
+	if ab.Envelope != "written" {
+		t.Errorf("the agent left an envelope and the record says %q", ab.Envelope)
+	}
+	if ab.EnvelopeSHA == "" || !d.Led.HasBlob(ab.EnvelopeSHA) {
+		t.Error("the envelope was not retained, so the only account of what the agent thought it did is gone")
+	}
+	if ab.Workspace != ws {
+		t.Errorf("the workspace is %q; the tree is still on disk and should be findable", ab.Workspace)
+	}
+	if ab.ColdMS < int64(4*time.Minute/time.Millisecond) {
+		t.Errorf("cold for %dms, want about five minutes", ab.ColdMS)
+	}
+	if !strings.Contains(ab.Why, "never admitted") {
+		t.Errorf("the reason must say the envelope was not admitted, got %q", ab.Why)
+	}
+
+	// And the envelope is NOT admitted. An envelope is a claim; admitting one
+	// whose checks nobody ran is the single thing this control plane exists to
+	// refuse, and an agent dying does not make it safer.
+	r, err := d.Led.Run(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Verdict != "unknown" {
+		t.Fatalf("verdict %q — a found envelope must not become a pass", r.Verdict)
+	}
+	props, _ := d.Led.Proposals(runID, false, 10)
+	if len(props) > 0 {
+		t.Fatal("a reaped run proposed a transition; nobody ran its checks")
+	}
+}
+
+// The other half of the same evidence: an agent that never reached a result.
+// "Wrote an envelope nobody read" and "never got that far" are different facts
+// and the record has to tell them apart.
+func TestReapingSaysWhenNoEnvelopeWasEverWritten(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	d := h.D
+	runID := "r-evidence-2"
+	if _, err := d.Led.Append("cli", ledger.KindRunStarted, runID, ledger.RunStarted{
+		RunID: runID, WorkerType: "researcher",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	writeBeat(t, d, beatFile{
+		RunID: runID, Worker: "researcher",
+		Envelope: filepath.Join(t.TempDir(), "never-written.json"),
+		BeatMS:   d.now().Add(-5 * time.Minute).UnixMilli(),
+	})
+	if _, err := d.Reap(); err != nil {
+		t.Fatal(err)
+	}
+	ab, ok, _ := d.Led.Abandonment(runID)
+	if !ok || ab.Envelope != "absent" {
+		t.Fatalf("envelope recorded as %q, want absent", ab.Envelope)
+	}
+	if !strings.Contains(ab.Why, "did not reach a result") {
+		t.Errorf("the reason should say the agent never got to a result, got %q", ab.Why)
 	}
 }

@@ -48,6 +48,7 @@ const (
 	KindRunStarted         Kind = "run.started"
 	KindRunFinished        Kind = "run.finished"
 	KindRunActorCorrected  Kind = "run.actor_corrected"
+	KindRunAbandoned       Kind = "run.abandoned"
 	KindTransitionAdmitted Kind = "transition.admitted"
 	KindTransitionRefused  Kind = "transition.refused"
 	KindGateObserved       Kind = "gate.observed"
@@ -79,6 +80,7 @@ var KnownKinds = map[Kind]bool{
 	KindPromptPinned: true, KindWorkerRegistered: true, KindNoteRecorded: true,
 	KindItemProposed: true, KindLoopTicked: true, KindSegmentAdvanced: true,
 	KindConsoleAsked: true, KindConsoleReplied: true, KindConsoleActed: true,
+	KindRunAbandoned: true,
 }
 
 // ---------------------------------------------------------------- payloads
@@ -885,3 +887,40 @@ func (l *Ledger) LoopHealthAll() (map[string]LoopHealth, error) {
 
 // Path is where this ledger lives, absolute.
 func (l *Ledger) Path() string { return l.path }
+
+// RunAbandoned is why a run was closed by something other than itself.
+//
+// It exists because the verdict alone was not the whole of what was known. A
+// reaped run is recorded UNKNOWN, and that is right — nobody can say what the
+// agent did. But WHY nobody can say is not unknown at all: the heartbeat went
+// cold at a particular time, an envelope was or was not left behind, and the
+// workspace is still on disk. Recording the conclusion and discarding the
+// evidence produced a bare "unknown" on every surface, which is the shape of
+// figure this tool refuses everywhere else.
+//
+// A new kind rather than a field on run.finished: an existing kind's payload is
+// read by every build that came before this one, and widening it would change
+// what those builds are looking at.
+type RunAbandoned struct {
+	RunID      string `json:"run_id"`
+	WorkerType string `json:"worker_type"`
+	ItemID     string `json:"item_id,omitempty"`
+	// LastSignMS is the last moment anything was known to be waiting on this
+	// run — its final heartbeat, or its start if it never wrote one.
+	LastSignMS int64 `json:"last_sign_ms"`
+	// ColdMS is how long it had been silent when it was closed.
+	ColdMS int64 `json:"cold_ms"`
+	// Envelope is what was found where the agent was told to write its result:
+	// "written", "absent" or "unreadable". The distinction matters — an agent
+	// that wrote one got to a result nobody read, and one that did not never
+	// got there at all.
+	Envelope string `json:"envelope"`
+	// EnvelopeSHA identifies the envelope that was found, so the claim it
+	// carries can still be looked at even though it was never admitted.
+	EnvelopeSHA string `json:"envelope_sha,omitempty"`
+	// Workspace is where the run's tree still is, so its work can be examined
+	// rather than only mourned.
+	Workspace string `json:"workspace,omitempty"`
+	// Why is the evidence in a sentence, for whoever reads this a month later.
+	Why string `json:"why"`
+}

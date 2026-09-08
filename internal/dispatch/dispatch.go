@@ -454,6 +454,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	// item claimed by something that no longer exists.
 	hb := d.startBeat(beatFile{
 		RunID: runID, ItemID: c.Item.ID, LeaseKey: c.Key(), Worker: c.Worker,
+		Workspace: ws.Dir, Envelope: ws.EnvelopePath,
 	})
 	defer hb.done()
 

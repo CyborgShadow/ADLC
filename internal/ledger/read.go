@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -662,4 +663,28 @@ func (r Run) StandingAt(now time.Time, timeout time.Duration) Standing {
 		return StandingAbandoned
 	}
 	return StandingWorking
+}
+
+// Abandonment returns why a run was closed by something other than itself, or
+// false when it ended on its own.
+//
+// Read from the chain rather than from a projection column: this is evidence
+// about one run, asked for on one page, and a table for it would be a second
+// place the same fact could be wrong.
+func (l *Ledger) Abandonment(runID string) (RunAbandoned, bool, error) {
+	var payload []byte
+	err := l.db.QueryRow(
+		`SELECT payload FROM adlc_event WHERE kind=? AND subject=? ORDER BY seq DESC LIMIT 1`,
+		string(KindRunAbandoned), runID).Scan(&payload)
+	if err == sql.ErrNoRows {
+		return RunAbandoned{}, false, nil
+	}
+	if err != nil {
+		return RunAbandoned{}, false, err
+	}
+	var p RunAbandoned
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return RunAbandoned{}, false, err
+	}
+	return p, true, nil
 }
