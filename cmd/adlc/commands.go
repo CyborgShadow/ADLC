@@ -241,8 +241,15 @@ func cmdItem(e *env, args []string) int {
 			fmt.Println("  recent runs:")
 			for _, r := range runs {
 				verdict := r.Verdict
-				if !r.Finished() {
-					verdict = "UNKNOWN (started, no end recorded)"
+				switch r.StandingAt(nowUTC(), time.Duration(e.cfg.Dispatch.TimeoutSeconds)*time.Second) {
+				case ledger.StandingWorking:
+					// Inside its timeout. An agent that is working is not a run
+					// with a missing answer, and showing both the same way sent
+					// somebody hunting a fault in a fleet that was fine.
+					verdict = fmt.Sprintf("running (%s)",
+						nowUTC().Sub(time.UnixMilli(r.StartedMS)).Round(time.Second))
+				case ledger.StandingAbandoned:
+					verdict = "UNKNOWN (open past twice the timeout — no end will be recorded)"
 				}
 				fmt.Printf("    %-26s %-16s %s\n", r.RunID, r.WorkerType, verdict)
 			}
@@ -372,10 +379,16 @@ func cmdRun(e *env, args []string) int {
 		}
 		for _, r := range runs {
 			v := r.Verdict
-			if !r.Finished() {
-				v = "UNKNOWN"
+			// "Still working" and "nobody will record how this ended" both show
+			// up as an absent verdict, and printing UNKNOWN for both sent
+			// somebody looking for a fault in a fleet that was working.
+			switch r.StandingAt(nowUTC(), time.Duration(e.cfg.Dispatch.TimeoutSeconds)*time.Second) {
+			case ledger.StandingWorking:
+				v = "running"
+			case ledger.StandingAbandoned:
+				v = "ABANDONED"
 			}
-			fmt.Printf("%-26s %-16s %-14s %-8s %s\n", r.RunID, r.WorkerType, r.ItemID, v,
+			fmt.Printf("%-26s %-16s %-14s %-10s %s\n", r.RunID, r.WorkerType, r.ItemID, v,
 				time.UnixMilli(r.StartedMS).UTC().Format(time.RFC3339))
 		}
 		return exitOK

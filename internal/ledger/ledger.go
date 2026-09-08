@@ -299,6 +299,15 @@ type NoteRecorded struct {
 type Ledger struct {
 	db  *sql.DB
 	now func() time.Time
+	// OnAppend is called after a row has committed. It is how the fleet learns
+	// that something moved without waiting for a timer to come round again.
+	//
+	// A notification, not a mechanism: it carries no authority, it may be nil,
+	// and every decision it might prompt is re-derived from the record when it
+	// is acted on. A listener that never fires costs latency and nothing else,
+	// which is why the timers stay — a lane whose wake-up was missed is late,
+	// not stopped, and its idle ticks still prove it is alive.
+	OnAppend func(Event)
 }
 
 // Event is one row of the chain.
@@ -469,6 +478,13 @@ func (l *Ledger) Append(actor string, kind Kind, subject string, payload any) (E
 	}
 	if err := tx.Commit(); err != nil {
 		return Event{}, err
+	}
+	// After the commit, never before: a listener told about a row that then
+	// failed to land would act on something that did not happen. The hook must
+	// not block and must not write to this ledger — it exists to nudge, not to
+	// decide, and nothing about the record depends on it running at all.
+	if l.OnAppend != nil {
+		l.OnAppend(ev)
 	}
 	return ev, nil
 }

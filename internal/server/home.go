@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/CyborgShadow/ADLC/internal/console"
-	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // Home is the console, and almost nothing else.
@@ -85,10 +84,7 @@ func (s *Server) home(*http.Request) (string, any, error) {
 			row.Waited = s.turns.since(t.TurnID, s.now()).Round(time.Second).String()
 		}
 		for _, a := range t.Actions {
-			row.Actions = append(row.Actions, consoleActionRow{
-				ConsoleAction: a, Pressable: a.Outcome == ledger.ActionPending,
-				Human: console.ActionKind(a.Kind).Human(),
-			})
+			row.Actions = append(row.Actions, actionRow(a, "/"))
 		}
 		v.Turns = append(v.Turns, row)
 	}

@@ -23,6 +23,10 @@ type Scheduler struct {
 	Cfg *config.Config
 	// Grace multiplies a loop's cadence before its liveness is called stale.
 	Grace float64
+	// wake lets a state change bring every lane's next look forward. See
+	// wake.go: it is a nudge with no authority, and the cadences remain the
+	// floor, so a lane that misses one is late rather than stopped.
+	wake waker
 }
 
 // Enabled lists the loops that will actually fire, in firing order.
@@ -161,27 +165,30 @@ func (s *Scheduler) runLane(ctx context.Context, l config.LoopDecl) {
 		case <-time.After(time.Duration(l.OffsetSeconds) * time.Second):
 		}
 	}
-	s.D.log("LOOP %s started — every %ds, scope %s", l.Name, l.EverySeconds, l.Scope())
+	s.D.log("LOOP %s started — every %ds, scope %s (and immediately when something moves)", l.Name, l.EverySeconds, l.Scope())
 	for {
 		cur := s.Cfg.Loop(l.Name)
 		if cur == nil {
 			s.D.log("LOOP %s is no longer declared; stopping", l.Name)
 			return
 		}
+		// Taken BEFORE the fire. A state change that lands while this lane is
+		// running is a change it has not looked at, and a channel taken
+		// afterwards would have missed it.
+		wake := s.wake.chanOf()
+		started := time.Now()
 		if cur.Enabled {
 			if _, err := s.FireOnce(ctx, *cur); err != nil && ctx.Err() == nil {
 				s.D.log("LOOP %s error: %v", l.Name, err)
 			}
 		}
-		wait := time.Duration(cur.EverySeconds) * time.Second
-		if wait <= 0 {
-			wait = time.Minute
+		cadence := time.Duration(cur.EverySeconds) * time.Second
+		if cadence <= 0 {
+			cadence = time.Minute
 		}
-		select {
-		case <-ctx.Done():
+		if !s.waitTurn(ctx, wake, cadence, time.Since(started)) {
 			s.D.log("LOOP %s stopped", l.Name)
 			return
-		case <-time.After(wait):
 		}
 	}
 }

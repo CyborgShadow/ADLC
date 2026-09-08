@@ -86,18 +86,7 @@ const consoleDockHTML = `
           {{else if not .Replied}}<div class="body wait">This turn was interrupted and never answered.</div>
           {{else if .Failure}}<div class="body fail">The turn failed: {{.Failure}}</div>
           {{else}}<div class="body">{{.Reply}}</div>{{end}}
-          {{range .Actions}}<div class="pact {{if .Pressable}}{{else if eq .Outcome "executed"}}ran{{else}}no{{end}}">
-            <b>{{.Summary}}</b>
-            <div class="why">{{.Human}}{{if .Detail}} — {{.Detail}}{{end}}</div>
-            {{if .Pressable}}
-              <form method="post" action="/console/do">
-                <input type="hidden" name="action" value="{{.ID}}">
-                <input type="hidden" name="back" value="{{$.Dock.Here}}">
-                <button type="submit" name="press" value="yes">Do it</button>
-                <button type="submit" name="press" value="no" class="sec">No</button>
-              </form>
-            {{else}}<span class="pill {{verdictClass .Outcome}}">{{.Outcome}}</span>{{end}}
-          </div>{{end}}
+          {{range .Actions}}{{template "action" .}}{{end}}
         </div>
       {{else}}<div class="msg"><div class="body wait">Ask about anything on screen. Try “what needs me?”</div></div>{{end}}
     </div>
@@ -151,21 +140,7 @@ everything a lane produces. It can do nothing here the rest of the system would 
   {{else}}<div class="them">{{.Reply}}</div>{{end}}
 
   {{if .Actions}}<div class="acts">
-    {{range .Actions}}<div class="act">
-      <div class="what">
-        <b>{{.Summary}}</b>
-        {{if .Gated}}<span class="pill warn">yours to press</span>{{end}}
-        <div class="why">{{.Human}}{{if .Detail}} — {{.Detail}}{{end}}</div>
-      </div>
-      {{if .Pressable}}
-        <form method="post" action="/console/do">
-          <input type="hidden" name="action" value="{{.ID}}">
-          <input type="text" name="who" placeholder="your name" style="min-width:110px">
-          <button type="submit" name="press" value="yes">Do it</button>
-          <button type="submit" name="press" value="no" class="sec">Decline</button>
-        </form>
-      {{else}}<span class="pill {{verdictClass .Outcome}}">{{.Outcome}}</span>{{end}}
-    </div>{{end}}
+    {{range .Actions}}{{template "action" .}}{{end}}
   </div>{{end}}
 </div>{{else}}<div class="card dim">Nothing has been asked yet.</div>{{end}}
 </div>

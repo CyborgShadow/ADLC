@@ -83,7 +83,7 @@ var tmpl = template.Must(template.New("page").Funcs(funcs).Parse(strings.Join([]
 	homePageHTML, advancedPageHTML, endHTML,
 	// After endHTML: this one is its own template, not part of the page body,
 	// and a define nested inside another define is a parse error.
-	consoleDockHTML, fieldsHTML, liveHTML,
+	consoleDockHTML, fieldsHTML, liveHTML, actionHTML,
 }, "")))
 
 const pageHTML = `
@@ -192,7 +192,7 @@ max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
 ` + aboutCSS + consoleCSS + historyPageCSS + roadmapPageCSS +
 	itemPageCSS + gatesCSS + rolesPageCSS + configPageCSS + aboutDataCSS +
-	aboutMoveCSS + homePageCSS + liveCSS + `
+	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + `
 </style></head><body>
 <header>
   <h1>{{.Project}}</h1>
@@ -203,6 +203,12 @@ max-width:1220px;margin:24px auto 0}
 {{if .Flash}}<div class="banner{{if .FlashBad}} bad{{end}}">{{.Flash}}</div>{{end}}
 {{if .Attn.Tampered}}<div class="banner bad"><b>The ledger does not describe itself.</b>
 Do not act on anything on this page until that is explained. Run <span class="mono">adlc ledger verify</span>.</div>
+{{else if .Attn.NotDispatching}}<div class="banner bad"><b>Nothing is being dispatched.</b>
+This process is serving the dashboard and firing no lanes, so all {{.Attn.Lanes}} of them will stay
+at NEVER RUN however much work is waiting — approving something will not start it. That is a
+process that was started with <span class="mono">--no-dispatch</span>, not a fault in a lane.
+Restart it as <span class="mono">adlc serve</span> (which dispatches) or
+<span class="mono">adlc schedule run</span>.</div>
 {{else if .Attn.Any}}<div class="banner"><b>Waiting on you:</b>
 {{if .Attn.Questions}}{{plural .Attn.Questions "blocking question" "blocking questions"}}.{{end}}
 {{if .Attn.Approvals}}{{plural .Attn.Approvals "approval" "approvals"}}.{{end}}

@@ -148,6 +148,15 @@ type consoleActionRow struct {
 	Pressable bool
 	// Human is what this action is, in a person's words.
 	Human string
+	// What is what pressing it actually does, and what it costs if it is wrong.
+	What string
+	// Fields are its arguments — the thing it will be done TO — linked where
+	// they name something with a page, so it can be read before it is approved.
+	Fields []actField
+	// Verb and Decline label the two buttons with what they do.
+	Verb, Decline string
+	// Back is where pressing it returns to.
+	Back string
 }
 
 func (s *Server) consolePage(*http.Request) (string, any, error) {
@@ -165,14 +174,10 @@ func (s *Server) consolePage(*http.Request) (string, any, error) {
 			r.Waited = s.turns.since(t.TurnID, s.now()).Round(time.Second).String()
 		}
 		for _, a := range t.Actions {
-			p := a.Outcome == ledger.ActionPending
-			if p {
+			if a.Outcome == ledger.ActionPending {
 				pending++
 			}
-			r.Actions = append(r.Actions, consoleActionRow{
-				ConsoleAction: a, Pressable: p,
-				Human: console.ActionKind(a.Kind).Human(),
-			})
+			r.Actions = append(r.Actions, actionRow(a, "/console"))
 		}
 		rows = append(rows, r)
 	}
@@ -258,6 +263,11 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.turns.start(turnID, s.now())
+	// Opened HERE, before the redirect, and not inside the goroutine. The page
+	// that is about to load connects to this buffer immediately; a buffer that
+	// did not exist yet reads as a turn that has already finished, and the page
+	// says so — about a turn that has not started.
+	s.live.open(turnID)
 	go s.runTurn(sid, turnID, run)
 	redirect(w, r, back, "asked — the answer appears in the console when the turn finishes", false)
 }
@@ -271,8 +281,8 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runTurn(sid, turnID string, run dispatch.Runner) {
 	// Registered first so it runs LAST. The page reloads when the stream ends,
 	// and a reload that arrives before the reply is appended shows an empty
-	// answer to a question that was, in fact, answered.
-	s.live.open(turnID)
+	// answer to a question that was, in fact, answered. The buffer itself was
+	// opened by the handler, before this goroutine was scheduled.
 	defer s.live.finish(turnID)
 	defer s.turns.done(turnID)
 

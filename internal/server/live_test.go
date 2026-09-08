@@ -113,13 +113,21 @@ func TestStreamDecoder(t *testing.T) {
 			`"delta":{"type":"text_delta","text":"Hi"}}}`, "Hi"},
 		{`{"type":"stream_event","event":{"type":"content_block_delta","index":0,` +
 			`"delta":{"type":"text_delta","text":" there"}}}`, " there"},
-		// Once deltas have been seen the whole message is the same text again.
+		// Once deltas have been seen the whole message repeats the same prose.
 		{`{"type":"assistant","message":{"content":[{"type":"text","text":"Hi there"}]}}`, ""},
+		// A tool call is announced from the completed message, which is the only
+		// place its arguments are whole. The incremental events that carry it in
+		// pieces say nothing, because a name on its own is not progress.
 		{`{"type":"stream_event","event":{"type":"content_block_start","index":1,` +
-			`"content_block":{"type":"tool_use","name":"Read"}}}`, "\n· Read\n"},
-		// A tool's arguments arrive as split JSON and are noise, not progress.
+			`"content_block":{"type":"tool_use","name":"Read"}}}`, ""},
 		{`{"type":"stream_event","event":{"type":"content_block_delta","index":1,` +
 			`"delta":{"type":"input_json_delta","partial_json":"{\"file\":"}}}`, ""},
+		{`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read",` +
+			`"input":{"file_path":"internal/server/live.go"}}]}}`,
+			"\n· Read(internal/server/live.go)\n"},
+		// A per-request status event fires between every pair of tool calls. It
+		// is noise wearing the costume of progress.
+		{`{"type":"system","subtype":"status","status":"requesting"}`, ""},
 		{`{"type":"result","subtype":"success","result":"Hi there"}`, ""},
 		{`plain progress from some other agent`, "plain progress from some other agent\n"},
 		{`{"not":"an event this build knows"}`, ""},
@@ -131,9 +139,32 @@ func TestStreamDecoder(t *testing.T) {
 	}
 }
 
-// Without deltas the whole-message events ARE the progress, so they must not be
-// suppressed. A decoder that only worked with partial messages on would show
-// nothing at all for an agent that does not support them.
+// The argument is what makes a tool call worth showing. Eleven lines reading
+// "Bash" tell somebody nothing they did not already know.
+func TestStreamDecoderShowsWhatAToolWasCalledWith(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",` +
+			`"input":{"command":"go test ./..."}}]}}`, "\n· Bash(go test ./...)\n"},
+		// A heredoc would otherwise turn one call into thirty lines of progress.
+		{`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",` +
+			`"input":{"command":"cat <<EOF\nline one\nline two\nEOF"}}]}}`,
+			"\n· Bash(cat <<EOF line one line two EOF)\n"},
+		// A tool this build has never heard of still gets pointed at something.
+		{`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Whatsit",` +
+			`"input":{"target":"the thing"}}]}}`, "\n· Whatsit(the thing)\n"},
+		{`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Nullary",` +
+			`"input":{}}]}}`, "\n· Nullary\n"},
+	}
+	for i, c := range cases {
+		if got := (&streamDecoder{}).Line(c.in); got != c.want {
+			t.Errorf("case %d: got %q want %q", i, got, c.want)
+		}
+	}
+}
+
+// Without deltas the whole-message events ARE the progress, so their prose must
+// not be suppressed. A decoder that only worked with partial messages on would
+// show nothing at all for an agent that does not support them.
 func TestStreamDecoderWithoutPartials(t *testing.T) {
 	d := &streamDecoder{}
 	got := d.Line(`{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}`)
@@ -166,18 +197,22 @@ func TestConsoleCommandBeatsTheFleetRunner(t *testing.T) {
 	}
 }
 
-// A turn that is all tool calls and no prose produces no text deltas. The
-// whole-message events that follow it must still be suppressed, or every tool
-// call is announced twice — which is what a real turn did.
-func TestStreamDecoderSuppressesEchoesWithoutAnyText(t *testing.T) {
+// A tool call is announced exactly once, whichever way it arrives.
+//
+// There are two events for the same call — the incremental start and the
+// completed message — and an earlier version read both, so a turn that was all
+// tool work printed every step twice. Only the completed message is read now,
+// because only it carries what the tool was called with.
+func TestStreamDecoderAnnouncesAToolCallOnce(t *testing.T) {
 	d := &streamDecoder{}
 	if got := d.Line(`{"type":"stream_event","event":{"type":"content_block_start","index":0,` +
-		`"content_block":{"type":"tool_use","name":"Bash"}}}`); got != "\n· Bash\n" {
-		t.Fatalf("got %q", got)
+		`"content_block":{"type":"tool_use","name":"Bash"}}}`); got != "" {
+		t.Fatalf("the incremental start knows no arguments and should say nothing, got %q", got)
 	}
-	echo := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}`
-	if got := d.Line(echo); got != "" {
-		t.Fatalf("the same tool call was announced twice: %q", got)
+	whole := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",` +
+		`"input":{"command":"go build ./..."}}]}}`
+	if got := d.Line(whole); got != "\n· Bash(go build ./...)\n" {
+		t.Fatalf("got %q", got)
 	}
 }
 

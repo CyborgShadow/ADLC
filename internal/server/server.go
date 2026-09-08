@@ -47,6 +47,11 @@ type Server struct {
 	Runner dispatch.Runner
 	Log    func(string)
 	turns  turnState
+	// Dispatching says whether THIS process fires lanes. A dashboard that only
+	// reads the record and one that also runs the fleet look identical, and the
+	// difference is the whole answer to "why is nothing happening" — so it is
+	// stated on the page rather than left to be worked out.
+	Dispatching bool
 	// live holds the output of the turns currently running, so the page can
 	// show one as it happens. It is a view of work in flight and never a
 	// source of truth; see live.go.
@@ -182,7 +187,11 @@ type attention struct {
 	Approvals int
 	Blocked   int
 	DarkLoops int
-	Stuck     int
+	// Lanes is how many are declared and enabled, so the banner can say what is
+	// not firing rather than only that something is not.
+	Lanes          int
+	NotDispatching bool
+	Stuck          int
 	// ConsolePending are actions the console drafted and left for a person.
 	// They belong in the same count as everything else waiting on you: an
 	// action nobody presses is work the console believes it has handed over.
@@ -192,7 +201,8 @@ type attention struct {
 
 func (a attention) Any() bool {
 	return a.Questions > 0 || a.Approvals > 0 || a.Blocked > 0 ||
-		a.DarkLoops > 0 || a.Stuck > 0 || a.ConsolePending > 0 || a.Tampered
+		a.DarkLoops > 0 || a.Stuck > 0 || a.ConsolePending > 0 || a.Tampered ||
+		a.NotDispatching
 }
 
 func (s *Server) page(name string, fn func(*http.Request) (string, any, error)) http.HandlerFunc {
@@ -264,11 +274,22 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 	if s.Sched != nil {
 		if hs, err := s.Sched.Health(s.now()); err == nil {
 			for _, h := range hs {
-				if h.Enabled && !h.Fresh(s.now(), 3) {
+				if !h.Enabled {
+					continue
+				}
+				attn.Lanes++
+				if !h.Fresh(s.now(), 3) {
 					attn.DarkLoops++
 				}
 			}
 		}
+	}
+	// "Lanes are not firing" and "nobody in this process is firing them" are
+	// different facts, and only one of them is a fault. Reporting the first when
+	// the second is true sends somebody looking for a broken lane.
+	attn.NotDispatching = !s.Dispatching && attn.Lanes > 0
+	if attn.NotDispatching {
+		attn.DarkLoops = 0
 	}
 	// The nav has two shapes. On Home it is one way out and nothing else: most
 	// of what somebody wants is answered by asking, and a row of eleven tabs is
@@ -397,9 +418,13 @@ func (s *Server) overview(*http.Request) (string, any, error) {
 	for _, r := range runs {
 		rr := recentRun{Run: r, Cost: spend.Micros(r.CostMicros).String(),
 			When: time.Since(time.UnixMilli(r.StartedMS)).Round(time.Second).String() + " ago"}
+		limit := time.Duration(s.Cfg.Dispatch.TimeoutSeconds) * time.Second
 		switch {
+		case r.StandingAt(s.now(), limit) == ledger.StandingWorking:
+			// An agent inside its timeout is working, not missing.
+			rr.Outcome, rr.Class = "running", "live"
 		case !r.Finished():
-			rr.Outcome, rr.Class = "UNKNOWN — no end recorded", "warn"
+			rr.Outcome, rr.Class = "UNKNOWN — open past twice the timeout, so nobody will record how it ended", "warn"
 		case r.Verdict == "pass":
 			rr.Outcome, rr.Class = "pass", "ok"
 		case r.Verdict == "blocked":

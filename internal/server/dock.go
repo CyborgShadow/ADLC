@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CyborgShadow/ADLC/internal/console"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
@@ -27,20 +26,11 @@ const dockCookie = "adlc_console"
 // transcript is a page.
 const dockTurns = 6
 
-type dockAction struct {
-	ledger.ConsoleAction
-	Pressable bool
-	// Human is the action in a person's words. The machine name is what the
-	// agent writes and what the record keeps; nobody operating this should have
-	// to read it.
-	Human string
-}
-
 type dockTurn struct {
 	ledger.ConsoleTurn
 	Running bool
 	Waited  string
-	Actions []dockAction
+	Actions []consoleActionRow
 }
 
 type dockData struct {
@@ -97,14 +87,13 @@ func (s *Server) dock(r *http.Request) dockData {
 			row.Waited = s.turns.since(t.TurnID, s.now()).Round(time.Second).String()
 		}
 		for _, a := range t.Actions {
-			p := a.Outcome == ledger.ActionPending
-			if p {
+			if a.Outcome == ledger.ActionPending {
 				d.Pending++
 			}
-			row.Actions = append(row.Actions, dockAction{
-				ConsoleAction: a, Pressable: p,
-				Human: console.ActionKind(a.Kind).Human(),
-			})
+			// The same card as everywhere else, including here. A control that
+			// explains itself on one surface and not on another is a control
+			// somebody presses blind on whichever page they happened to be on.
+			row.Actions = append(row.Actions, actionRow(a, here))
 		}
 		d.Turns = append(d.Turns, row)
 	}

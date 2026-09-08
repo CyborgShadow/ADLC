@@ -623,3 +623,43 @@ func (l *Ledger) SegmentHistory(segmentID string) ([]Event, error) {
 	}
 	return out, nil
 }
+
+// Standing is where an unfinished run stands.
+//
+// "Still working" and "nobody will ever record how this ended" are different
+// facts, and both read as an absent verdict. Every surface showed them the same
+// way — UNKNOWN, no end recorded — so a healthy fleet mid-run looked exactly
+// like a fleet whose processes had been killed, and the only way to tell was to
+// go and look for the process yourself.
+//
+// The rule is elapsed time against the timeout that would have killed the run.
+// Inside it, the run is working. Past twice it, the run should have been killed
+// and its end recorded, and neither happened — so something is holding it open
+// that this control plane is no longer part of.
+type Standing string
+
+const (
+	// StandingDone is a run with a recorded end. Read its verdict.
+	StandingDone Standing = "done"
+	// StandingWorking is a run inside its timeout. Absent is not late.
+	StandingWorking Standing = "working"
+	// StandingAbandoned is a run open past twice its timeout. It is not a
+	// verdict of failure — nobody knows what it did, which is the point.
+	StandingAbandoned Standing = "abandoned"
+)
+
+// StandingAt reports where the run stands. A zero or negative timeout means
+// there is nothing to measure against, so an open run reads as working rather
+// than being called abandoned on no evidence.
+func (r Run) StandingAt(now time.Time, timeout time.Duration) Standing {
+	if r.Finished() {
+		return StandingDone
+	}
+	if timeout <= 0 {
+		return StandingWorking
+	}
+	if now.Sub(time.UnixMilli(r.StartedMS)) > 2*timeout {
+		return StandingAbandoned
+	}
+	return StandingWorking
+}

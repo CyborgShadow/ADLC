@@ -76,19 +76,7 @@ const homePageHTML = `
           {{else if .Failure}}<div class="say bad2">The turn failed: {{.Failure}}</div>
           {{else}}<div class="say">{{.Reply}}</div>{{end}}
 
-          {{range .Actions}}<div class="did {{if .Pressable}}todo2{{else if eq .Outcome "executed"}}{{else}}nope{{end}}">
-            <b>{{.Summary}}</b>
-            <div class="sub3">{{.Human}}{{if .Detail}} — {{.Detail}}{{end}}</div>
-            {{if .Pressable}}
-              <form method="post" action="/console/do">
-                <input type="hidden" name="action" value="{{.ID}}">
-                <input type="hidden" name="back" value="/">
-                <input type="text" name="who" placeholder="your name" style="min-width:110px">
-                <button type="submit" name="press" value="yes">Do it</button>
-                <button type="submit" name="press" value="no" class="sec">No thanks</button>
-              </form>
-            {{else}}<span class="pill {{verdictClass .Outcome}}">{{.Outcome}}</span>{{end}}
-          </div>{{end}}
+          {{range .Actions}}{{template "action" .}}{{end}}
         </div>
       {{else}}
         <div class="empty">

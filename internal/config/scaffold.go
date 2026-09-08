@@ -139,18 +139,24 @@ func standardLanes() []LoopDecl {
 	// short and cheap and the queue is where work piles up; lower where a run
 	// is long, expensive, or touches something real. The fleet-wide ceiling
 	// bounds the total regardless, so these are a shape rather than a sum.
+	//
+	// Cadences are short because a tick that finds nothing costs nothing. Only a
+	// DISPATCH spends money, and perTick with the fleet ceiling is what bounds
+	// that — so a long cadence buys no safety, it only delays. The entry lanes
+	// were half an hour apart and a new project sat there looking broken until
+	// somebody worked out that nothing was wrong except the wait.
 	order := []lane{
 		{"improve", CapImprove, 900, 1},
-		{"arbitrate", CapArbitrate, 300, 2},
+		{"arbitrate", CapArbitrate, 180, 2},
 		{"curate", CapCurate, 900, 1},
-		{"review", CapValidate, 240, 3},
-		{"judge", CapJudge, 180, 3},
-		{"test", CapTest, 180, 3},
-		{"build", CapImplement, 300, 2},
+		{"review", CapValidate, 120, 3},
+		{"judge", CapJudge, 90, 3},
+		{"test", CapTest, 90, 3},
+		{"build", CapImplement, 120, 2},
 		// Applies touch real machines one at a time, whatever the ceiling says.
-		{"apply", CapOperate, 600, 1},
-		{"plan", CapPlan, 1800, 1},
-		{"research", CapResearch, 1800, 1},
+		{"apply", CapOperate, 300, 1},
+		{"plan", CapPlan, 120, 1},
+		{"research", CapResearch, 120, 1},
 	}
 	out := make([]LoopDecl, 0, len(order))
 	for i, l := range order {
