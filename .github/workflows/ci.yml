@@ -25,8 +25,13 @@ jobs:
       # on its own is a step that can never fail.
       - name: gofmt
         run: |
-          out=$(gofmt -l ./cmd ./internal)
-          if [ -n "$out" ]; then echo "$out"; echo "::error::gofmt would rewrite these files"; exit 1; fi
+          out=197609gofmt -l ./cmd ./internal)
+          if [ -n "" ]; then
+            echo ""
+            gofmt -d ./cmd ./internal
+            echo "::error::gofmt would rewrite these files"
+            exit 1
+          fi
 
       - name: vet
         run: go vet ./...
