@@ -3,6 +3,7 @@ package ledger
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -341,7 +342,56 @@ func TestAMigratedTableIsNotTampering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep2.Verdict != VerdictTampered {
-		t.Fatal("a projection edited behind the chain's back must still be caught")
+	// Caught, and named as what it is. A projection edited behind the chain's
+	// back and an upgrade that derives a row differently are indistinguishable
+	// from here, so the verdict reports the disagreement and names both causes
+	// rather than accusing anyone of one of them.
+	if rep2.Verdict != VerdictStale {
+		t.Fatalf("a projection edited behind the chain's back must still be caught, got %s", rep2.Verdict)
+	}
+	if rep2.Failed() {
+		t.Error("the chain is intact, so this is not a hard stop — the record is not in doubt, one derived table is")
+	}
+	if len(rep2.Findings) == 0 || !strings.Contains(rep2.Findings[0], "adlc_segment") {
+		t.Errorf("the finding must name the table that disagrees: %v", rep2.Findings)
+	}
+	if !strings.Contains(rep2.Findings[0], "rebuild") {
+		t.Errorf("the finding must say how to fix it: %v", rep2.Findings)
+	}
+}
+
+// TestRebuildRestoresAProjectionFromTheChain is the other half: the fix has to
+// work, or naming it in the finding is a promise the tool does not keep.
+func TestRebuildRestoresAProjectionFromTheChain(t *testing.T) {
+	l := open(t)
+	if _, err := l.Append("pm", KindSegmentCreated, "S1", SegmentCreated{
+		ID: "S1", Title: "Foundation", Brief: "do the thing", TargetOpen: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := l.db.Exec(`UPDATE adlc_segment SET brief='something else' WHERE id='S1'`); err != nil {
+		t.Fatal(err)
+	}
+	if rep, _ := l.Verify(); rep.Verdict != VerdictStale {
+		t.Fatalf("precondition: want a stale projection, got %s", rep.Verdict)
+	}
+	tables, events, err := l.Rebuild()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tables == 0 || events == 0 {
+		t.Fatalf("rebuild reported doing nothing: %d table(s), %d event(s)", tables, events)
+	}
+	rep, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Verdict != VerdictIntact {
+		t.Fatalf("after a rebuild the projections must agree with the chain, got %s: %v", rep.Verdict, rep.Findings)
+	}
+	// And the chain itself was never touched.
+	if _, err := l.db.Exec(`DELETE FROM adlc_event WHERE seq=1`); err == nil {
+		t.Error("the append-only guards must survive a rebuild")
 	}
 }

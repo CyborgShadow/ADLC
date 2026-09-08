@@ -35,6 +35,23 @@ const (
 	// VerdictTampered means the record does not describe itself. This is the only
 	// verdict that accuses anyone.
 	VerdictTampered Verdict = "TAMPERED"
+	// VerdictStale means the chain is intact and the derived tables do not match
+	// a replay of it.
+	//
+	// Two things produce that, and from outside they are indistinguishable: an
+	// upgrade changed how a row is derived, or something wrote to a projection
+	// without going through the chain. So this verdict deliberately does not
+	// claim to know which — it reports what was observed and names both causes.
+	//
+	// It is separate from TAMPERED for two reasons. The first is that calling it
+	// tampering asserts a cause the check cannot establish, and it would fire on
+	// every release that changes a projection; an alarm that goes off on routine
+	// upgrades is one people learn to ignore, which costs exactly the one time
+	// it was real. The second is that the consequence is genuinely different: a
+	// broken chain means history is unaccounted for, while a wrong projection
+	// means a cache is wrong and `adlc ledger rebuild` restores it from the
+	// record that was never in doubt.
+	VerdictStale Verdict = "STALE PROJECTION"
 )
 
 // Tier separates the two questions.
@@ -42,6 +59,9 @@ type Tier string
 
 const (
 	TierIntegrity Tier = "integrity"
+	// TierDerived covers the tables rebuilt from the chain. A disagreement here
+	// says the deriving code changed, not that the record did.
+	TierDerived   Tier = "derived"
 	TierKnowledge Tier = "knowledge"
 )
 
@@ -64,6 +84,10 @@ type Report struct {
 }
 
 // Failed reports whether the caller should treat this as a hard stop.
+//
+// A stale projection is not one. The chain is the record and it is intact, so
+// the work can carry on; what is wrong is a derived table, and it is fixable
+// with one command.
 func (r *Report) Failed() bool { return r.Verdict == VerdictTampered }
 
 // Verify walks the chain and answers both questions.
@@ -77,8 +101,13 @@ func (l *Ledger) Verify() (*Report, error) {
 		switch tier {
 		case TierIntegrity:
 			rep.Verdict = VerdictTampered
+		case TierDerived:
+			// Never downgrades a real integrity failure.
+			if rep.Verdict == VerdictIntact || rep.Verdict == VerdictUnknown {
+				rep.Verdict = VerdictStale
+			}
 		case TierKnowledge:
-			if rep.Verdict != VerdictTampered {
+			if rep.Verdict == VerdictIntact {
 				rep.Verdict = VerdictUnknown
 			}
 		}
@@ -172,10 +201,11 @@ func (l *Ledger) Verify() (*Report, error) {
 	add("blob_integrity", TierIntegrity, badBlobs == 0,
 		fmt.Sprintf("%d retained prompt/envelope blob(s), %d whose contents no longer hash to their own address", totalBlobs, badBlobs))
 
-	add("projection_replay", TierIntegrity, len(diffs) == 0,
+	add("projection_replay", TierDerived, len(diffs) == 0,
 		fmt.Sprintf("%d projection table(s) disagree with a replay of the chain%s", len(diffs), listSuffix(diffs)))
 	for _, d := range diffs {
-		rep.Findings = append(rep.Findings, "projection "+d+" does not match a replay of the chain")
+		rep.Findings = append(rep.Findings, fmt.Sprintf(
+			"projection %s does not match a replay of the chain. The chain itself passed every integrity check, so the record is not in doubt — but this table is not what the record says it should be. Either an upgrade changed how these rows are derived, or something wrote to this table without going through the chain. `adlc ledger rebuild` re-derives it from the chain; if you were not expecting this, find out which of the two it was first.", d))
 	}
 
 	// --- knowledge: kinds this build cannot interpret.

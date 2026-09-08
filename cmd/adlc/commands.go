@@ -658,7 +658,7 @@ func cmdReport(e *env, args []string) int {
 
 func cmdLedger(e *env, args []string) int {
 	if len(args) == 0 {
-		return fail("ledger needs a subcommand: verify | events | head")
+		return fail("ledger needs a subcommand: verify | rebuild | events | head")
 	}
 	switch args[0] {
 	case "verify":
@@ -676,6 +676,28 @@ func cmdLedger(e *env, args []string) int {
 			return exitTampered
 		case ledger.VerdictUnknown:
 			return exitLedgerUnknown
+		case ledger.VerdictStale:
+			return exitStaleProjection
+		}
+		return exitOK
+
+	case "rebuild":
+		// Deliberately not automatic. Re-deriving the projections silently on
+		// startup would hide the fact that an upgrade changed how a row is
+		// computed, and that is worth somebody knowing once.
+		tables, events, err := e.led.Rebuild()
+		if err != nil {
+			return fail("%v", err)
+		}
+		fmt.Printf("rebuilt %d projection table(s) from %d event(s)\n", tables, events)
+		rep, err := e.led.Verify()
+		if err != nil {
+			return fail("%v", err)
+		}
+		fmt.Printf("ledger is now %s\n", rep.Verdict)
+		if rep.Verdict != ledger.VerdictIntact {
+			printVerify(rep)
+			return exitStaleProjection
 		}
 		return exitOK
 

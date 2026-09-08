@@ -32,6 +32,9 @@ const (
 	exitLedgerUnknown = 5
 	exitGateRed       = 6
 	exitGateUnknown   = 7
+	// exitStaleProjection: the chain is intact and the derived tables were
+	// written by a different build. `adlc ledger rebuild` fixes it.
+	exitStaleProjection = 8
 )
 
 type env struct {
@@ -109,6 +112,8 @@ func run(args []string) int {
 		return withEnv(rest, cmdServe)
 	case "schedule":
 		return withEnv(rest, cmdSchedule)
+	case "config":
+		return cmdConfig(rest)
 	}
 	fmt.Fprintf(os.Stderr, "adlc: unknown command %q\n\n", cmd)
 	usage()
