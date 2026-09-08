@@ -18,8 +18,10 @@ padding:6px 14px;font-size:13px;color:var(--ink);display:flex;gap:7px;align-item
 display:flex;flex-direction:column;gap:14px}
 .chat .empty{color:var(--dim);padding:26px 18px;text-align:center;font-size:14px}
 .chat .empty .eg{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px}
-.chat .empty .eg span{background:#101619;border:1px solid var(--line);border-radius:14px;
-padding:5px 12px;font-size:13px;color:var(--ink)}
+.chat .empty .eg form{margin:0}
+.chat .empty .eg button{background:#101619;border:1px solid var(--line);border-radius:14px;
+padding:6px 13px;font-size:13px;color:var(--ink);font-weight:400;cursor:pointer}
+.chat .empty .eg button:hover{border-color:var(--accent);color:var(--accent);filter:none}
 .bubble .who3{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
 margin-bottom:4px}
 .bubble .say{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.6}
@@ -91,12 +93,13 @@ const homePageHTML = `
         </div>
       {{else}}
         <div class="empty">
-          Nothing has been asked yet.
+          Nothing has been asked yet. Try one of these, or write your own below.
           <div class="eg">
-            <span>what needs me right now?</span>
-            <span>what is the fleet working on?</span>
-            <span>start work on …</span>
-            <span>why is nothing moving?</span>
+            {{range .Examples}}<form method="post" action="/console/ask">
+              <input type="hidden" name="text" value="{{.}}">
+              <input type="hidden" name="back" value="/">
+              <button type="submit">{{.}}</button>
+            </form>{{end}}
           </div>
         </div>
       {{end}}

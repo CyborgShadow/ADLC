@@ -42,6 +42,9 @@ type homeView struct {
 	Quiet   bool
 	Vocab   []console.HumanAction
 	Project string
+	// Examples are complete questions rather than fragments, because each one
+	// is a button that asks it — half a sentence cannot be submitted.
+	Examples []string
 }
 
 func (s *Server) home(*http.Request) (string, any, error) {
@@ -51,6 +54,12 @@ func (s *Server) home(*http.Request) (string, any, error) {
 		Worker:    s.Cfg.Console.Worker,
 		Vocab:     console.HumanVocabulary(s.Cfg.Console.Authority),
 		Project:   s.Cfg.Project,
+		Examples: []string{
+			"What needs me right now?",
+			"What is the fleet working on?",
+			"Why is nothing moving?",
+			"What has this cost so far?",
+		},
 	}
 	if !s.Cfg.Console.Enabled {
 		v.Blocked = "The console is off in this project's config. Turn it on under Advanced → Config, " +
