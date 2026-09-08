@@ -17,7 +17,7 @@ Read the item's own history before you write anything:
 
 ```
 adlc item show {{work_item_id}}
-adlc history --item {{work_item_id}}
+adlc report segment {{segment_id}}
 ```
 
 That shows every state it passed through, every run against it, and — the part worth

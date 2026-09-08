@@ -2,50 +2,92 @@
 
 Fifteen minutes from nothing to a fleet building something.
 
-## 1. Install and initialise
+## 1. Install
 
 ```bash
 go install github.com/CyborgShadow/ADLC/cmd/adlc@latest
 cd /path/to/your/project
 ```
 
-Copy a config to start from. There are two in the repository: `adlc.json` for a Go codebase, and
-`examples/infra.adlc.json` for provisioning and hardening work.
+## 2. Set it up by answering questions
+
+The repository ships four Claude Code skills in `.claude/skills/`. Copy them into the project
+where `adlc.json` will live and `adlc-setup` runs the setup as an interview: it reads your
+repository first, asks what it could not work out, and then runs `adlc config init` for you.
 
 ```bash
-curl -O https://raw.githubusercontent.com/CyborgShadow/ADLC/main/adlc.json
-mkdir agents && cd agents
-# copy the prompt files from the repository's agents/ directory
+mkdir -p .claude/skills
+cp -r /path/to/ADLC/.claude/skills/adlc-* .claude/skills/
 ```
 
-Then:
+Then say what you want — "set up adlc here" — and the skill is picked up from its description.
+There is nothing to register.
+
+| Skill | What it is for |
+|---|---|
+| `adlc-setup` | Generates and validates `adlc.json`, then creates the ledger |
+| `adlc-deliverable` | Turns a goal into a brief a researcher can work from, and registers it |
+| `adlc-role` | Adds a role: the worker declaration, the routing entry and the prompt file together |
+| `adlc-triage` | Read-only. Says what is blocked, what is waiting on you, which lanes have stopped |
+
+The skills never hand-assemble JSON that `adlc` could generate and validate itself, and they stop
+at the first command the CLI refuses. `.claude/skills/README.md` covers copying them to
+`~/.claude/skills/` so they are available in every project rather than one.
+
+## 3. Or set it up with flags
+
+`adlc config init` is the same path without the conversation.
 
 ```bash
-adlc init
+adlc config init \
+  -project "your project" \
+  -source-root src -source-root cmd \
+  -check 'test:go_test_json:go test -json ./...' \
+  -check 'lint:output_empty:gofmt -l ./src' \
+  -agent-command 'claude -p --dangerously-skip-permissions @{{prompt}}' \
+  -console act
 ```
 
-That creates `.adlc/ledger.db` and registers the roles your config declares. It prints what it
-found, including the auto-apply threshold, so you can see immediately how much the fleet is
-allowed to do unattended.
+A check is `id:verdict:command`. A verdict rule that reads parameters takes them in brackets after
+its name, and two parameters are separated by a semicolon:
 
-## 2. Point it at your toolchain
-
-Open `adlc.json` and edit `source_roots` and `checks` so they describe your project rather than
-this one. A check is a command, the channel its verdict is read from, and the lifecycle edges it
-gates:
-
-```json
-{
-  "id": "test",
-  "command": ["npm", "test", "--", "--reporter=json"],
-  "verdict": "count_min",
-  "count_pattern": "\"numTotalTests\":(\\d+)",
-  "min_count": 1,
-  "required_for": ["in_progress->ready_for_testing", "testing->ready_for_review"]
-}
+```
+tests:count_min[count_pattern="numTotalTests":(\d+)]:npm test
+plan:exit_in[allowed_exits=0,2]:terraform plan -detailed-exitcode
+lint:output_matches[expect_pattern=^0 problems]:npx eslint .
 ```
 
-Check it works before you rely on it:
+At least one check is required — a gate with no checks reports green over nothing. The other flags
+are `-agents` (where prompt files live, default `agents`), `-trunk` (the branch the merge queue
+lands on, default `main`), `-auto-apply-max` (the widest blast radius applied with no person,
+default `none`), `-console` (`off`, `propose`, `act` or `full`) and `-force` to overwrite an
+existing config.
+
+What comes out is a complete roster: one role per capability, the generalists, the seven
+engineering disciplines, ten lanes staggered so no two fire on the same second, and the routing
+entries that make each area reachable. Every value is editable afterwards.
+
+Hand-writing `adlc.json` is still possible and is how the two configs in this repository were
+made — `adlc.json` for a Go codebase, `examples/infra.adlc.json` for provisioning work. It is not
+the recommended start. A hand-written config fails in one of two ways: it is refused at load with
+a message about a field, or it loads and then quietly does nothing because a capability has no
+role or a role has no lane.
+
+Then check it and create the ledger:
+
+```bash
+adlc config check     # what is declared, and whether the loader accepts it
+adlc init             # creates .adlc/ledger.db and registers the roles
+```
+
+`config check` prints the counts and the two settings that decide how much the fleet does
+unattended — the auto-apply radius and the console's authority. `-quiet` prints nothing and
+answers with the exit code, which is what to run in CI.
+
+The generated config names prompt files that do not exist yet. Copy them from this repository's
+`agents/` directory; `adlc prompt list` says which are missing.
+
+## 4. Check the gate before you rely on it
 
 ```bash
 adlc gate run
@@ -54,7 +96,7 @@ adlc gate run
 This runs every declared check right here and prints what it observed. If a tool is missing you
 get `UNKNOWN` rather than a pass — fix that now, because `UNKNOWN` satisfies nothing later.
 
-## 3. Set the agent command
+## 5. Set the agent command
 
 ```json
 "dispatch": {
@@ -72,7 +114,17 @@ so every path in it must be absolute. And the envelope is read from the file at 
 Any process works: a coding CLI, a shell script wrapping an HTTP API, anything that can read a
 prompt and write a JSON file.
 
-## 4. Set your prices
+## 6. Confirm the prices
+
+`config init` writes a price table rather than an empty one, so a fleet reports what it is
+spending from the first run. Those are list prices as of early 2026 and they are yours to
+confirm: providers change rates, and a cost report is only worth reading if somebody checked the
+numbers behind it once.
+
+Every cost figure carries where its rate came from. `configured` means your own table priced it,
+`default` means the table that shipped in the binary did, and `unpriced` means neither — cost
+unknown, which is not the same as zero. The Config page marks a project still running entirely on
+defaults, and per-model rates are editable there as dollars per million tokens.
 
 ```json
 "budget": {
@@ -85,11 +137,13 @@ prompt and write a JSON file.
 }
 ```
 
-The table ships empty on purpose. With no entry, runs report `UNPRICED` — cost unknown, not zero
-— and the dashboard says so rather than printing `$0.00` over real spend. Fill it in before
-running unattended, or the cap can never be reached.
+The fallback is per model, not per table. Pricing two models and forgetting a third leaves your
+two figures alone and prices the third from the defaults; a model in neither table stays
+`UNPRICED` rather than reporting as free.
 
-## 5. Describe something you want
+## 7. Describe something you want
+
+`adlc-deliverable` conducts this as an interview. The command underneath it is:
 
 ```bash
 adlc -actor you segment create \
@@ -104,7 +158,7 @@ adlc -actor you segment create \
 — without it the deliverable is hand-filled and no planner runs against it. `-why` is what shows
 up months later when somebody asks what a particular run was for.
 
-## 6. Start the fleet
+## 8. Start the fleet
 
 ```bash
 adlc schedule run
@@ -134,7 +188,22 @@ Watch it on the Roadmap and Overview pages. If an agent hits something ambiguous
 asks — the Questions page shows the question with the agent's own recommendation, and answering
 it unblocks the item.
 
-## 7. Stop it
+## 9. Talk to it
+
+If you set `-console` to anything but `off`, a panel rides on every dashboard page and the
+Console page holds the whole conversation. Ask it what is happening, or tell it what you want, and
+it answers in prose and proposes actions with a control beside each one.
+
+`console.authority` decides how many of those it presses itself. At `propose` it executes nothing.
+At `act` it does what the control plane could have done on its own and only drafts the three
+things a person owns — signing off an idea, answering a blocking question, approving something
+irreversible. At `full` it presses those too, and the fleet has no human checkpoint left in it.
+Start at `propose` or `act`; the setting is on the Config page and takes effect on the next turn.
+
+Every turn is a run: it is dispatched as a declared worker, its prompt is retained, and what it
+did is on the ledger under the console's own name rather than yours.
+
+## 10. Stop it
 
 Ctrl+C. Each lane finishes the dispatch it is in and exits. Nothing is held in memory — every
 outcome is already on the ledger — so starting it again resumes exactly where it was.
@@ -146,6 +215,8 @@ adlc dispatch plan       # what would be picked next, in order, and why
 adlc schedule status     # which lanes are live, stale, or have never fired
 adlc report fleet
 ```
+
+Or ask `adlc-triage`, which runs those and reads the answers back in plain language.
 
 The most common causes, in order of likelihood:
 

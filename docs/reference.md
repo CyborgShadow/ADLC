@@ -16,6 +16,37 @@ adlc [global flags] <command> [args]
 
 Set `-actor` to your name for anything you do by hand. It is what the record shows later.
 
+## config — writing and checking `adlc.json`
+
+```bash
+adlc config init [-project "…"] [-source-root dir]… [-check 'id:verdict:command']…
+                 [-agent-command "…"] [-agents agents] [-trunk main]
+                 [-auto-apply-max none|host|fleet|region|global]
+                 [-console off|propose|act|full] [-force]
+adlc config check [-quiet]
+adlc config show
+```
+
+`init` generates a complete config from a handful of answers: the standard roster, the lanes, the
+routing entries, the default price table and the mandatory clauses. `-source-root` and `-check`
+are repeatable. At least one check is required — a gate with no checks reports green over
+nothing. `-force` overwrites an existing config and destroys any edits in it.
+
+A check is `id:verdict:command`. A verdict rule that takes parameters carries them in brackets,
+two of them separated by a semicolon:
+
+```
+tests:count_min[count_pattern="numTotalTests":(\d+)]:npm test
+plan:exit_in[allowed_exits=0,2]:terraform plan -detailed-exitcode
+lint:output_matches[expect_pattern=^0 problems]:npx eslint .
+scan:count_min[count_pattern=([0-9]+) rules;min_count=200]:scripts/scan.sh
+```
+
+`check` loads the config with the same loader a running fleet uses and prints what is declared,
+including the auto-apply radius and what this project's console authority actually permits.
+`-quiet` prints nothing and answers with the exit code. `show` prints the effective config with
+every default filled in.
+
 ## init
 
 ```bash
@@ -93,8 +124,8 @@ adlc transition table
 adlc transition propose -item S1-001 -to ready_for_testing [-run …] [-worker …] [-pm] [-envelope path] [-reason "…"]
 ```
 
-`table` prints all 35 edges with who may propose each and what must be true. Everything not on it
-is refused.
+`table` prints every edge in the authority with who may propose it and what must be true.
+Everything not on the table is refused with `no_such_edge`.
 
 `propose` is the manual path; the dispatcher uses the same authority.
 
@@ -113,12 +144,15 @@ to be happening.
 
 ```bash
 adlc schedule run [-serve] [-addr 127.0.0.1:8099]
-adlc schedule once -loop verify
+adlc schedule once -loop judge
 adlc schedule status
 ```
 
-`run` starts every declared lane on its cadence, plus the dashboard. `status` reports derived
-liveness: `live`, `STALE`, `NEVER RUN`, `disabled`.
+`run` starts every declared lane on its cadence, plus the built-in merge lane and the dashboard.
+`status` reports derived liveness: `live`, `STALE`, `NEVER RUN`, `disabled`.
+
+`once` fires one lane named in the config. The merge lane is not declared there, so it has no name
+to pass here; `schedule run` is what drives it.
 
 ## question
 
@@ -162,11 +196,15 @@ adlc report segment S1
 
 ```bash
 adlc ledger verify
+adlc ledger rebuild
 adlc ledger events [-from 1] [-limit 40] [-kind run.started]
 adlc ledger head
 ```
 
-`verify` exits 3 on `TAMPERED` and 5 on `UNKNOWN`.
+`verify` exits 3 on `TAMPERED`, 5 on `UNKNOWN` and 8 on `STALE PROJECTION`.
+
+`rebuild` re-derives every projection table from the chain and verifies afterwards. It touches
+nothing in the chain, and it is the recovery for `STALE PROJECTION` and for nothing else.
 
 ## prompt
 
@@ -199,9 +237,11 @@ Loopback only. A non-loopback or empty host is refused with the reason.
 | 5 | the ledger is **UNKNOWN** to this build — upgrade the binary; the chain is fine |
 | 6 | the gate is **RED** |
 | 7 | the gate **could not be run** — which is not a pass |
+| 8 | the ledger's **projections are stale** — the chain is fine; run `adlc ledger rebuild` |
 
-3 and 5 are separate deliberately. A binary too old to read part of a record has not found
-tampering, and a detector that accuses at its own obsolescence gets ignored.
+3, 5 and 8 are separate deliberately. A binary too old to read part of a record has not found
+tampering, a derived table written by a previous build has not either, and a detector that
+accuses at its own obsolescence gets ignored.
 
 ## Environment given to an agent
 

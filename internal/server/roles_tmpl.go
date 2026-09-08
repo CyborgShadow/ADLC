@@ -13,18 +13,19 @@ package server
 
 const rolesPageCSS = `
 .roles{display:grid;grid-template-columns:290px minmax(0,1fr);gap:18px;align-items:start}
-.rail{display:flex;flex-direction:column;gap:14px;position:sticky;top:62px;max-height:calc(100vh - 84px);overflow-y:auto}
-.rail .lay .lh{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);
+.rolerail{display:flex;flex-direction:column;gap:14px;position:sticky;top:62px;max-height:calc(100vh - 84px);overflow-y:auto}
+.rolerail .lay{flex:none}
+.rolerail .lay .lh{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);
 font-weight:600;margin:0 0 5px 2px}
-.rail .lay .lh small{display:block;text-transform:none;letter-spacing:0;font-weight:400;
+.rolerail .lay .lh small{display:block;text-transform:none;letter-spacing:0;font-weight:400;
 font-size:12px;color:var(--dim);opacity:.8;margin-top:2px}
-.rail a.rrole{display:block;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--line);
+.rolerail a.rrole{display:block;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--line);
 border-radius:4px;padding:8px 11px;margin-bottom:5px;color:var(--ink)}
-.rail a.rrole:hover{border-color:var(--accent);text-decoration:none}
-.rail a.rrole.on{border-left-color:var(--accent);background:#182225}
-.rail a.rrole .rt{font-weight:600;font-family:ui-monospace,Consolas,monospace;font-size:13px}
-.rail a.rrole .rd{color:var(--dim);font-size:12px;line-height:1.4;margin-top:2px}
-.rail a.rrole .rm{color:var(--dim);font-size:11px;font-family:ui-monospace,Consolas,monospace;margin-top:4px}
+.rolerail a.rrole:hover{border-color:var(--accent);text-decoration:none}
+.rolerail a.rrole.on{border-left-color:var(--accent);background:#182225}
+.rolerail a.rrole .rt{font-weight:600;font-family:ui-monospace,Consolas,monospace;font-size:13px}
+.rolerail a.rrole .rd{color:var(--dim);font-size:12px;line-height:1.4;margin-top:2px}
+.rolerail a.rrole .rm{color:var(--dim);font-size:11px;font-family:ui-monospace,Consolas,monospace;margin-top:4px}
 .panel{min-width:0}
 .panel .hd .sub{font-weight:400;color:var(--dim);font-size:12px;margin-left:8px}
 .facts{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
@@ -37,7 +38,7 @@ details.asm{background:var(--card);border:1px solid var(--line);border-radius:4p
 details.asm summary{cursor:pointer;font-weight:600;font-size:13px}
 details.asm summary span{font-weight:400;color:var(--dim);margin-left:6px}
 details.asm pre{margin-top:10px}
-@media (max-width:860px){.roles{grid-template-columns:1fr}.rail{position:static;max-height:none}}
+@media (max-width:860px){.roles{grid-template-columns:1fr}.rolerail{position:static;max-height:none}}
 `
 
 const rolesPageHTML = `
@@ -58,7 +59,7 @@ That is counted from the registry, not inferred from silence — a worker that n
 saying so, so its absence has to be computed from outside.</div>{{end}}
 
 <div class="roles">
-  <div class="rail">
+  <div class="rolerail">
   {{range .Layers}}<div class="lay">
     <div class="lh">{{.Label}}<small>{{.What}}</small></div>
     {{range .Roles}}<a class="rrole{{if .Selected}} on{{end}}" href="/roles/{{.Type}}">

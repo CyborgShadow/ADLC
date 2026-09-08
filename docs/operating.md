@@ -3,7 +3,7 @@
 ## Running it
 
 ```bash
-adlc schedule run              # every lane on its cadence, plus the dashboard
+adlc schedule run              # every lane on its cadence, the merge queue, and the dashboard
 adlc schedule run -serve=false # lanes only
 adlc serve                     # dashboard only
 ```
@@ -17,7 +17,11 @@ A process killed hard leaves a run with a start and no end. That shows as `UNKNO
 pass — and the item is untouched, so the next pass picks it up again. Its lease expires on its
 own TTL, so a dead run cannot hold a resource forever.
 
-## The two things it needs you for
+## The three things it needs you for
+
+**Sign-off.** A deliverable sits as a `theory` until you agree it is worth pursuing. Research,
+decomposition and plan validation all cost runs, so the pipeline stops in front of them rather
+than after them. It is one click on the Roadmap page, or `adlc segment advance`.
 
 **Questions.** An agent that hits something it cannot defensibly decide stops and asks rather
 than guessing. The Questions page shows each one with the agent's own recommendation and the
@@ -37,6 +41,48 @@ adlc -actor you question answer -id Q-1 -answer "…"
 adlc approval list
 adlc -actor you approval decide -id AP-1 -verdict approve -approver you -note "…"
 ```
+
+## Driving it by conversation
+
+With `console.enabled`, a panel rides on every dashboard page and `/console` holds the whole
+transcript. You say what you want in a sentence; the console answers in prose and proposes
+actions, each with a control beside it saying what it would do and what it costs if it is wrong.
+
+It is not a shortcut past anything. An item it raises goes through the same admission rules a
+planner's proposals face; a state change goes through the same transition authority a lane's work
+does. What it removes is having to assemble the flags.
+
+What it does with a proposal rather than handing it to you is one setting.
+
+| `console.authority` | what it executes |
+|---|---|
+| `propose` | nothing. Every action renders as a control you press |
+| `act` | anything the control plane could do on its own. The three gates a person owns, it drafts |
+| `full` | those three as well |
+
+The three are signing off a deliverable, answering a blocking question, and deciding an approval.
+They are not gated because they are the most dangerous — cancelling an item is arguably worse.
+They are gated because each one *is* the checkpoint, and an agent that clears its own checkpoint
+has removed it. At `full` there is no human checkpoint left in the pipeline; the record still
+says, on every one of them, that the console pressed it.
+
+An unrecognised authority level is refused at load rather than treated as the safest one, because
+a console that silently does less than you configured is one you would not notice was wrong.
+
+Every turn is a run. It is dispatched as a declared worker holding the `converse` capability, its
+assembled prompt is retained like any other, and both the ask and the reply are events on the
+chain. Actions the console took on its own are recorded under the actor `console`; actions you
+pressed are recorded under your name. That distinction is the whole point of the actor column, so
+the console never files its own work under yours.
+
+A turn that timed out, crashed or wrote nothing readable is recorded as a failed turn with the
+reason. An ask with no reply and no explanation looks exactly like a console that has quietly
+stopped working.
+
+The conversation is one per project, not one per browser tab: two operators holding separate
+conversations about the same fleet would each be missing half of why it is in the state it is in.
+The agent has no memory between turns beyond the transcript replayed into it —
+`console.history_turns` is how much, and the panel carries the last six.
 
 ## Watching it
 
@@ -137,23 +183,50 @@ is indistinguishable from a mistake.
 ## Auditing the record
 
 ```bash
-adlc ledger verify      # integrity and knowledge, answered separately
+adlc ledger verify      # integrity, derivation and knowledge, answered separately
+adlc ledger rebuild     # re-derive the projections from the chain
 adlc ledger events      # the chain; kinds this build cannot read are marked
 adlc ledger head
 ```
 
-`verify` runs eight integrity checks and two knowledge ones. The integrity set includes a
-**replay**: every projection table is rebuilt from the chain in a scratch database and diffed, so
-"the reports agree with the record" is a checked property rather than a convention. It also
-*proves the append-only guards still fire*, by attempting the writes they exist to refuse — a
-guard that has gone quiet reads exactly like a clean one.
+`verify` asks three separate questions rather than one. Does the chain describe itself — hashes,
+the anchor held outside the event table, and the append-only guards, which it *proves still fire*
+by attempting the writes they exist to refuse, since a guard that has gone quiet reads exactly
+like a clean one. Do the derived tables match a replay of the chain, rebuilt in a scratch database
+and diffed, so "the reports agree with the record" is checked rather than assumed. And did this
+build understand everything it read.
 
-Three verdicts:
+Four verdicts:
 
-- `INTACT` — everything passed and this build understood all of it
-- `UNKNOWN` — integrity holds, but this binary is too old to interpret part of the record.
-  Upgrade it. This is not an accusation
-- `TAMPERED` — the record does not describe itself. Stop and investigate
+| verdict | what it means | exit |
+|---|---|---|
+| `INTACT` | everything passed and this build understood all of it | 0 |
+| `STALE PROJECTION` | the chain is fine; a derived table does not match a replay of it | 8 |
+| `UNKNOWN` | integrity holds, but this binary is too old to interpret part of the record. Upgrade it. This is not an accusation | 5 |
+| `TAMPERED` | the record does not describe itself. Stop and investigate | 3 |
+
+`STALE PROJECTION` is separate from `TAMPERED` because the disagreement it reports has two causes
+that look identical from outside: an upgrade changed how a row is derived, or something wrote to
+a projection without going through the chain. Calling that tampering asserts a cause the check
+cannot establish, and it fired on every ordinary upgrade — an alarm that goes off on routine
+releases is one people learn to ignore, which costs exactly the one time it was real.
+
+The consequence is different too. A broken chain means history is unaccounted for. A wrong
+projection means a cache is wrong, and it is one command:
+
+```bash
+adlc ledger rebuild
+```
+
+That deletes every projection table and re-derives it from the chain, then verifies and tells you
+where the ledger now stands. Nothing touches the chain — the append-only guards stay in force
+throughout — because a rebuild that could rewrite history would defeat the point of having any.
+It is deliberately not automatic on startup: an upgrade that changed how a row is computed is
+worth somebody knowing about once.
+
+If the rebuild itself stops partway, it names the sequence number and event kind it stopped on.
+The chain is intact and this build cannot derive a projection from it, which is the same recovery
+as `UNKNOWN` — upgrade the binary.
 
 ## Backing up
 

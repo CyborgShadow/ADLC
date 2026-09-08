@@ -30,7 +30,6 @@ import (
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 	"github.com/CyborgShadow/ADLC/internal/prompt"
 	"github.com/CyborgShadow/ADLC/internal/spend"
-	"github.com/CyborgShadow/ADLC/internal/story"
 )
 
 // Server serves the dashboard.
@@ -565,15 +564,6 @@ type historyRun struct {
 	When     string
 	Cost     string
 	Class    string
-}
-
-func (s *Server) run(r *http.Request) (string, any, error) {
-	id := strings.TrimPrefix(r.URL.Path, "/run/")
-	st, err := story.OfRun(s.Led, s.Cfg, id)
-	if err != nil {
-		return "", nil, err
-	}
-	return "Run " + id, st, nil
 }
 
 func (s *Server) segment(r *http.Request) (string, any, error) {

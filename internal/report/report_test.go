@@ -2,10 +2,12 @@ package report
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/CyborgShadow/ADLC/internal/authority"
 	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
@@ -125,6 +127,68 @@ func TestASegmentReportShowsEveryItemAndItsState(t *testing.T) {
 	for _, want := range []string{"S1-001", "blocked", "token lifetime"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the segment report is missing %q", want)
+		}
+	}
+}
+
+// dispatched is the set of commands cmd/adlc's run() switches on.
+//
+// It is written out here rather than derived because the report is a different
+// package from the CLI. Every `adlc <word>` this package prints has to be in
+// it: an operator reading a stopped fleet's report is the least able to work
+// out that the command they were handed does not exist.
+var dispatched = map[string]bool{
+	"help": true, "init": true, "segment": true, "item": true, "run": true,
+	"gate": true, "transition": true, "lease": true, "question": true,
+	"approval": true, "report": true, "ledger": true, "prompt": true,
+	"dispatch": true, "serve": true, "schedule": true, "config": true,
+}
+
+var printedCommand = regexp.MustCompile(`adlc ([a-z]+)`)
+
+func awaitingFixture(t *testing.T) string {
+	t.Helper()
+	l, cfg := fixture(t)
+	add(t, l, ledger.KindSegmentCreated, "S1", ledger.SegmentCreated{ID: "S1", Title: "First"})
+	add(t, l, ledger.KindItemCreated, "S1-001", ledger.ItemCreated{
+		ID: "S1-001", SegmentID: "S1", Title: "Rotate the signing key", Radius: "host",
+		Criteria: []string{"the old key still verifies"},
+	})
+	add(t, l, ledger.KindItemTransitioned, "S1-001", ledger.ItemTransitioned{
+		ItemID: "S1-001", From: "ready_for_apply", To: string(authority.StateAwaitingApproval),
+	})
+	add(t, l, ledger.KindApprovalRequested, "AP-1", ledger.ApprovalRequested{
+		ID: "AP-1", ItemID: "S1-001", Radius: "host", PlanDigest: "d0d0d0", Summary: "rotates the key",
+	})
+	out, err := Fleet(l, cfg, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestTheApprovalInstructionIsACommandThatExists. This printed `adlc approve
+// <item> --approver ...`, which is not a command, does not use this binary's
+// flag style, and named the item rather than the approval request that
+// `approval decide` actually answers.
+func TestTheApprovalInstructionIsACommandThatExists(t *testing.T) {
+	out := awaitingFixture(t)
+	want := `adlc approval decide -id AP-1 -verdict approve -approver <you> -note "..."`
+	if !strings.Contains(out, want) {
+		t.Fatalf("the report should hand the operator %q\n\n%s", want, out)
+	}
+	if strings.Contains(out, "adlc approve ") {
+		t.Error("`adlc approve` is not a command this binary dispatches")
+	}
+}
+
+// TestEveryCommandTheReportPrintsIsDispatched is the general form of the same
+// defect: a report is read when something is stopped, and a command that does
+// not resolve sends the reader to the documentation instead of to the fix.
+func TestEveryCommandTheReportPrintsIsDispatched(t *testing.T) {
+	for _, m := range printedCommand.FindAllStringSubmatch(awaitingFixture(t), -1) {
+		if !dispatched[m[1]] {
+			t.Errorf("the report prints %q and cmd/adlc has no %q command", m[0], m[1])
 		}
 	}
 }

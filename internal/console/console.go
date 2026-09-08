@@ -188,7 +188,7 @@ func Parse(env *envelope.Envelope, turnID string, auth config.ConsoleAuthority) 
 		switch {
 		case !kind.Known():
 			a.Outcome, a.Detail = ledger.ActionRefused,
-				fmt.Sprintf("%q is not an action this build knows; run `adlc console actions` for the ones that exist", ra.Kind)
+				fmt.Sprintf("%q is not an action this build knows; the dashboard\x27s Console page lists the ones that exist", ra.Kind)
 		case a.Summary == "":
 			a.Outcome, a.Detail = ledger.ActionRefused,
 				"an action with no summary cannot be labelled on a control somebody presses"

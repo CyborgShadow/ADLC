@@ -871,8 +871,7 @@ func promptList(e *env) int {
 		case p.Present:
 			fmt.Printf("%-24s %-6s %s  %s\n", p.ID, p.Version, p.SHA, p.Path)
 		default:
-			fmt.Printf("%-24s %-6s %-64s  named by %s\n",
-				p.ID, "-", "MISSING", strings.Join(p.Roles, ", "))
+			fmt.Printf("%-24s %-6s MISSING — named by %s\n", p.ID, "-", strings.Join(p.Roles, ", "))
 		}
 	}
 	if inv.PreambleFile != "" {
@@ -889,8 +888,8 @@ func promptList(e *env) int {
 		fmt.Printf("\n%d prompt(s); every role's prompt is present.\n", len(inv.Prompts))
 		return exitOK
 	}
-	fmt.Printf("\n%d of the files this config depends on are not in %s. A role whose prompt is\n", inv.Missing, inv.Dir)
-	fmt.Println("absent cannot be dispatched, so this exits non-zero until they are written.")
+	fmt.Printf("\n%d missing. A role whose prompt is absent cannot be dispatched, so this exits\n", inv.Missing)
+	fmt.Printf("non-zero until every file above is written into %s.\n", inv.Dir)
 	return exitUsage
 }
 

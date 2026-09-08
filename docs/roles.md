@@ -6,21 +6,21 @@ run can still say exactly which bytes it was given.
 
 ## The shipped roster
 
-| role | capability | area | what it does |
+| role | capability | declared areas | what it does |
 |---|---|---|---|
-| `researcher` | research | — | Turns an intent into a written approach. Creates no work items |
-| `planner` | plan | — | Decomposes an approach into work items with checkable criteria |
+| `researcher` | research | *generalist* | Turns an intent into a written approach. Creates no work items |
+| `planner` | plan | *generalist* | Decomposes an approach into work items with checkable criteria |
 | `engineer` | implement | *generalist* | Builds anything no specialist claims |
-| `cli-dev` | implement | cli | |
-| `docs-writer` | implement | docs | |
+| `cli-dev` | implement | cli | Builds the command surface |
+| `docs-writer` | implement | docs | Builds the documentation |
 | `frontend` | implement | frontend | Builds the surface a person looks at, including the states other than the populated one |
 | `backend` | implement | backend | Builds the service tier, for a request that arrives twice and concurrently with another |
 | `api` | implement | api | Builds the published contract. Owns whether a change is additive or breaking |
 | `database` | implement | database, migration | Owns the stored shape and the migrations that change it |
 | `query` | implement | query | Owns the access path: the statements issued, the plans they take, the transactions they run in |
 | `sre` | implement | sre, infrastructure | Writes the infrastructure, the deploy path and the signals. Applying is the operator's step |
-| `tester` | test | testing | Executes the tests. A suite that matched nothing is a failure |
-| `judge` | judge | — | Checks items against criteria by executing things |
+| `tester` | test | *generalist* | Executes the tests. A suite that matched nothing is a failure |
+| `judge` | judge | *generalist* | Checks items against criteria by executing things |
 | `validator` | validate | *generalist* | Adversarial review; the only role that can reject |
 | `architect` | validate | architecture | Reviews boundaries, dependency direction, and decisions that are expensive to undo |
 | `security` | validate | security | Reviews for what an attacker would do |
@@ -28,10 +28,11 @@ run can still say exactly which bytes it was given.
 | `resilience` | validate | resilience | Reviews for what is left behind when something dies halfway |
 | `janitor` | curate | hygiene | Stale docs, dead references, duplicated facts. Low cadence |
 | `arbiter` | arbitrate | — | Judges the change against the system rather than against the item |
-| `improver` | improve | — | Records what a landed item taught; raises fixes as work. Low cadence |
+| `improver` | improve | *generalist* | Records what a landed item taught; raises fixes as work. Low cadence |
 | `operator` | operate | platform, ci | Applies changes to real resources. Low cadence |
+| `console` | converse | *generalist* | Answers an operator in the dashboard and drafts actions. Advances no item on its own |
 
-Twenty prompt files back these twenty-two roles. `cli-dev` and `docs-writer` share
+Twenty-one prompt files back these twenty-three roles. `cli-dev` and `docs-writer` share
 `implementer.md` with the generalist, because what makes them separate roles is which files they
 touch and nothing else. The engineering disciplines each have their own file, because what makes
 them separate is a failure mode the generalist prompt does not warn about — that is the test for
@@ -41,6 +42,12 @@ whether a role is worth declaring at all.
 first, and a worker that lists no area is preferred over an unrelated specialist, so an item filed
 under an area nobody claimed reaches the generalist instead of whichever specialist happened to
 sort first.
+
+The *generalist* rows are roles that declare no areas of their own. Several of them are still the
+routed owner of an area — `testing` routes to `tester`, `verification` to `judge`, `review` to
+`validator`, `core` to `engineer` — which is what an item filed under that area is tagged with. A
+declared area narrows what a role will be picked for; a routing entry says who owns work tagged
+that way. `console` never appears in routing because it advances no work item.
 
 ### Why `database` and `query` are two roles
 
@@ -103,20 +110,23 @@ Two steps. Declare the role:
 
 ```json
 {
-  "type": "database",
+  "type": "mobile",
   "layer": "worker",
-  "description": "Schema, migrations and query work.",
+  "description": "Builds the phone client, where a release cannot be rolled back.",
   "prompt": "implementer",
   "capabilities": ["implement"],
-  "areas": ["database"]
+  "areas": ["mobile"]
 }
 ```
 
 and route the area to it:
 
 ```json
-"routing": { "database": "database" }
+"routing": { "mobile": "mobile" }
 ```
+
+`adlc-role` does both halves and the prompt file together, then validates with `adlc config check`
+and `adlc prompt check`. Doing it by hand is the same three edits.
 
 Write a dedicated prompt when the guidance genuinely differs — a security reviewer looks for
 different things than a performance reviewer, and a frontend builder falls into different holes

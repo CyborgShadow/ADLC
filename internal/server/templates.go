@@ -74,7 +74,8 @@ var funcs = template.FuncMap{
 // control is a plain form and the refresh is a meta tag.
 var tmpl = template.Must(template.New("page").Funcs(funcs).Parse(strings.Join([]string{
 	pageHTML, overviewHTML, roadmapPageHTML, progressHTML, questionsPageHTML, approvalsPageHTML,
-	rolesPageHTML, coordinationHTML, configPageHTML, historyPageHTML, runHTML, itemPageHTML,
+	rolesPageHTML, coordinationHTML, configPageHTML, historyPageHTML, runHTML,
+	unregisteredRunHTML, itemPageHTML,
 	segmentHTML, aboutHTML, aboutDataHTML, consoleHTML, endHTML,
 	// After endHTML: this one is its own template, not part of the page body,
 	// and a define nested inside another define is a parse error.
@@ -233,9 +234,10 @@ const overviewHTML = `
     <span class="mono">adlc schedule run</span>.</td></tr>{{end}}
 </table></div>
 
-<h2>Where the work is</h2>
+<h2>Where the work is <span class="sub">every tile opens the work behind it</span></h2>
 <div class="grid">
-  {{range .Stages}}<div class="card"><div class="n">{{.N}}</div><div class="l">{{.Label}}</div></div>{{end}}
+  {{range .Stages}}<a class="card tile" href="/progress?stage={{.Key}}"><div class="n">{{.N}}</div>
+    <div class="l">{{.Label}}</div></a>{{end}}
   <a class="card tile" href="/config#money"><div class="n">{{.Cost.Day}}</div>
     <div class="l">spend, last 24h{{if .Cost.OnDefaults}} · default rates{{end}}</div></a>
   <a class="card tile" href="/history?tab=runs"><div class="n">{{.Cost.Week}}</div>
@@ -355,6 +357,22 @@ cannot be dropped: it is arithmetic on recorded state, not a message somebody ha
 </table></div>
 <p class="dim small">An area with no owner is a configuration error, not a warning: an item filed under one
 is unreachable, and an unreachable item looks exactly like one nobody has got round to yet.</p>
+{{end}}{{end}}
+`
+
+const unregisteredRunHTML = `
+{{if eq .Page "run"}}{{with .Body}}{{with .Mentions}}{{end}}
+<div class="banner bad"><b>There is no run under this id.</b> {{.Why}}</div>
+<h2>What the record says about <span class="mono">{{.RunID}}</span>
+  <span class="sub">{{len .Mentions}} event(s) name it</span></h2>
+<div class="wrap"><table>
+  <tr><th class="num">seq</th><th>kind</th><th>subject</th><th>what it recorded</th><th>when</th></tr>
+  {{range .Mentions}}<tr>
+    <td class="num dim">{{.Seq}}</td><td class="mono small">{{.Kind}}</td>
+    <td class="mono small">{{if .Link}}<a href="{{.Link}}">{{.Subject}}</a>{{else}}{{.Subject}}{{end}}</td>
+    <td>{{.Says}}</td><td class="dim small">{{.When}}</td>
+  </tr>{{else}}<tr><td colspan="5" class="dim">Nothing.</td></tr>{{end}}
+</table></div>
 {{end}}{{end}}
 `
 

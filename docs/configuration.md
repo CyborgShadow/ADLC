@@ -1,10 +1,31 @@
 # Configuration
 
 Everything project-specific lives in one file, `adlc.json`. It is a gated artefact: the fleet
-reads it, and changing it is an ordinary reviewable edit. Only two things are ever writable from
-the dashboard — a lane's cadence and its pause switch.
+reads it, and changing it is an ordinary reviewable edit.
+
+Generate it with `adlc config init` rather than writing it by hand — see
+[getting started](getting-started.md). `adlc config check` re-validates it with the loader a
+running fleet uses, and `adlc config show` prints it with every default filled in.
 
 Any object may carry a `_comment` string; it is ignored.
+
+## What the dashboard may change
+
+Some of this file is editable from the Config page and some is not, and the line is drawn at
+whether the setting is a *policy* decision or a *structural* one.
+
+Editable live: the safety policy, the spend caps and per-model prices, the console's authority and
+whether it is on, the rework budget, the per-run timeout, the dashboard's own refresh rate, and
+each lane's cadence and pause switch. Those are judgement calls somebody makes and revises, often
+during an incident, and making them require an editor and a restart means they get made badly or
+not at all. Every one is written back to `adlc.json`, and a policy is validated whole before any
+part of it is written — a half-applied safety policy is worse than either the old one or the new
+one, because nobody can say which rules were in force.
+
+File-only: checks, workers and routing. A check is a command line, and a form that writes
+arbitrary argv into something the control plane will execute is a remote shell wearing a hat;
+"it is only bound to loopback" is the kind of reasoning that ages badly. Workers and routing are
+structure — they belong in a commit somebody reviewed, next to the prompt files they name.
 
 ## source_roots
 
@@ -109,6 +130,7 @@ A role declares **capabilities** and, optionally, **areas**.
 | `arbitrate` | judge the change against the system rather than against the item |
 | `operate` | perform an apply against a real resource |
 | `improve` | record what a landed item taught, and raise fixes as work |
+| `converse` | answer an operator in the console and draft actions. Advances no item on its own |
 
 `low_cadence: true` marks a role expected to run rarely, so the never-run roll call reports it
 without raising it as an alarm.
@@ -145,11 +167,11 @@ Concurrency is N scheduled lanes, not a thread pool.
 
 ```json
 {
-  "name": "verify",
+  "name": "judge",
   "enabled": true,
   "every_seconds": 180,
   "offset_seconds": 0,
-  "capability": "verify",
+  "capability": "judge",
   "max_per_tick": 2
 }
 ```
@@ -169,6 +191,13 @@ unverified work that looks exactly like progress.
 
 Every firing writes a ledger tick, including the idle ones, so a lane that quietly stops shows as
 `STALE` rather than looking like a lane with nothing to report.
+
+One lane is not declared here and cannot be. The **merge** lane drains the merge queue every 120
+seconds, and merging is the control plane's own step rather than an agent's — a lane with no
+capability has no worker to route to. It still appears in `adlc schedule status` with a cadence
+and a tick on every firing, because a merge queue that has quietly stopped draining and one with
+nothing to drain look identical otherwise. It is the one lane `adlc schedule once -loop …` cannot
+name; `adlc schedule run` drives it.
 
 ## blast
 
@@ -203,11 +232,83 @@ radius fails closed.
 }
 ```
 
-Prices are in millionths of a currency unit per million tokens. A model with no entry reports
-`UNPRICED` — cost unknown, not zero.
+Prices are in micros — millionths of a dollar — per million tokens, so $15 per million input
+tokens is `15000000`. Integers throughout: money in floats accumulates error across thousands of
+runs, and a spend cap that drifts is a cap nobody trusts. Cache reads bill at a tenth of input and
+cache writes at 1.25x, which is the shape of the published rates rather than a per-model figure,
+so `adlc config init` and the Config page both ask only for input and output.
+
+`config init` writes the built-in table rather than an empty one, and every cost figure says which
+of three places its rate came from:
+
+| source | meaning |
+|---|---|
+| `configured` | your own `price_micros_per_mtok` entry priced it |
+| `default` | the table that shipped in the binary priced it. Real money, unconfirmed rate |
+| `unpriced` | neither did. Cost unknown, which is not the same as zero |
+
+The distinction is the point. With no table at all every run reports `UNPRICED`, and a number
+nobody has ever seen is a number nobody notices going wrong; with a table that quietly defaults
+unknown models to zero, real spend renders as `$0.00`, which is the same failure the three-valued
+verdicts exist to prevent. So the defaults get a figure onto the screen and the source is what
+stops it being mistaken for one somebody confirmed. The Config and Overview pages mark a project
+still running entirely on defaults.
+
+The fallback is per model, not per table. Pricing two models and forgetting a third leaves your
+two figures alone and prices the third from the defaults; a model in neither table stays
+`UNPRICED` rather than being guessed at.
 
 A cap of `0` means unlimited and reports as unlimited. "No budget configured" and "budget
 exhausted" are opposite facts and must not collapse into one number.
+
+## console
+
+```json
+"console": {
+  "enabled": true,
+  "authority": "act",
+  "worker": "console",
+  "timeout_seconds": 180,
+  "history_turns": 20
+}
+```
+
+The operator console is a way to drive this tool by talking to it: a panel on every dashboard
+page, and a Console page holding the transcript. It is off by default, because it invokes an agent,
+an agent costs money, and a surface that starts spending without being asked is one nobody trusts.
+
+| setting | meaning |
+|---|---|
+| `enabled` | Whether the panel exists at all. Off means no panel and no tab |
+| `authority` | `propose`, `act` or `full`. Empty means `propose` |
+| `worker` | The declared worker a turn runs as. Must hold `converse`. Empty picks the first that does |
+| `timeout_seconds` | Bounds one turn. Default 180 |
+| `history_turns` | How much of the conversation is replayed into each turn. Default 20 |
+
+`authority` is the only setting here worth deliberating over.
+
+| level | what it executes |
+|---|---|
+| `propose` | nothing. Everything renders as a control a person presses |
+| `act` | anything the control plane could do on its own, through the same transition authority as everything else. The three gates a person owns, it drafts |
+| `full` | those three as well |
+
+The three gates are signing off a deliverable, answering a blocking question, and deciding an
+approval. They are not gated because they are the most dangerous — cancelling an item is arguably
+worse. They are gated because each one *is* the human checkpoint, and an agent that clears its own
+checkpoint has removed it. `full` is a real choice with a real cost: an approval an agent granted
+itself is not an approval, and a fleet running that way has no human checkpoint left. The record
+still says, on every one of them, that the console pressed it.
+
+An unrecognised level is refused at load rather than treated as the safest one. Failing closed
+would give a console that silently does less than the config says, which is worse than a config
+that will not load.
+
+`worker` must hold `converse` because a console turn is a run like every other and is attributed
+to a role in the roster; a worker that cannot converse would appear in the record having done
+something it is not declared to do.
+
+`enabled` and `authority` are editable from the Config page. The rest is file-only.
 
 ## lease
 

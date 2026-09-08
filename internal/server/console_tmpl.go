@@ -46,6 +46,21 @@ box-shadow:0 10px 34px rgba(0,0,0,.5);display:flex;flex-direction:column;max-hei
 .vrow b{display:block}
 .vrow .d{color:var(--dim);font-size:13px;margin-top:2px}
 .vrow .m{color:var(--dim);font-size:11px;font-family:ui-monospace,Consolas,monospace;margin-top:4px}
+.talk{display:flex;flex-direction:column;gap:10px;margin-bottom:18px}
+.turn{background:var(--card);border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.turn .you{padding:11px 15px;border-bottom:1px solid var(--line);background:#101619}
+.turn .you b{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;
+letter-spacing:.06em;display:block;margin-bottom:3px}
+.turn .them{padding:12px 15px;white-space:pre-wrap;word-break:break-word;line-height:1.55}
+.turn .them.wait{color:var(--dim);font-style:italic}
+.turn .them.fail{color:var(--bad)}
+.acts{border-top:1px solid var(--line);background:#0d1215}
+.act{padding:10px 15px;border-bottom:1px solid var(--line);display:flex;gap:12px;
+align-items:baseline;flex-wrap:wrap}
+.act:last-child{border-bottom:none}
+.act .what{flex:1;min-width:220px}
+.act .why{color:var(--dim);font-size:12px;margin-top:3px}
+.act form{display:flex;gap:6px;align-items:center}
 @media (max-width:560px){.dock{left:12px;right:12px;width:auto}}
 `
 

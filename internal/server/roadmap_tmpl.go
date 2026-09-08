@@ -53,7 +53,7 @@ nothing under it is dispatched until it passes.</div>
   {{if .Undescribed}}<div class="nobrief">Nobody wrote down what this is for. A deliverable with no
     intent cannot be researched or decomposed — a planner given only a title invents the scope, and
     nobody finds out until the work is finished and wrong. Add one with
-    <span class="mono">adlc segment amend</span>, or ask the console to.</div>{{end}}
+    <span class="mono">adlc segment create</span> next time, or ask the console to add one.</div>{{end}}
 
   {{if .Progress.Total}}<div class="bar"><i style="width:{{.Progress.Percent}}%"></i></div>{{end}}
   <div class="waiting">{{.Next}}</div>
