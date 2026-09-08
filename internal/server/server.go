@@ -299,8 +299,16 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 			(nav[i].Href != "/" && strings.HasPrefix(nav[i].Href, "/"+page))
 	}
 	refresh := s.Cfg.Server.RefreshSeconds
-	if s.turns.any() && (refresh == 0 || refresh > 2) {
+	switch {
+	case s.turns.any() && (refresh == 0 || refresh > 2):
+		// Something is running and the answer is worth waiting for.
 		refresh = 2
+	case page == "home" || page == "console":
+		// These two pages ARE a text box somebody types into, and a page that
+		// reloads itself every fifteen seconds throws away whatever they had
+		// half-written. Nothing on them changes on its own while no turn is
+		// running, so there is nothing being traded away.
+		refresh = 0
 	}
 	return &pageData{
 		Page: page, Title: title, Refresh: refresh, Project: s.Cfg.Project,

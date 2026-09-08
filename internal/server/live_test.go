@@ -180,3 +180,42 @@ func TestStreamDecoderSuppressesEchoesWithoutAnyText(t *testing.T) {
 		t.Fatalf("the same tool call was announced twice: %q", got)
 	}
 }
+
+// The two pages that ARE a text box do not reload themselves while idle.
+//
+// A regression test for a page that threw away a half-written question every
+// fifteen seconds. Nothing on Home or the console changes on its own while no
+// turn is running, so the refresh bought nothing and cost the thing somebody
+// was in the middle of typing.
+func TestTypingPagesDoNotReloadThemselvesWhileIdle(t *testing.T) {
+	s := newServer(t)
+	s.Cfg.Server.RefreshSeconds = 15
+
+	for _, page := range []string{"home", "console"} {
+		d, err := s.shell(httptest.NewRequest(http.MethodGet, "/", nil), page, "T", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Refresh != 0 {
+			t.Errorf("%s auto-refreshes every %ds with nothing running; a question being typed is lost", page, d.Refresh)
+		}
+	}
+	// Every other page still refreshes: those are read, not written into.
+	d, err := s.shell(httptest.NewRequest(http.MethodGet, "/overview", nil), "overview", "T", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Refresh != 15 {
+		t.Errorf("a page an operator only reads should still refresh, got %d", d.Refresh)
+	}
+	// And a running turn brings the fast fallback back, on Home too — that is
+	// what shows the answer to a browser that cannot stream.
+	s.turns.start("t-1", s.now())
+	d, err = s.shell(httptest.NewRequest(http.MethodGet, "/", nil), "home", "T", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Refresh != 2 {
+		t.Errorf("a running turn must keep the no-JavaScript fallback alive, got %d", d.Refresh)
+	}
+}

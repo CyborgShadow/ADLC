@@ -16,6 +16,7 @@ border-left:2px solid var(--live);border-radius:4px;max-height:260px;overflow:au
 white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,Consolas,monospace;
 color:var(--dim)}
 .livetext.on{color:var(--ink)}
+.liveready{display:block;margin-top:8px;font-size:13px}
 `
 
 // liveHTML is one running turn. It is its own template because the same
@@ -27,29 +28,59 @@ const liveHTML = `
     <span class="livehint">You will see it work as it works; if your browser cannot stream,
     this page refreshes every two seconds instead.</span></div>
   <pre class="livetext" hidden></pre>
+  <a class="liveready" href="" hidden>The turn finished — open the answer.
+    <span class="livehint">Not loaded automatically because you are part-way through typing.</span></a>
 </div>{{end}}
 `
 
 // liveScript is the whole of the JavaScript on this dashboard.
 //
-// It does nothing at all unless the page contains a running turn, it never
-// renders a result, and every failure mode it has falls back to the reload the
-// page would have done anyway.
+// It does two things, and both of them are about not making a person repeat
+// themselves: it streams a running turn, and it stops the page reloading out
+// from under somebody who is typing into it.
+//
+// It never renders a result, and every failure mode it has falls back to the
+// reload the page would have done anyway.
 const liveScript = `<script>
 (function(){
-  var nodes = document.querySelectorAll("[data-live]");
-  if (!nodes.length || !window.EventSource) return;
-  var watchdog;
-  // The meta refresh is the fallback for a browser that cannot do this. It is
-  // cancelled only once bytes have actually arrived, so a stream that never
-  // connects leaves the old behaviour in place.
-  function takeOver(){
+  // A page that reloads itself every fifteen seconds throws away whatever was
+  // half-written in its text box, and the console — on Home, on its own page,
+  // and in the panel that rides on every other page — is mostly a text box.
+  // Home and the console page stop refreshing on the server side when nothing
+  // is running; this covers the rest: the moment anybody types anywhere, the
+  // refresh is off until they navigate.
+  var dirty = false, watchdog;
+  function stopRefresh(){
     var m = document.querySelector("meta[http-equiv=refresh]");
     if (m && m.parentNode) m.parentNode.removeChild(m);
+  }
+  document.addEventListener("input", function(ev){
+    var t = ev.target;
+    if (!t || !t.value) return;
+    if (t.tagName !== "TEXTAREA" && t.tagName !== "INPUT") return;
+    dirty = true;
+    clearTimeout(watchdog);
+    stopRefresh();
+  }, true);
+  // Submitting is the end of typing, so the page may look after itself again.
+  document.addEventListener("submit", function(){ dirty = false; }, true);
+
+  var nodes = document.querySelectorAll("[data-live]");
+  if (!nodes.length || !window.EventSource) return;
+
+  // The meta refresh is also the fallback for a browser that cannot stream, so
+  // it is cancelled only once bytes have actually arrived.
+  function takeOver(){
+    stopRefresh();
     clearTimeout(watchdog);
     // If the stream goes quiet for a minute, fall back to a reload rather than
     // sitting on a page that has stopped being told anything.
-    watchdog = setTimeout(function(){ location.reload(); }, 60000);
+    if (!dirty) watchdog = setTimeout(function(){ reload(); }, 60000);
+  }
+  function reload(){ if (!dirty) location.reload(); }
+  function offerReload(node){
+    var a = node.querySelector(".liveready");
+    if (a) a.hidden = false;
   }
   Array.prototype.forEach.call(nodes, function(node){
     var id = node.getAttribute("data-live");
@@ -72,12 +103,15 @@ const liveScript = `<script>
     es.addEventListener("done", function(){
       es.close();
       clearTimeout(watchdog);
-      // Reload into the record. The reply, what it did and what it cost are all
-      // read from the ledger; nothing on screen came from this script.
+      // Reload into the record: the reply, what it did and what it cost are all
+      // read from the ledger, and nothing on screen came from this script. The
+      // exception is somebody mid-sentence — losing what they typed to show
+      // them an answer they can reach with one click is a bad trade.
+      if (dirty) { offerReload(node); return; }
       location.reload();
     });
     es.onerror = function(){
-      if (es.readyState === 2) setTimeout(function(){ location.reload(); }, 5000);
+      if (es.readyState === 2) setTimeout(reload, 5000);
     };
   });
 })();
