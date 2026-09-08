@@ -73,12 +73,12 @@ var funcs = template.FuncMap{
 // it must not depend on a network fetch, a bundler or a browser feature. Every
 // control is a plain form and the refresh is a meta tag.
 var tmpl = template.Must(template.New("page").Funcs(funcs).Parse(strings.Join([]string{
-	pageHTML, overviewHTML, roadmapHTML, progressHTML, questionsHTML, approvalsHTML,
-	rolesHTML, roleHTML, coordinationHTML, configHTML, historyHTML, runHTML, itemHTML,
-	segmentHTML, aboutHTML, consoleHTML, endHTML,
+	pageHTML, overviewHTML, roadmapPageHTML, progressHTML, questionsPageHTML, approvalsPageHTML,
+	rolesPageHTML, coordinationHTML, configPageHTML, historyPageHTML, runHTML, itemPageHTML,
+	segmentHTML, aboutHTML, aboutDataHTML, consoleHTML, endHTML,
 	// After endHTML: this one is its own template, not part of the page body,
 	// and a define nested inside another define is a parse error.
-	consoleDockHTML,
+	consoleDockHTML, fieldsHTML,
 }, "")))
 
 const pageHTML = `
@@ -116,6 +116,10 @@ h2 .sub{font-weight:400;color:var(--dim);margin-left:8px;font-size:13px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:13px 15px}
 .card .n{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
 .card .l{color:var(--dim);font-size:12px;margin-top:3px}
+a.card.tile{display:block;color:var(--ink)}
+a.card.tile:hover{border-color:var(--accent);text-decoration:none}
+a.card.tile.on{border-color:var(--accent)}
+a.card.tile .l{color:var(--dim)}
 table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:4px}
 th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);
 padding:7px 11px;border-bottom:1px solid var(--line);font-weight:600;white-space:nowrap}
@@ -159,18 +163,22 @@ border-radius:50%;background:var(--line)}
 padding:12px 15px;margin-bottom:8px;display:grid;grid-template-columns:150px 1fr;gap:14px}
 .chain .step .who{font-weight:600}
 .chain .step .who small{display:block;color:var(--dim);font-weight:400;margin-top:2px}
+.decide{margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+.decide .ask{margin-bottom:7px;color:var(--dim);font-size:13px}
+.decide .ask b{display:block;color:var(--ink);font-size:14px;margin-bottom:2px}
 .tabs{display:flex;gap:4px;margin-bottom:12px}
 .tabs a{padding:5px 12px;border-radius:3px;background:var(--card);border:1px solid var(--line);color:var(--dim)}
 .tabs a.on{color:var(--ink);border-color:var(--accent)}
 footer{color:var(--dim);font-size:12px;padding:18px 24px;border-top:1px solid var(--line);
 max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
-` + aboutCSS + consoleCSS + `
+` + aboutCSS + consoleCSS + historyPageCSS + roadmapPageCSS +
+	itemPageCSS + gatesCSS + rolesPageCSS + configPageCSS + aboutDataCSS + `
 </style></head><body>
 <header>
   <h1>{{.Project}}</h1>
   <nav>{{range .Nav}}<a href="{{.Href}}" class="{{if .Active}}on{{end}}{{if .Alarm}} alarm{{end}}">{{.Label}}{{if .Count}}<span class="n">{{.Count}}</span>{{end}}</a>{{end}}</nav>
-  <span class="meta">ledger <span class="pill {{verdictClass .Verdict}}">{{.Verdict}}</span> seq {{.HeadSeq}} · {{.Now}}</span>
+  <span class="meta"><a href="/history?tab=ledger">ledger <span class="pill {{verdictClass .Verdict}}">{{.Verdict}}</span> seq {{.HeadSeq}}</a> · {{.Now}}</span>
 </header>
 <main>
 {{if .Flash}}<div class="banner{{if .FlashBad}} bad{{end}}">{{.Flash}}</div>{{end}}
@@ -215,8 +223,18 @@ const overviewHTML = `
 <h2>Where the work is</h2>
 <div class="grid">
   {{range .Stages}}<div class="card"><div class="n">{{.N}}</div><div class="l">{{.Label}}</div></div>{{end}}
-  <div class="card"><div class="n">{{.Spend.Today}}</div><div class="l">spend, last 24h</div></div>
+  <a class="card tile" href="/config#money"><div class="n">{{.Cost.Day}}</div>
+    <div class="l">spend, last 24h{{if .Cost.OnDefaults}} · default rates{{end}}</div></a>
+  <a class="card tile" href="/history?tab=runs"><div class="n">{{.Cost.Week}}</div>
+    <div class="l">spend, last 7 days</div></a>
 </div>
+{{if .Cost.OnDefaults}}<div class="banner"><b>These figures use the built-in price table.</b>
+Nobody here has confirmed those rates against the provider's current pricing, so treat them as an
+estimate — <a href="/config">the Config page</a> shows what each model is being charged at.
+{{if .Cost.TopRole}} Most of it went to <a href="/roles/{{.Cost.TopRole}}">{{.Cost.TopRole}}</a>
+({{.Cost.TopRoleSpend}}).{{end}}</div>
+{{else if .Cost.TopRole}}<div class="banner calm">Most of the last 24 hours went to
+<a href="/roles/{{.Cost.TopRole}}">{{.Cost.TopRole}}</a> ({{.Cost.TopRoleSpend}}).</div>{{end}}
 {{if .Spend.Unpriced}}<div class="banner bad">{{plural .Spend.Unpriced "finished run" "finished runs"}} used a model
 with no price entry. Their cost is <b>unknown, not zero</b>, and is not in the figure above. First: <span class="mono">{{.Spend.UnpricedRun}}</span>.</div>{{end}}
 
@@ -247,46 +265,27 @@ re-derived rather than merely described. <span class="mono">adlc run replay &lt;
 {{end}}{{end}}
 `
 
-const roadmapHTML = `
-{{if eq .Page "roadmap"}}
-<div class="banner calm">An idea is signed off, researched, decomposed, and the decomposition is
-checked against the intent <b>before any of it is built</b>. Signing off is the one planning gate no
-machine passes on its own; a deliverable at <b>planned</b> is waiting for the plan review, and
-nothing under it is dispatched until it passes.</div>
-{{range .Body}}
-<div class="card" style="margin-bottom:10px">
-  <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
-    <b class="mono"><a href="/segment/{{.ID}}">{{.ID}}</a></b>
-    <span style="font-size:15px">{{.Title}}</span>
-    <span class="pill {{stateClass .State}}">{{.State}}</span>
-    <span class="dim" style="margin-left:auto">{{.Progress.Done}}/{{.Progress.Total}} items done</span>
-  </div>
-  {{if .Brief}}<div style="margin-top:7px">{{.Brief}}</div>{{end}}
-  {{if .Rationale}}<div class="dim small" style="margin-top:4px">Why: {{.Rationale}}</div>{{end}}
-  <div class="bar"><i style="width:{{.Progress.Percent}}%"></i></div>
-  <div class="dim small" style="margin-top:6px">{{.Next}}
-    {{if .Progress.Blocked}}· <span class="pill bad">{{.Progress.Blocked}} blocked</span>{{end}}
-    {{if .Progress.Waiting}}· <span class="pill warn">{{.Progress.Waiting}} awaiting approval</span>{{end}}</div>
-  {{if .NeedsYou}}<form class="inline" method="post" action="/signoff">
-    <input type="hidden" name="id" value="{{.ID}}">
-    <input type="hidden" name="to" value="{{.SignTo}}">
-    <input type="text" name="who" placeholder="your name">
-    <input type="text" name="why" placeholder="why, in your own words" style="flex:1;min-width:200px">
-    <button type="submit">{{.SignVerb}}</button>
-  </form>{{end}}
-</div>
-{{else}}<div class="card dim">No deliverables yet. Add one with a brief and a target and the planner lane
-will fill it:<br><span class="mono">adlc segment create -id S1 -title "…" -brief "…" -target 5</span></div>{{end}}
-{{end}}
-`
-
 const progressHTML = `
 {{if eq .Page "progress"}}{{with .Body}}
-<h2>Everything, by stage</h2>
+<h2>Everything, by stage <span class="sub">click a tile for the work behind it</span></h2>
 <div class="grid">
-  {{$t := .Totals}}{{range .Stages}}<div class="card">
-    <div class="n">{{index $t .Key}}</div><div class="l">{{.Label}}</div></div>{{end}}
+  {{$t := .Totals}}{{$sel := .Stage}}{{range .Stages}}<a class="card tile{{if eq $sel .Key}} on{{end}}"
+    href="/progress?stage={{.Key}}">
+    <div class="n">{{index $t .Key}}</div><div class="l">{{.Label}}</div></a>{{end}}
 </div>
+{{if .Stage}}
+<h2>{{.StageLabel}} <span class="sub">{{len .Drill}} item(s) · <a href="/progress">show every stage</a></span></h2>
+<div class="wrap"><table>
+  <tr><th>item</th><th>deliverable</th><th>area</th><th>state</th><th>what that means</th></tr>
+  {{range .Drill}}<tr>
+    <td><a href="/item/{{.ID}}">{{.ID}}</a> {{.Title}}</td>
+    <td class="mono small">{{if .SegmentID}}<a href="/segment/{{.SegmentID}}">{{.SegmentID}}</a>{{end}}</td>
+    <td class="dim small">{{.Area}}</td>
+    <td><span class="pill {{.Class}}">{{.State}}</span></td>
+    <td class="dim">{{.Says}}</td>
+  </tr>{{else}}<tr><td colspan="5" class="dim">Nothing is in this stage.</td></tr>{{end}}
+</table></div>
+{{end}}
 <p class="dim small">Overall: <b>{{.Overall.Done}}</b> of <b>{{.Overall.Total}}</b> work items done
 ({{.Overall.Percent}}%). The bar measures items <b>finished</b>, not items touched — how busy the fleet
 looks is not the question anyone is asking.</p>
@@ -297,7 +296,7 @@ looks is not the question anyone is asking.</p>
       <th class="num">done</th><th class="num">active</th><th class="num">queued</th>
       <th class="num">blocked</th><th class="num">approval</th><th class="num">total</th></tr>
   {{range .Rows}}<tr>
-    <td><a href="/segment/{{.ID}}">{{.ID}}</a> <span class="dim">{{.Title}}</span></td>
+    <td><a href="/segment/{{.ID}}"><span class="mono">{{.ID}}</span> {{.Title}}</a></td>
     <td><span class="pill {{stateClass .State}}">{{.State}}</span></td>
     <td><div class="bar" style="margin:6px 0"><i style="width:{{.Progress.Percent}}%"></i></div></td>
     <td class="num">{{.Progress.Done}}</td><td class="num">{{.Progress.Active}}</td>
@@ -307,97 +306,6 @@ looks is not the question anyone is asking.</p>
     <td class="num">{{.Progress.Total}}</td>
   </tr>{{else}}<tr><td colspan="9" class="dim">Nothing on the roadmap yet.</td></tr>{{end}}
 </table></div>
-{{end}}{{end}}
-`
-
-const questionsHTML = `
-{{if eq .Page "questions"}}{{with .Body}}
-<div class="banner calm">An agent that needs a decision stops and asks rather than guessing. Each question
-carries the asker's own recommendation — a question with no lean hands you back the analysis it was
-dispatched to do. Your answer is recorded verbatim and unblocks the item.</div>
-{{range .Items}}
-<div class="q">
-  <h3>{{if .Blocking}}<span class="pill bad">blocking</span> {{end}}{{.Text}}</h3>
-  <div class="dim mono small">{{.ID}}{{if .ItemID}} · <a href="/item/{{.ItemID}}">{{.ItemID}}</a>{{end}}
-    {{if .RaisedBy}} · raised by <a href="/run/{{.RaisedBy}}">{{.RaisedBy}}</a>{{end}}</div>
-  {{if .Lean}}<div class="lean"><b>Their recommendation:</b> {{.Lean}}</div>{{end}}
-  {{if .Evidence}}<div class="dim small">{{.Evidence}}</div>{{end}}
-  <form method="post" action="/answer">
-    <input type="hidden" name="id" value="{{.ID}}">
-    <textarea name="answer" placeholder="Your answer, recorded verbatim." required></textarea>
-    <div class="inline"><input type="text" name="who" placeholder="your name">
-      <button type="submit">Answer and unblock</button></div>
-  </form>
-</div>
-{{else}}<div class="card dim">No open questions.</div>{{end}}
-{{end}}{{end}}
-`
-
-const approvalsHTML = `
-{{if eq .Page "approvals"}}{{with .Body}}
-<div class="banner calm">Anything whose blast radius exceeds the configured threshold stops here before it
-touches a machine. You approve <b>one specific plan</b>: if the plan changes afterwards, the approval stops
-applying and the apply is refused.</div>
-{{range .Rows}}
-<div class="q" {{if .Decided}}style="border-left-color:var(--line)"{{end}}>
-  <h3>{{.Item.Title}}</h3>
-  <div class="dim mono small">{{.ID}} · <a href="/item/{{.ItemID}}">{{.ItemID}}</a> ·
-    radius <b>{{.Radius}}</b> · plan {{short .PlanDigest}} · requested {{ago .RequestedMS}}</div>
-  {{if .Summary}}<div class="lean">{{.Summary}}</div>{{end}}
-  {{if .Item.Resources}}<div class="dim small">changes: <span class="mono">{{join .Item.Resources}}</span></div>{{end}}
-  {{if .Decided}}
-    <div style="margin-top:7px"><span class="pill {{if eq .Verdict "approve"}}ok{{else}}bad{{end}}">{{.Verdict}}d</span>
-      by {{.Approver}} {{ago .DecidedMS}}{{if .Note}} — {{.Note}}{{end}}</div>
-  {{else}}
-    <form class="inline" method="post" action="/decide">
-      <input type="hidden" name="id" value="{{.ID}}">
-      <input type="text" name="approver" placeholder="your name" required>
-      <input type="text" name="note" placeholder="why, or any condition" style="flex:1;min-width:200px">
-      <button type="submit" name="verdict" value="approve">Approve this plan</button>
-      <button type="submit" name="verdict" value="reject" class="sec">Reject</button>
-    </form>
-  {{end}}
-</div>
-{{else}}<div class="card dim">Nothing is waiting for approval.</div>{{end}}
-{{end}}{{end}}
-`
-
-const rolesHTML = `
-{{if eq .Page "roles"}}{{with .Body}}
-<div class="banner calm">Each role is a prompt file in the repository. The dispatcher reads it at dispatch
-time and carries no prompt of its own, so editing the file changes the role — reviewably, in a commit.
-The shared preamble below is assembled into every one of them, which is why fleet-wide policy is one edit.</div>
-<div class="wrap"><table>
-  <tr><th>role</th><th>layer</th><th>can</th><th>areas</th><th>prompt</th>
-      <th class="num">runs</th><th class="num">pass</th><th class="num">refused</th></tr>
-  {{range .Rows}}<tr>
-    <td class="mono">{{.Type}}{{if .LowCadence}} <span class="pill mute">low cadence</span>{{end}}
-      <div class="dim small" style="max-width:38ch">{{.Description}}</div></td>
-    <td class="dim">{{.Layer}}</td>
-    <td class="mono small">{{join .Capabilities}}</td>
-    <td class="dim small">{{if .Areas}}{{join .Areas}}{{else}}<i>generalist</i>{{end}}</td>
-    <td><a href="/role/{{.Prompt}}">{{.Prompt}}</a>
-      {{if .Missing}}<span class="pill bad">prompt file missing</span>{{end}}
-      <div class="dim mono small">{{short .SHA}}</div></td>
-    <td class="num">{{if .Stat.Runs}}{{.Stat.Runs}}{{else}}<span class="pill bad">0</span>{{end}}</td>
-    <td class="num">{{.Stat.Pass}}</td><td class="num">{{.Stat.Refusals}}</td>
-  </tr>{{end}}
-</table></div>
-<h2>Shared preamble <span class="sub">{{.PPath}} · {{short .PSHA}}</span></h2>
-<pre>{{.Preamble}}</pre>
-{{end}}{{end}}
-`
-
-const roleHTML = `
-{{if eq .Page "role"}}{{with .Body}}
-<h2>{{.ID}} <span class="sub">{{.Version}} · {{.Path}} · {{short .SHA}}</span></h2>
-<p class="dim small">Used by: <span class="mono">{{join .UsedBy}}</span>. To tune this role, edit the file
-and commit — the change takes effect on the next dispatch, and the gate checks that every mandatory
-safety clause survived the edit.</p>
-<h2>Role text</h2>
-<pre>{{.Body}}</pre>
-<h2>What an agent actually receives <span class="sub">preamble + role, assembled at dispatch</span></h2>
-<pre>{{.Assembled}}</pre>
 {{end}}{{end}}
 `
 
@@ -437,102 +345,6 @@ is unreachable, and an unreachable item looks exactly like one nobody has got ro
 {{end}}{{end}}
 `
 
-const configHTML = `
-{{if eq .Page "config"}}{{with .Body}}
-<h2>Lanes <span class="sub">pause one, or change its cadence — takes effect on its next tick</span></h2>
-<div class="wrap"><table>
-  <tr><th>lane</th><th>status</th><th>scope</th><th>last fired</th><th>controls</th></tr>
-  {{range .Lanes}}<tr>
-    <td class="mono">{{.Name}}</td>
-    <td><span class="pill {{verdictClass .Status}}">{{.Status}}</span></td>
-    <td class="dim mono small">{{.Scope}}</td>
-    <td class="dim">{{.Since}}</td>
-    <td><form class="inline" method="post" action="/loop" style="margin:0">
-      <input type="hidden" name="name" value="{{.Name}}">
-      <label class="small dim"><input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}}> running</label>
-      <input type="number" name="every" value="{{.EverySeconds}}" min="15" title="seconds between firings">
-      <input type="number" name="max" value="{{.MaxPerTick}}" min="1" title="dispatches per firing">
-      <button type="submit" class="sec">Save</button>
-    </form></td>
-  </tr>{{else}}<tr><td colspan="5" class="dim">No lanes declared.</td></tr>{{end}}
-</table></div>
-
-<h2>Safety policy <span class="sub">read-only here; it lives in {{.Path}}</span></h2>
-<div class="wrap"><table>
-  <tr><th>setting</th><th>value</th><th>what it means</th></tr>
-  <tr><td class="mono">auto_apply_max</td><td class="mono">{{.Cfg.Blast.AutoApplyMax}}</td>
-    <td class="dim">The largest blast radius that may be applied with no approval. Anything above it stops and waits for a person.</td></tr>
-  <tr><td class="mono">named_approver_min</td><td class="mono">{{.Cfg.Blast.NamedApproverMin}}</td>
-    <td class="dim">From this radius up, the approval must name a human rather than merely exist.</td></tr>
-  <tr><td class="mono">two_approvals_min</td><td class="mono">{{.Cfg.Blast.TwoApprovalsMin}}</td>
-    <td class="dim">From this radius up, two distinct approvers are required.</td></tr>
-  <tr><td class="mono">approval_ttl_minutes</td><td class="mono">{{.Cfg.Blast.ApprovalTTLMinutes}}</td>
-    <td class="dim">How long an approval stays valid, even if the plan has not moved.</td></tr>
-  <tr><td class="mono">max_attempts</td><td class="mono">{{.Cfg.Dispatch.MaxAttempts}}</td>
-    <td class="dim">Rework attempts before an item escalates to a person instead of looping.</td></tr>
-  <tr><td class="mono">isolation</td><td class="mono">{{.Cfg.Dispatch.Isolation}}</td>
-    <td class="dim">How each run's workspace is separated from the shared tree.</td></tr>
-  <tr><td class="mono">per_day_micros</td><td class="mono">{{.Cfg.Budget.PerDayMicros}}</td>
-    <td class="dim">Daily spend cap. Zero means unlimited, which is not the same as exhausted.</td></tr>
-</table></div>
-{{if not .PriceSet}}<div class="banner bad">No model prices are configured, so every run reports
-<b>UNPRICED</b> — cost unknown, not zero. Set <span class="mono">budget.price_micros_per_mtok</span>
-before running unattended, or the spend cap can never be reached.</div>{{end}}
-
-<h2>Gate checks <span class="sub">what the control plane runs itself, and how it reads the answer</span></h2>
-<div class="wrap"><table>
-  <tr><th>check</th><th>kind</th><th>command</th><th>verdict is</th><th>gates</th></tr>
-  {{range .Checks}}<tr>
-    <td class="mono">{{.ID}}</td><td class="dim">{{.Kind}}</td>
-    <td class="mono small">{{join .Command}}</td>
-    <td class="mono small">{{.Verdict}}</td>
-    <td class="dim small">{{join .RequiredFor}}</td>
-  </tr>{{end}}
-</table></div>
-
-<h2>Mandatory clauses <span class="sub">every role prompt must carry these; the gate refuses a commit that drops one</span></h2>
-<div class="card"><ul style="margin:0;padding-left:18px">
-  {{range .Clauses}}<li class="mono small">{{.}}</li>{{end}}
-</ul></div>
-
-{{end}}{{end}}
-`
-
-const historyHTML = `
-{{if eq .Page "history"}}{{with .Body}}
-<div class="tabs">
-  <a href="/history?tab=runs" class="{{if eq .Tab "runs"}}on{{end}}">Runs</a>
-  <a href="/history?tab=ledger" class="{{if eq .Tab "ledger"}}on{{end}}">Ledger</a>
-</div>
-{{if eq .Tab "ledger"}}
-<div class="banner calm">The raw chain, newest first. Every row is hash-linked to the one before it, and a
-kind this build cannot interpret is marked — that is reported as unknown, never as tampering.</div>
-<div class="wrap"><table>
-  <tr><th class="num">seq</th><th>when</th><th>kind</th><th>subject</th><th>actor</th><th>payload</th></tr>
-  {{range .Rows}}<tr>
-    <td class="num dim">{{.Seq}}</td><td class="dim small">{{.When}}</td>
-    <td class="mono small">{{.Kind}}{{if not .Known}} <span class="pill warn">unknown to this build</span>{{end}}</td>
-    <td class="mono small">{{.Subject}}</td><td class="dim small">{{.Actor}}</td>
-    <td class="dim small mono" style="max-width:52ch;overflow:hidden;text-overflow:ellipsis">{{.Payload}}</td>
-  </tr>{{end}}
-</table></div>
-{{else}}
-<div class="banner calm">What each run actually did, in plain language. Open one to see what it was given,
-what the control plane observed, and what it decided — and to re-derive that decision from the record.</div>
-<div class="wrap"><table>
-  <tr><th>run</th><th>role</th><th>item</th><th>what it did</th><th class="num">cost</th><th>when</th></tr>
-  {{range .Runs}}<tr>
-    <td class="mono"><a href="/run/{{.RunID}}">{{.RunID}}</a></td>
-    <td class="dim">{{.WorkerType}}</td>
-    <td class="mono">{{if .ItemID}}<a href="/item/{{.ItemID}}">{{.ItemID}}</a>{{end}}</td>
-    <td><span class="pill {{.Class}}">{{.Verdict}}</span> {{.Headline}}</td>
-    <td class="num">{{.Cost}}</td><td class="dim">{{.When}}</td>
-  </tr>{{else}}<tr><td colspan="6" class="dim">No runs yet.</td></tr>{{end}}
-</table></div>
-{{end}}
-{{end}}{{end}}
-`
-
 const runHTML = `
 {{if eq .Page "run"}}{{with .Body}}
 <div class="card">
@@ -568,57 +380,6 @@ const runHTML = `
    · envelope {{short .Run.EnvelopeSHA}} {{if .EnvRetained}}(retained){{else}}(not retained){{end}}
    · base {{short .Run.BaseSHA}} · head {{short .Run.HeadSHA}}</p>
 </div>
-{{end}}{{end}}
-`
-
-const itemHTML = `
-{{if eq .Page "item"}}{{with .Body}}
-<div class="card">
-  <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
-    <b class="mono">{{.Item.ID}}</b>
-    <span class="pill {{stateClass .Item.State}}">{{.Item.State}}</span>
-    <span class="pill mute">{{.Stage.Label}}</span>
-    <span style="font-size:15px">{{.Item.Title}}</span>
-    <span class="dim" style="margin-left:auto">radius {{.Item.Radius}} · area {{.Item.Area}} ·
-      attempt {{.Item.Attempts}} · {{.Tries}} run(s), {{.Passed}} passed, {{.Failed}} failed</span>
-  </div>
-  {{if .Item.Rationale}}<div class="dim" style="margin-top:7px">Why: {{.Item.Rationale}}</div>{{end}}
-  {{if .Segment.ID}}<div class="dim small" style="margin-top:4px">Part of
-    <a href="/segment/{{.Segment.ID}}">{{.Segment.ID}} {{.Segment.Title}}</a></div>{{end}}
-  {{if .Item.BlockedWhy}}<div class="banner bad" style="margin-top:9px">{{.Item.BlockedWhy}}</div>{{end}}
-  {{if .Item.Resources}}<div class="dim small" style="margin-top:6px">resources: <span class="mono">{{join .Item.Resources}}</span></div>{{end}}
-</div>
-
-<h2>Acceptance criteria <span class="sub">the specification of record — no agent may change these</span></h2>
-<div class="card"><ol style="margin:0;padding-left:18px">{{range .Item.Criteria}}<li>{{.}}</li>{{end}}</ol></div>
-
-<h2>Runs</h2>
-<div class="wrap"><table>
-  <tr><th>run</th><th>role</th><th>verdict</th><th>when</th><th>commit</th></tr>
-  {{range .Runs}}<tr>
-    <td class="mono"><a href="/run/{{.RunID}}">{{.RunID}}</a></td><td class="dim">{{.WorkerType}}</td>
-    <td>{{if .Finished}}<span class="pill {{verdictClass .Verdict}}">{{.Verdict}}</span>
-        {{else}}<span class="pill warn">UNKNOWN — started, no end recorded</span>{{end}}</td>
-    <td class="dim">{{ago .StartedMS}}</td><td class="mono dim small">{{short .HeadSHA}}</td>
-  </tr>{{else}}<tr><td colspan="5" class="dim">No runs yet.</td></tr>{{end}}
-</table></div>
-
-<h2>Decisions</h2>
-<div class="wrap"><table>
-  <tr><th>change</th><th>role</th><th>answer</th><th>detail</th></tr>
-  {{range .Proposals}}<tr>
-    <td class="mono dim">{{if .From}}{{.From}} → {{end}}{{.To}}</td><td class="dim">{{.Worker}}</td>
-    <td>{{if .Admitted}}<span class="pill ok">advanced</span>{{else}}<span class="pill bad">{{.Reason}}</span>{{end}}</td>
-    <td class="dim small">{{.Detail}}</td>
-  </tr>{{else}}<tr><td colspan="4" class="dim">Nothing yet.</td></tr>{{end}}
-</table></div>
-
-{{if .Questions}}<h2>Questions</h2>
-{{range .Questions}}<div class="q"><h3>{{.Text}}</h3>
-  <div class="dim mono small">{{.ID}}</div>
-  {{if .Lean}}<div class="lean">{{.Lean}}</div>{{end}}
-  {{if .Answered}}<div><span class="pill ok">answered</span> by {{.AnsweredBy}}: {{.Answer}}</div>{{end}}
-</div>{{end}}{{end}}
 {{end}}{{end}}
 `
 

@@ -91,3 +91,74 @@ func TestAPerRunCapReportsAnOverrun(t *testing.T) {
 		t.Fatal("a run under its cap should not be")
 	}
 }
+
+// The fallback exists because an operator whose config predates DefaultPricing
+// carries an empty table, and every run then reports UNPRICED. A cap that is
+// never reached is a cap nobody notices is missing.
+func TestAModelAbsentFromConfigIsPricedFromTheDefaults(t *testing.T) {
+	b := config.Budget{} // the shape of a config written before pricing shipped
+	c, src := CostFrom(b, "claude-sonnet-4-5", ledger.Usage{InputTokens: 1_000_000, OutputTokens: 100_000})
+	if src != config.PriceDefaulted {
+		t.Fatalf("want the default table to price it, got %q", src)
+	}
+	// $3/Mtok in, $15/Mtok out.
+	if c.String() != "$4.50" {
+		t.Fatalf("want $4.50 from the default rates, got %s", c)
+	}
+}
+
+// The operator's own table wins. Someone who priced a model against their real
+// invoice must not have that figure quietly replaced by a list price.
+func TestTheConfigTableBeatsTheDefaultsForTheSameModel(t *testing.T) {
+	b := config.Budget{PriceMicrosPerMTok: map[string]map[string]int64{
+		"claude-sonnet-4-5": {"input": 1_000_000, "output": 1_000_000},
+	}}
+	c, src := CostFrom(b, "claude-sonnet-4-5", ledger.Usage{InputTokens: 1_000_000})
+	if src != config.PriceConfigured {
+		t.Fatalf("want the configured table, got %q", src)
+	}
+	if c.String() != "$1.00" {
+		t.Fatalf("want the operator's own rate, got %s", c)
+	}
+}
+
+// The fallback is per model, not per table: an operator who priced two models
+// and forgot a third should keep their two figures and not get a free third.
+func TestTheFallbackIsPerModelNotPerTable(t *testing.T) {
+	b := budget() // prices model-a only
+	if _, src := CostFrom(b, "model-a", ledger.Usage{}); src != config.PriceConfigured {
+		t.Errorf("model-a is in the config table, got %q", src)
+	}
+	if _, src := CostFrom(b, "claude-opus-5", ledger.Usage{}); src != config.PriceDefaulted {
+		t.Errorf("claude-opus-5 is only in the defaults, got %q", src)
+	}
+}
+
+// The invariant the fallback must not break: unknown cost is not zero cost.
+func TestAModelInNeitherTableIsStillUnpricedNotFree(t *testing.T) {
+	b := config.Budget{}
+	c, src := CostFrom(b, "some-other-vendors-model", ledger.Usage{InputTokens: 5_000_000})
+	if src != config.PriceUnpriced {
+		t.Fatalf("a model nobody has priced must stay unpriced, got %q", src)
+	}
+	if c != 0 {
+		t.Fatalf("the source carries the meaning; the value is zero, got %s", c)
+	}
+	if ok := b.Priced("some-other-vendors-model"); ok {
+		t.Error("Priced must agree with CostFrom")
+	}
+	if _, ok := Cost(b, "some-other-vendors-model", ledger.Usage{InputTokens: 5_000_000}); ok {
+		t.Error("Cost must report an unpriced model as unpriced")
+	}
+}
+
+// A config with no table at all is what the Overview has to warn about, and it
+// is distinct from a config whose table simply lacks one model.
+func TestAnEmptyTableIsReportedAsRunningOnDefaults(t *testing.T) {
+	if !(config.Budget{}).UsesDefaultPricing() {
+		t.Error("an empty price table means the figures rest on defaults")
+	}
+	if budget().UsesDefaultPricing() {
+		t.Error("an operator with their own table is not running on defaults")
+	}
+}

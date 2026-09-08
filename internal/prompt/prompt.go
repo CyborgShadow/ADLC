@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/CyborgShadow/ADLC/internal/config"
 )
@@ -46,9 +47,17 @@ type Prompt struct {
 func (p Prompt) SHA() string { return digest(p.Body) }
 
 // Library is a directory of prompts plus the shared preamble.
+//
+// One process holds one library and both the scheduler and the dashboard are
+// given it — `adlc schedule run --serve` runs them side by side. So a prompt
+// edited from the dashboard is written while a dispatch may be assembling one,
+// and a Go map read during a write is not a stale read, it is a crash. Every
+// access to the prompt set therefore goes through mu.
 type Library struct {
-	Dir       string
-	Preamble  string
+	Dir      string
+	Preamble string
+	// mu guards Preamble and prompts. Callers never hold it: they call methods.
+	mu        sync.RWMutex
 	preambleP string
 	prompts   map[string]Prompt
 }
@@ -118,6 +127,12 @@ func readPrompt(path string) (Prompt, error) {
 
 // Get returns one prompt.
 func (l *Library) Get(id string) (Prompt, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.get(id)
+}
+
+func (l *Library) get(id string) (Prompt, error) {
 	p, ok := l.prompts[id]
 	if !ok {
 		return Prompt{}, fmt.Errorf("no prompt %q in %s", id, l.Dir)
@@ -127,6 +142,12 @@ func (l *Library) Get(id string) (Prompt, error) {
 
 // IDs lists the prompts in the library.
 func (l *Library) IDs() []string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.ids()
+}
+
+func (l *Library) ids() []string {
 	out := make([]string, 0, len(l.prompts))
 	for id := range l.prompts {
 		out = append(out, id)
@@ -159,7 +180,9 @@ func (a Assembled) Bytes() []byte {
 // prompt is written to be read starting at the seam, and the preamble above it
 // is fleet policy that the role does not restate and cannot override.
 func (l *Library) Assemble(promptID string, vars map[string]string) (Assembled, error) {
-	p, err := l.Get(promptID)
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	p, err := l.get(promptID)
 	if err != nil {
 		return Assembled{}, err
 	}
@@ -194,7 +217,9 @@ func (l *Library) CheckClauses(clauses []string) []ClauseFinding {
 	if len(clauses) == 0 {
 		return nil
 	}
-	for _, id := range l.IDs() {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	for _, id := range l.ids() {
 		p := l.prompts[id]
 		whole := l.Preamble + "\n" + p.Body
 		for _, c := range clauses {
@@ -210,7 +235,19 @@ func (l *Library) CheckClauses(clauses []string) []ClauseFinding {
 func (l *Library) PreamblePath() string { return l.preambleP }
 
 // PreambleSHA identifies the preamble bytes.
-func (l *Library) PreambleSHA() string { return digest(l.Preamble) }
+func (l *Library) PreambleSHA() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return digest(l.Preamble)
+}
+
+// PreambleText reads the shared preamble under the lock. Prefer it to the
+// exported field anywhere the preamble might be edited while it is read.
+func (l *Library) PreambleText() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.Preamble
+}
 
 func digest(s string) string {
 	sum := sha256.Sum256([]byte(strings.ReplaceAll(s, "\r\n", "\n")))

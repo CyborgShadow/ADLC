@@ -175,6 +175,10 @@ func (s *Server) about(*http.Request) (string, any, error) {
 		Workers    int
 		Lanes      int
 		StateCount int
+		// Data is the storage section: one SQLite file, what is in it, and
+		// which parts of it are the record rather than a cache.
+		Data aboutDataInfo
 	}{stages, roadmap, guards, roster, s.Cfg.Project,
-		len(s.Cfg.Checks), len(s.Cfg.Workers), len(s.Cfg.LoopList()), len(authority.AllStates())}, nil
+		len(s.Cfg.Checks), len(s.Cfg.Workers), len(s.Cfg.LoopList()), len(authority.AllStates()),
+		aboutDataFacts()}, nil
 }

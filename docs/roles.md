@@ -13,9 +13,16 @@ run can still say exactly which bytes it was given.
 | `engineer` | implement | *generalist* | Builds anything no specialist claims |
 | `cli-dev` | implement | cli | |
 | `docs-writer` | implement | docs | |
+| `frontend` | implement | frontend | Builds the surface a person looks at, including the states other than the populated one |
+| `backend` | implement | backend | Builds the service tier, for a request that arrives twice and concurrently with another |
+| `api` | implement | api | Builds the published contract. Owns whether a change is additive or breaking |
+| `database` | implement | database, migration | Owns the stored shape and the migrations that change it |
+| `query` | implement | query | Owns the access path: the statements issued, the plans they take, the transactions they run in |
+| `sre` | implement | sre, infrastructure | Writes the infrastructure, the deploy path and the signals. Applying is the operator's step |
 | `tester` | test | testing | Executes the tests. A suite that matched nothing is a failure |
 | `judge` | judge | — | Checks items against criteria by executing things |
 | `validator` | validate | *generalist* | Adversarial review; the only role that can reject |
+| `architect` | validate | architecture | Reviews boundaries, dependency direction, and decisions that are expensive to undo |
 | `security` | validate | security | Reviews for what an attacker would do |
 | `performance` | validate | performance | Reviews for scale and load. Findings need a number |
 | `resilience` | validate | resilience | Reviews for what is left behind when something dies halfway |
@@ -24,8 +31,30 @@ run can still say exactly which bytes it was given.
 | `improver` | improve | — | Records what a landed item taught; raises fixes as work. Low cadence |
 | `operator` | operate | platform, ci | Applies changes to real resources. Low cadence |
 
-Thirteen prompt files back these fifteen roles: several implementers share `implementer.md`, and
-the differentiation is the area they are routed work from.
+Twenty prompt files back these twenty-two roles. `cli-dev` and `docs-writer` share
+`implementer.md` with the generalist, because what makes them separate roles is which files they
+touch and nothing else. The engineering disciplines each have their own file, because what makes
+them separate is a failure mode the generalist prompt does not warn about — that is the test for
+whether a role is worth declaring at all.
+
+`engineer` declaring no areas is load-bearing rather than an oversight. Routing is consulted
+first, and a worker that lists no area is preferred over an unrelated specialist, so an item filed
+under an area nobody claimed reaches the generalist instead of whichever specialist happened to
+sort first.
+
+### Why `database` and `query` are two roles
+
+They fail differently and need different evidence. A migration runs once against data that is
+already there, and `git revert` does not undo it — so the evidence it owes is a rehearsal at
+realistic size, a lock duration, and a written rollback. A query change is revertible with a
+commit, and the evidence it owes is a plan and a row count at production volume. The two are also
+prone to opposite mistakes: the schema side adds a column that rewrites a large table, and the
+access-path side fixes one read with an index that every write then pays for.
+
+The line between them, when an item could be either: if it changes what is stored, it is
+`database`; if it changes how what is stored is reached, it is `query`. Getting an index onto a
+live table is `database` even when `query` asked for it, because how it lands is an operational
+question rather than an access-path one.
 
 ## The handoff
 
@@ -90,12 +119,25 @@ and route the area to it:
 ```
 
 Write a dedicated prompt when the guidance genuinely differs — a security reviewer looks for
-different things than a performance reviewer. Reuse `implementer.md` when the difference is only
-which files the role touches.
+different things than a performance reviewer, and a frontend builder falls into different holes
+than a database one. Reuse `implementer.md` when the difference is only which files the role
+touches. The question to answer before adding a role is what its prompt would say that no
+existing prompt says; if the answer is nothing, the role is a file scope, not a discipline.
 
 **Never add a role without an area that routes to it, and never an area without a role.** An item
 filed under an unowned area is unreachable, and an unreachable item looks exactly like one nobody
 has got round to yet. The config refuses a routing entry naming an undeclared role.
+
+The other half of that rule is quieter and costs more. A role whose area nobody files work under
+never runs, and the Roles page reports it as a red zero — which is correct, and which is why a
+speculative roster is worse than a short one. Declare the disciplines the project actually has.
+
+One area has one owner in `routing`, but two roles can still share an area when they hold
+different capabilities. `security` owns the `security` area for review; an item tagged `security`
+that needs building falls through to the generalist implementer, because the routed owner does not
+hold `implement`. The resolution order is: the area's owner if it holds the capability, then a
+worker holding the capability that lists the area, then a worker holding the capability that
+declares no areas, then anything holding it.
 
 ## Writing a prompt
 

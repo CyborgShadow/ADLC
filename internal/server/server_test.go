@@ -158,7 +158,7 @@ func TestEveryPageRendersOverARealLedger(t *testing.T) {
 		"/coordination":       "Arbitrate",
 		"/about":              "The guards, and what each one prevents",
 		"/roles":              "performer",
-		"/role/impl":          "Builder",
+		"/roles/performer":    "performer",
 		"/config":             "Safety policy",
 		"/history?tab=runs":   "p-1",
 		"/history?tab=ledger": "segment.created",

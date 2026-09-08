@@ -35,21 +35,33 @@ func (m Micros) String() string {
 // whole point: an unpriced model silently costing zero is how a spend cap
 // comes to be never reached.
 func Cost(b config.Budget, model string, u ledger.Usage) (Micros, bool) {
-	if model == "" {
-		model = b.DefaultModel
-	}
-	table, ok := b.PriceMicrosPerMTok[model]
-	if !ok {
-		return 0, false
+	c, src := CostFrom(b, model, u)
+	return c, src != config.PriceUnpriced
+}
+
+// CostFrom prices one run's usage and says which table did it.
+//
+// It is the same arithmetic as Cost with the provenance kept. Callers that
+// print money to a person want it: a total built partly on rates that shipped
+// in the binary is still worth showing, but only if it is labelled, because the
+// figure will otherwise be quoted as if somebody had checked the rates.
+//
+// A model in neither the operator's table nor the defaults returns zero micros
+// and PriceUnpriced. The zero is not a price; the source is what carries the
+// meaning, and a caller that ignores it turns an unknown cost into a free one.
+func CostFrom(b config.Budget, model string, u ledger.Usage) (Micros, config.PriceSource) {
+	table, src := b.PriceFor(model)
+	if src == config.PriceUnpriced {
+		return 0, src
 	}
 	per := func(class string, tokens int64) int64 {
 		return table[class] * tokens / 1_000_000
 	}
-	total := per("input", u.InputTokens) +
-		per("output", u.OutputTokens) +
-		per("cache_read", u.CacheReadTokens) +
-		per("cache_write", u.CacheWriteTokens)
-	return Micros(total), true
+	total := per(config.PriceInput, u.InputTokens) +
+		per(config.PriceOutput, u.OutputTokens) +
+		per(config.PriceCacheRead, u.CacheReadTokens) +
+		per(config.PriceCacheWrite, u.CacheWriteTokens)
+	return Micros(total), src
 }
 
 // Verdict is the answer to "may this run be dispatched, or its result kept".

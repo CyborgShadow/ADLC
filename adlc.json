@@ -112,6 +112,66 @@
     },
 
     {
+      "_comment": "The engineering disciplines. Each one earns a dedicated prompt because it is prone to a different mistake — not because it touches different files. cli-dev and docs-writer above share implementer.md precisely because for them the difference IS only which files they touch.",
+      "type": "frontend",
+      "layer": "worker",
+      "description": "Interface work. The trap is building the one state you had data for, and retrofitting accessibility after the layout.",
+      "prompt": "frontend",
+      "capabilities": ["implement"],
+      "areas": ["frontend"]
+    },
+    {
+      "type": "backend",
+      "layer": "worker",
+      "description": "Service work. The trap is code that is correct in one process and wrong in two.",
+      "prompt": "backend",
+      "capabilities": ["implement"],
+      "areas": ["backend"]
+    },
+    {
+      "type": "api",
+      "layer": "worker",
+      "description": "Interface contracts. The only implement work whose damage a revert cannot reach, because client code is already written against it.",
+      "prompt": "api",
+      "capabilities": ["implement"],
+      "areas": ["api"]
+    },
+    {
+      "_comment": "Split from `query` on irreversibility: a migration runs once against data already there and is not undone by reverting the commit.",
+      "type": "database",
+      "layer": "worker",
+      "description": "Schema and migrations. Owes a rehearsal at realistic size, a lock duration, and a written rollback.",
+      "prompt": "database",
+      "capabilities": ["implement"],
+      "areas": ["database", "migration"]
+    },
+    {
+      "type": "query",
+      "layer": "worker",
+      "description": "Access paths. Owes a plan and a row count at production volume, not an argument from reading the code.",
+      "prompt": "query",
+      "capabilities": ["implement"],
+      "areas": ["query"]
+    },
+    {
+      "type": "sre",
+      "layer": "worker",
+      "description": "Infrastructure as code and the alerting on it. The trap is alerting on causes rather than symptoms, and drift an apply silently reverts.",
+      "prompt": "sre",
+      "capabilities": ["implement"],
+      "areas": ["sre", "infrastructure"]
+    },
+    {
+      "_comment": "A validator rather than a builder: it reviews shape against the system. An implement item tagged `architecture` falls through to the generalist, because the routed owner does not hold implement.",
+      "type": "architect",
+      "layer": "verification",
+      "description": "Reviews structure. The trap is blocking on taste, and reviewing a plan's description instead of its import list.",
+      "prompt": "architecture",
+      "capabilities": ["validate"],
+      "areas": ["architecture"]
+    },
+
+    {
       "type": "tester",
       "layer": "verification",
       "description": "Executes the tests and reports what ran. A suite that matched nothing is a failure, not a pass.",
@@ -206,6 +266,15 @@
     "core": "engineer",
     "cli": "cli-dev",
     "docs": "docs-writer",
+    "frontend": "frontend",
+    "backend": "backend",
+    "api": "api",
+    "database": "database",
+    "migration": "database",
+    "query": "query",
+    "sre": "sre",
+    "infrastructure": "sre",
+    "architecture": "architect",
     "testing": "tester",
     "hygiene": "janitor",
     "verification": "judge",

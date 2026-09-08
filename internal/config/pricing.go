@@ -59,10 +59,62 @@ func DefaultPricing() map[string]map[string]int64 {
 // travels with the numbers rather than living only here.
 const PricingComment = "List prices as of early 2026, in micros per million tokens (one micro = one millionth of a dollar). These are a default, not a fact: confirm them against your provider's current pricing before you rely on a cost report. A model absent from this table reports UNPRICED rather than zero — cost unknown is not cost nothing."
 
-// Priced reports whether a model has an entry. It is separate from looking the
-// price up so that "we do not know what this cost" and "this cost nothing" stay
-// different answers everywhere they are asked.
-func (b Budget) Priced(model string) bool {
-	_, ok := b.PriceMicrosPerMTok[model]
-	return ok
+// PriceSource says where the numbers behind a cost figure came from.
+//
+// Three values, not two, for the same reason the gate verdicts are three-valued:
+// "priced from the table an operator checked" and "priced from a default nobody
+// has looked at" are different degrees of trust, and a report that renders them
+// identically invites a figure to be believed further than it has earned.
+type PriceSource string
+
+const (
+	// PriceUnpriced: no entry for this model in the config table or the
+	// defaults. Its cost is unknown, which is not the same as zero.
+	PriceUnpriced PriceSource = "unpriced"
+	// PriceConfigured: the operator's own table priced it.
+	PriceConfigured PriceSource = "configured"
+	// PriceDefaulted: the built-in table priced it, because the config had no
+	// entry. Real money, unconfirmed rate.
+	PriceDefaulted PriceSource = "default"
+)
+
+// PriceFor resolves one model's price table and says where it came from.
+//
+// The fallback exists because the failure it prevents is silent: a project
+// configured before DefaultPricing shipped carries an empty table, every run
+// prices as UNPRICED, and a spend cap that is never reached is a cap nobody
+// notices is missing. Falling back to the defaults gets a number on the screen.
+// Reporting the source is what stops that number from being mistaken for one
+// somebody confirmed.
+//
+// The fallback is per-model, not per-table. An operator who priced two models
+// and forgot a third should not have their two figures replaced by defaults,
+// and the third should not report as free.
+func (b Budget) PriceFor(model string) (map[string]int64, PriceSource) {
+	if model == "" {
+		model = b.DefaultModel
+	}
+	if t, ok := b.PriceMicrosPerMTok[model]; ok {
+		return t, PriceConfigured
+	}
+	if t, ok := DefaultPricing()[model]; ok {
+		return t, PriceDefaulted
+	}
+	// A model in neither table stays unpriced. Guessing a rate for a model
+	// nobody listed would put an invented number where an absent one belongs.
+	return nil, PriceUnpriced
 }
+
+// Priced reports whether a model has a price at all, from either table. It is
+// separate from looking the price up so that "we do not know what this cost"
+// and "this cost nothing" stay different answers everywhere they are asked.
+func (b Budget) Priced(model string) bool {
+	_, src := b.PriceFor(model)
+	return src != PriceUnpriced
+}
+
+// UsesDefaultPricing reports whether the operator has supplied any price table
+// of their own. It answers the question the Overview has to answer before
+// anybody reads a money figure off it: is this arithmetic on rates somebody
+// here checked, or on the ones that shipped in the binary?
+func (b Budget) UsesDefaultPricing() bool { return len(b.PriceMicrosPerMTok) == 0 }

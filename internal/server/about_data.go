@@ -158,7 +158,7 @@ const aboutDataCSS = `
 `
 
 const aboutDataHTML = `
-{{with .Data}}
+{{if eq .Page "about"}}{{with .Body}}{{with .Data}}
 
 <h2>How the data is stored</h2>
 <p class="lede">Everything on every page of this dashboard comes out of <b>one file</b>:
@@ -413,5 +413,5 @@ reads a column that is not there. So additive columns are separate
 v{{.SchemaVersion}}, the number is stored in <span class="mono">{{.Meta}}</span>, and a build that
 meets a file newer than itself says so before it says anything else.</p>
 
-{{end}}
+{{end}}{{end}}{{end}}
 `

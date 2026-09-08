@@ -85,13 +85,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/progress", s.page("progress", s.progress))
 	mux.HandleFunc("/questions", s.page("questions", s.questions))
 	mux.HandleFunc("/approvals", s.page("approvals", s.approvals))
-	mux.HandleFunc("/roles", s.page("roles", s.roles))
-	mux.HandleFunc("/role/", s.page("role", s.role))
+	mux.HandleFunc("/roles", s.page("roles", s.rolesPage))
+	mux.HandleFunc("/roles/", s.page("roles", s.rolesPage))
+	// Outside /roles/ so that no role name can ever shadow them.
+	mux.HandleFunc("/prompt/save", s.saveRolePrompt)
+	mux.HandleFunc("/preamble/save", s.savePreamble)
 	mux.HandleFunc("/coordination", s.page("coordination", s.coordination))
 	mux.HandleFunc("/about", s.page("about", s.about))
 	mux.HandleFunc("/console", s.page("console", s.consolePage))
-	mux.HandleFunc("/config", s.page("config", s.configPage))
-	mux.HandleFunc("/history", s.page("history", s.history))
+	mux.HandleFunc("/config", s.page("config", s.configPageV2))
+	mux.HandleFunc("/history", s.page("history", s.historyPage))
 	mux.HandleFunc("/run/", s.page("run", s.run))
 	mux.HandleFunc("/item/", s.page("item", s.item))
 	mux.HandleFunc("/segment/", s.page("segment", s.segment))
@@ -100,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/decide", s.decide)
 	mux.HandleFunc("/loop", s.setLoop)
 	mux.HandleFunc("/signoff", s.signoff)
+	mux.HandleFunc("/resume", s.resume)
 	mux.HandleFunc("/console/ask", s.ask)
 	mux.HandleFunc("/console/toggle", s.toggleDock)
 	mux.HandleFunc("/console/do", s.consoleDo)
@@ -294,6 +298,10 @@ type overviewView struct {
 	Spend    spend.Report
 	Blobs    int
 	Refusals []ledger.Proposal
+	// Cost is re-derived from each run's recorded usage rather than summed
+	// from the stored column, so a project whose runs were unpriced when they
+	// ran still reports a figure — and says which pricing it used.
+	Cost CostView
 }
 
 type stageCount struct {
@@ -310,7 +318,7 @@ type recentRun struct {
 }
 
 func (s *Server) overview(*http.Request) (string, any, error) {
-	v := overviewView{}
+	v := overviewView{Cost: s.CostView()}
 	active, err := s.Led.ActiveRuns()
 	if err != nil {
 		return "", nil, err
@@ -367,80 +375,52 @@ func (s *Server) overview(*http.Request) (string, any, error) {
 	return "Overview", v, nil
 }
 
-type roadmapRow struct {
-	ledger.Segment
-	Progress authority.SegmentProgress
-	Stage    string
-	Class    string
-	Next     string
-	// NeedsYou marks the one planning gate no machine passes on its own, and
-	// carries the state the sign-off control would move it to.
-	NeedsYou bool
-	SignTo   string
-	SignVerb string
-}
-
-func (s *Server) roadmap(*http.Request) (string, any, error) {
-	segs, err := s.Led.Segments()
-	if err != nil {
-		return "", nil, err
-	}
-	var rows []roadmapRow
-	for _, sg := range segs {
-		items, _ := s.Led.Items(sg.ID)
-		r := roadmapRow{Segment: sg, Progress: authority.Progress(items)}
-		r.Stage = sg.State
-		switch authority.SegmentState(sg.State) {
-		case authority.SegTheory:
-			r.Class, r.Next = "mute", "An idea. Nothing is committed to it yet."
-			r.NeedsYou, r.SignTo, r.SignVerb = true, string(authority.SegRoadmap), "Put on the roadmap"
-		case authority.SegRoadmap:
-			r.Class, r.Next = "warn", "On the roadmap, waiting for you to sign off the intent. Nothing moves until you do."
-			r.NeedsYou, r.SignTo, r.SignVerb = true, string(authority.SegSignedOff), "Sign it off"
-		case authority.SegSignedOff:
-			r.Class, r.Next = "live", "Signed off. A researcher will turn the intent into an approach."
-		case authority.SegResearching:
-			r.Class, r.Next = "live", "A researcher is working out the approach."
-		case authority.SegResearched:
-			r.Class, r.Next = "live", "The approach is written. A planner will decompose it into work."
-		case authority.SegPlanning:
-			r.Class, r.Next = "live", "A planner is decomposing the approach."
-		case authority.SegPlanned:
-			r.Class, r.Next = "warn", "The plan is written and nobody has checked it against the intent yet. No work starts until they do."
-		case authority.SegValidating:
-			r.Class, r.Next = "live", "A validator is checking the plan against the intent."
-		case authority.SegReady:
-			r.Class, r.Next = "live", "The plan was accepted. Work can start."
-		case authority.SegBuilding:
-			r.Class, r.Next = "live", "Work is in flight."
-		case authority.SegDelivered:
-			r.Class, r.Next = "ok", "Delivered."
-		case authority.SegPaused:
-			r.Class, r.Next = "mute", "Paused by an operator."
-		}
-		rows = append(rows, r)
-	}
-	return "Roadmap", rows, nil
-}
-
 type progressView struct {
+	// Stage is the tile that was clicked, and Drill is what is behind it.
+	Stage      string
+	StageLabel string
+	Drill      []itemLine
+
 	Rows    []roadmapRow
 	Stages  []authority.Stage
 	Totals  map[string]int
 	Overall authority.SegmentProgress
 }
 
-func (s *Server) progress(*http.Request) (string, any, error) {
+// progress rolls the whole fleet up, and drills into one stage when asked.
+//
+// The tiles are counts of something. A count you cannot click is a number that
+// makes you go and find the rows yourself, which on any real backlog means
+// nobody does — so each one leads to the items behind it.
+func (s *Server) progress(r *http.Request) (string, any, error) {
 	segs, _ := s.Led.Segments()
 	all, _ := s.Led.Items("")
 	v := progressView{Stages: authority.Stages(), Totals: map[string]int{},
-		Overall: authority.Progress(all)}
+		Overall: authority.Progress(all), Stage: r.URL.Query().Get("stage")}
 	for _, sg := range segs {
 		items, _ := s.Led.Items(sg.ID)
 		v.Rows = append(v.Rows, roadmapRow{Segment: sg, Progress: authority.Progress(items), Stage: sg.State})
 	}
 	for _, it := range all {
 		v.Totals[authority.StageOf(authority.State(it.State)).Key]++
+	}
+	if v.Stage != "" {
+		for _, st := range authority.Stages() {
+			if st.Key == v.Stage {
+				v.StageLabel = st.Label
+			}
+		}
+		for _, it := range all {
+			if authority.StageOf(authority.State(it.State)).Key != v.Stage {
+				continue
+			}
+			state := authority.State(it.State)
+			v.Drill = append(v.Drill, itemLine{
+				Item: it, Stage: v.StageLabel,
+				Says: humanState(state), Class: itemClass(state),
+			})
+		}
+		sort.Slice(v.Drill, func(i, j int) bool { return v.Drill[i].ID < v.Drill[j].ID })
 	}
 	return "Progress", v, nil
 }
@@ -483,57 +463,6 @@ type roleRow struct {
 	Prompt  string
 	SHA     string
 	Missing bool
-}
-
-func (s *Server) roles(*http.Request) (string, any, error) {
-	stats, _ := s.Led.WorkerStats("")
-	byType := map[string]ledger.WorkerStat{}
-	for _, st := range stats {
-		byType[st.Type] = st
-	}
-	var out []roleRow
-	for _, w := range s.Cfg.Workers {
-		r := roleRow{WorkerDecl: w, Stat: byType[w.Type], Prompt: w.Prompt}
-		if s.Lib != nil {
-			if p, err := s.Lib.Get(w.Prompt); err == nil {
-				r.SHA = p.SHA()
-			} else {
-				r.Missing = true
-			}
-		}
-		out = append(out, r)
-	}
-	return "Roles", struct {
-		Rows     []roleRow
-		Preamble string
-		PSHA     string
-		PPath    string
-	}{out, preambleText(s.Lib), preambleSHA(s.Lib), preamblePath(s.Lib)}, nil
-}
-
-func (s *Server) role(r *http.Request) (string, any, error) {
-	id := strings.TrimPrefix(r.URL.Path, "/role/")
-	if s.Lib == nil {
-		return "", nil, fmt.Errorf("no prompt library is loaded")
-	}
-	p, err := s.Lib.Get(id)
-	if err != nil {
-		return "", nil, err
-	}
-	asm, err := s.Lib.Assemble(id, nil)
-	if err != nil {
-		return "", nil, err
-	}
-	var users []string
-	for _, w := range s.Cfg.Workers {
-		if w.Prompt == id {
-			users = append(users, w.Type)
-		}
-	}
-	return "Role " + id, struct {
-		ID, Version, Path, SHA, Body, Assembled string
-		UsedBy                                  []string
-	}{p.ID, p.Version, p.Path, p.SHA(), p.Body, asm.Text, users}, nil
 }
 
 type handoff struct {
@@ -625,113 +554,12 @@ type loopRow struct {
 	Since  string
 }
 
-func (s *Server) configPage(*http.Request) (string, any, error) {
-	var lanes []loopRow
-	health := map[string]ledger.LoopHealth{}
-	if s.Sched != nil {
-		if hs, err := s.Sched.Health(s.now()); err == nil {
-			for _, h := range hs {
-				health[h.Loop] = h
-			}
-		}
-	}
-	for _, l := range s.Cfg.LoopList() {
-		h := health[l.Name]
-		row := loopRow{LoopDecl: l, Health: h, Status: "live", Since: "—"}
-		switch {
-		case !l.Enabled:
-			row.Status = "paused"
-		case h.LastTickMS == 0:
-			row.Status = "NEVER RUN"
-		case !h.Fresh(s.now(), 3):
-			row.Status = "STALE"
-		}
-		if h.LastTickMS > 0 {
-			row.Since = s.now().Sub(time.UnixMilli(h.LastTickMS)).Round(time.Second).String() + " ago"
-		}
-		lanes = append(lanes, row)
-	}
-	return "Config", struct {
-		Path     string
-		Lanes    []loopRow
-		Cfg      *config.Config
-		Clauses  []string
-		Checks   []config.Check
-		Radii    []config.Radius
-		PriceSet bool
-	}{
-		s.Cfg.Path(), lanes, s.Cfg, s.Cfg.Prompts.MandatoryClauses, s.Cfg.Checks,
-		config.Radii(), len(s.Cfg.Budget.PriceMicrosPerMTok) > 0,
-	}, nil
-}
-
 type historyRun struct {
 	ledger.Run
 	Headline string
 	When     string
 	Cost     string
 	Class    string
-}
-
-func (s *Server) history(r *http.Request) (string, any, error) {
-	tab := r.URL.Query().Get("tab")
-	if tab == "" {
-		tab = "runs"
-	}
-	if tab == "ledger" {
-		from := int64(1)
-		evs, err := s.Led.Events(from, 0)
-		if err != nil {
-			return "", nil, err
-		}
-		if len(evs) > 300 {
-			evs = evs[len(evs)-300:]
-		}
-		for i, j := 0, len(evs)-1; i < j; i, j = i+1, j-1 {
-			evs[i], evs[j] = evs[j], evs[i]
-		}
-		type row struct {
-			ledger.Event
-			When    string
-			Known   bool
-			Payload string
-		}
-		var rows []row
-		for _, e := range evs {
-			rows = append(rows, row{Event: e, Known: ledger.KnownKinds[e.Kind],
-				When:    time.UnixMilli(e.TsMS).Format("Jan 2 15:04:05"),
-				Payload: string(e.Payload)})
-		}
-		return "History", struct {
-			Tab  string
-			Rows []row
-		}{tab, rows}, nil
-	}
-	runs, err := s.Led.Runs("", 120)
-	if err != nil {
-		return "", nil, err
-	}
-	var out []historyRun
-	for _, r := range runs {
-		h := historyRun{Run: r, Cost: spend.Micros(r.CostMicros).String(),
-			When: time.UnixMilli(r.StartedMS).Format("Jan 2 15:04")}
-		if st, err := story.OfRun(s.Led, s.Cfg, r.RunID); err == nil {
-			h.Headline = st.Headline
-		}
-		switch {
-		case !r.Finished():
-			h.Class = "warn"
-		case r.Verdict == "pass":
-			h.Class = "ok"
-		default:
-			h.Class = "bad"
-		}
-		out = append(out, h)
-	}
-	return "History", struct {
-		Tab  string
-		Runs []historyRun
-	}{tab, out}, nil
 }
 
 func (s *Server) run(r *http.Request) (string, any, error) {
@@ -741,30 +569,6 @@ func (s *Server) run(r *http.Request) (string, any, error) {
 		return "", nil, err
 	}
 	return "Run " + id, st, nil
-}
-
-func (s *Server) item(r *http.Request) (string, any, error) {
-	id := strings.TrimPrefix(r.URL.Path, "/item/")
-	it, err := s.Led.Item(id)
-	if err != nil {
-		return "", nil, err
-	}
-	runs, _ := s.Led.Runs(id, 30)
-	props, _ := s.Led.Proposals(id, false, 30)
-	qs, _ := s.Led.Questions(id, false)
-	aps, _ := s.Led.Approvals(id)
-	seg, _ := s.Led.Segment(it.SegmentID)
-	tries, passed, failed, _ := s.Led.AttemptsFor(id)
-	return "Item " + id, struct {
-		Item                  ledger.Item
-		Segment               ledger.Segment
-		Stage                 authority.Stage
-		Runs                  []ledger.Run
-		Proposals             []ledger.Proposal
-		Questions             []ledger.Question
-		Approvals             []ledger.Approval
-		Tries, Passed, Failed int
-	}{it, seg, authority.StageOf(authority.State(it.State)), runs, props, qs, aps, tries, passed, failed}, nil
 }
 
 func (s *Server) segment(r *http.Request) (string, any, error) {

@@ -42,14 +42,27 @@ type scaffoldRole struct {
 	LowCadence                       bool
 }
 
-// standardRoster is one role per capability, plus the generalists.
+// standardRoster is one role per capability, the generalists, and the
+// engineering disciplines.
 //
 // Every capability in the lifecycle gets an owner here, because a capability
 // nobody holds strands every item that reaches it — and a stranded item looks
-// exactly like one nobody has got round to. Specialists are deliberately absent:
-// they are worth adding when a project knows what its risks are, and inventing
-// a security reviewer for a project that has not asked for one just produces a
-// role that never runs.
+// exactly like one nobody has got round to.
+//
+// The disciplines are here for a different reason. A planner may only file work
+// under an area the project has declared, so an area that is absent from the
+// generated config is one the planner cannot name: the item is filed as core,
+// the generalist takes it, and the roster is decorative. Declaring them up front
+// makes the taxonomy available from the first item. Each one is a discipline
+// that brings different judgement rather than a different file scope — the
+// trap each is prone to is written into its prompt — and a discipline a project
+// does not have is one entry to delete, which `adlc config check` will point at
+// because a role with no runs reports as a red zero rather than an empty row.
+//
+// Risk reviewers are still deliberately absent. Security, performance and
+// resilience specialists are worth adding once a project knows which of those
+// is its risk; generating all three for a project that has not asked produces
+// three roles that never run.
 func standardRoster() []scaffoldRole {
 	return []scaffoldRole{
 		{"researcher", "planning", "researcher",
@@ -64,6 +77,24 @@ func standardRoster() []scaffoldRole {
 		{"docs-writer", "worker", "implementer",
 			"Implements documentation items.",
 			[]string{CapImplement}, []string{"docs"}, false},
+		{"frontend", "worker", "frontend",
+			"Builds the surface a person looks at, including the states other than the populated one.",
+			[]string{CapImplement}, []string{"frontend"}, false},
+		{"backend", "worker", "backend",
+			"Builds the service tier, for a request that arrives twice and concurrently with another.",
+			[]string{CapImplement}, []string{"backend"}, false},
+		{"api", "worker", "api",
+			"Builds the published contract. Owns whether a change is additive or breaking.",
+			[]string{CapImplement}, []string{"api"}, false},
+		{"database", "worker", "database",
+			"Owns the stored shape and the migrations that change it — the work git revert does not undo.",
+			[]string{CapImplement}, []string{"database", "migration"}, false},
+		{"query", "worker", "query",
+			"Owns the access path: the statements issued, the plans they take, the transactions they run in.",
+			[]string{CapImplement}, []string{"query"}, false},
+		{"sre", "worker", "sre",
+			"Writes the infrastructure, the deploy path and the signals. Applying is the operator's step.",
+			[]string{CapImplement}, []string{"sre", "infrastructure"}, false},
 		{"tester", "verification", "tester",
 			"Executes the tests and reports what ran. A suite that matched nothing is a failure.",
 			[]string{CapTest}, []string{"testing"}, false},
@@ -73,6 +104,9 @@ func standardRoster() []scaffoldRole {
 		{"validator", "verification", "validator",
 			"Adversarial review, and validation of a plan against the intent behind it. The only role that may reject.",
 			[]string{CapValidate}, nil, false},
+		{"architect", "verification", "architecture",
+			"Reviews where a change puts things: boundaries, dependency direction, decisions that are expensive to undo.",
+			[]string{CapValidate}, []string{"architecture"}, false},
 		{"janitor", "stewardship", "janitor",
 			"Hygiene only: stale docs, dead references, duplicated statements of one fact.",
 			[]string{CapCurate}, []string{"hygiene"}, true},
