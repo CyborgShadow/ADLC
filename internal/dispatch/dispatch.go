@@ -27,14 +27,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/authority"
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/envelope"
-	"github.com/CyborgShadow/adlc/internal/gate"
-	"github.com/CyborgShadow/adlc/internal/lease"
-	"github.com/CyborgShadow/adlc/internal/ledger"
-	"github.com/CyborgShadow/adlc/internal/prompt"
-	"github.com/CyborgShadow/adlc/internal/spend"
+	"github.com/CyborgShadow/ADLC/internal/authority"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/envelope"
+	"github.com/CyborgShadow/ADLC/internal/gate"
+	"github.com/CyborgShadow/ADLC/internal/lease"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/prompt"
+	"github.com/CyborgShadow/ADLC/internal/spend"
 )
 
 // Invocation is everything an agent runner is told.

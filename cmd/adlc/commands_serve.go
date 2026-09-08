@@ -7,9 +7,9 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/dispatch"
-	"github.com/CyborgShadow/adlc/internal/prompt"
-	"github.com/CyborgShadow/adlc/internal/server"
+	"github.com/CyborgShadow/ADLC/internal/dispatch"
+	"github.com/CyborgShadow/ADLC/internal/prompt"
+	"github.com/CyborgShadow/ADLC/internal/server"
 )
 
 // ---------------------------------------------------------------- serve

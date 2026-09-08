@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/envelope"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/envelope"
 )
 
 // Refusal reasons specific to work generation.

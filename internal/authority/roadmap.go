@@ -3,7 +3,7 @@ package authority
 import (
 	"fmt"
 
-	"github.com/CyborgShadow/adlc/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // SegmentState is where a deliverable sits on the roadmap.

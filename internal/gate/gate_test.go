@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/envelope"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/envelope"
 )
 
 func check(t *testing.T, c config.Check) *config.Check {
@@ -141,11 +141,9 @@ func TestAFabricatedExitCodeIsADiscrepancy(t *testing.T) {
 	}
 }
 
-// TestAnHonestNotRunIsNeverADiscrepancy pins a correction that cost real runs.
-//
-// A matcher that punishes a worker for saying "I could not run this" teaches
-// workers to delete the line instead — which is strictly worse, because the
-// omission is invisible and the honest report was not.
+// TestAnHonestNotRunIsNeverADiscrepancy pins the honesty rule. A matcher that
+// punishes "I could not run this" teaches workers to delete the line instead,
+// which is strictly worse: the omission is invisible and the report was not.
 func TestAnHonestNotRunIsNeverADiscrepancy(t *testing.T) {
 	cfg := mustConfig(t, []config.Check{{ID: "race", Command: []string{"x"}, Verdict: config.VerdictExitZero}})
 	res := &Result{Checks: []Observation{{CheckID: "race", Rule: config.VerdictExitZero, Ran: true, ExitCode: 0, Verdict: StatusGreen}}}
@@ -158,9 +156,9 @@ func TestAnHonestNotRunIsNeverADiscrepancy(t *testing.T) {
 	}
 }
 
-// TestAClaimIsJudgedInTheChannelTheObservationWas pins the inversion this
-// matcher was rewritten to fix: comparing exit codes for an output-judged
-// check refused a truthful envelope and admitted a doctored one.
+// TestAClaimIsJudgedInTheChannelTheObservationWas pins the channel rule.
+// Comparing exit codes for an output-judged check refuses a truthful envelope
+// and admits a doctored one — the exact inversion the matcher exists to prevent.
 func TestAClaimIsJudgedInTheChannelTheObservationWas(t *testing.T) {
 	cfg := mustConfig(t, []config.Check{{ID: "fmt", Command: []string{"x"}, Verdict: config.VerdictOutputEmpty}})
 	// The gate saw an unformatted tree: exit 0, but files printed.

@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/envelope"
-	"github.com/CyborgShadow/adlc/internal/gate"
-	"github.com/CyborgShadow/adlc/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/envelope"
+	"github.com/CyborgShadow/ADLC/internal/gate"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // Request is one proposal put to the authority.

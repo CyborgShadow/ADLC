@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/authority"
-	"github.com/CyborgShadow/adlc/internal/dispatch"
-	"github.com/CyborgShadow/adlc/internal/envelope"
-	"github.com/CyborgShadow/adlc/internal/gate"
-	"github.com/CyborgShadow/adlc/internal/ledger"
-	"github.com/CyborgShadow/adlc/internal/prompt"
-	"github.com/CyborgShadow/adlc/internal/spend"
+	"github.com/CyborgShadow/ADLC/internal/authority"
+	"github.com/CyborgShadow/ADLC/internal/dispatch"
+	"github.com/CyborgShadow/ADLC/internal/envelope"
+	"github.com/CyborgShadow/ADLC/internal/gate"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/prompt"
+	"github.com/CyborgShadow/ADLC/internal/spend"
 )
 
 // ---------------------------------------------------------------- gate

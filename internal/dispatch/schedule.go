@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // Scheduler runs the declared loops on their own cadences.

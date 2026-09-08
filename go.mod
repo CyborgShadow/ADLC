@@ -1,4 +1,4 @@
-module github.com/CyborgShadow/adlc
+module github.com/CyborgShadow/ADLC
 
 go 1.25.0
 

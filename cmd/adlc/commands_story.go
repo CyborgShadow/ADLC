@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/CyborgShadow/adlc/internal/authority"
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/ledger"
-	"github.com/CyborgShadow/adlc/internal/story"
+	"github.com/CyborgShadow/ADLC/internal/authority"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/story"
 )
 
 // cmdRunStory implements the read-and-reproduce half of `adlc run`.

@@ -3,8 +3,8 @@ package spend
 import (
 	"testing"
 
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 func budget() config.Budget {

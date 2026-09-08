@@ -3,7 +3,7 @@ package authority
 import (
 	"fmt"
 
-	"github.com/CyborgShadow/adlc/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/config"
 )
 
 // Advance is what the control plane will do next with an item.

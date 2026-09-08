@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/envelope"
-	"github.com/CyborgShadow/adlc/internal/gate"
-	"github.com/CyborgShadow/adlc/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/envelope"
+	"github.com/CyborgShadow/ADLC/internal/gate"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 var now = time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)

@@ -39,8 +39,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/envelope"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/envelope"
 )
 
 // Status is a verdict. There are three, and the third is load-bearing.

@@ -8,7 +8,7 @@ Agents propose. `adlc` decides. Both answers land on an append-only, hash-chaine
 agents cannot write to.
 
 ```bash
-go install github.com/CyborgShadow/adlc/cmd/adlc@latest
+go install github.com/CyborgShadow/ADLC/cmd/adlc@latest
 adlc init && adlc schedule run     # then open http://127.0.0.1:8099
 ```
 
@@ -105,10 +105,9 @@ choosing.
 
 ## Status
 
-Working and used, with a caveat worth stating plainly: `internal/server`, `config`, `prompt`,
-`report` and `story` have no tests of their own and are exercised through the packages that use
-them. The dashboard is verified by hand. Everything else — the ledger, the transition authority,
-the gate, the dispatcher, leases, spend — is covered.
+Working and used. Every package carries its own tests, including the dashboard and the decision
+replay path, and each guard is pinned by both a firing case and a clean case — a test that only
+asserts a guard fires passes vacuously the day it starts flagging everything.
 
 ## Licence
 

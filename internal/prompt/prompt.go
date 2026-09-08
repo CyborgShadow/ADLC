@@ -29,7 +29,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/CyborgShadow/adlc/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/config"
 )
 
 // Prompt is one role's instructions, as stored.

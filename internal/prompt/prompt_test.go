@@ -1,0 +1,197 @@
+package prompt
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/CyborgShadow/ADLC/internal/config"
+)
+
+func library(t *testing.T, files map[string]string) *Library {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pol := config.PromptPolicy{Dir: dir}
+	if _, ok := files["_preamble.md"]; ok {
+		pol.PreambleFile = filepath.Join(dir, "_preamble.md")
+	}
+	lib, err := Load(pol)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return lib
+}
+
+const preamble = "---\nid: _preamble\n---\nFLEET POLICY. You never write the ledger.\n"
+const builder = "---\nid: builder\nversion: v2\n---\n# Builder\n\nWork on {{work_item_id}} in {{workdir}}.\n"
+
+func TestAPromptIsReadWithItsFrontMatter(t *testing.T) {
+	lib := library(t, map[string]string{"builder.md": builder})
+	p, err := lib.Get("builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ID != "builder" || p.Version != "v2" {
+		t.Fatalf("front matter not parsed: %+v", p.Front)
+	}
+	if strings.Contains(p.Body, "---") {
+		t.Error("the front matter should not survive into the body")
+	}
+	if !strings.HasPrefix(p.Body, "# Builder") {
+		t.Errorf("body starts wrong: %q", p.Body[:20])
+	}
+}
+
+func TestAFileWithNoFrontMatterStillLoads(t *testing.T) {
+	lib := library(t, map[string]string{"plain.md": "just some instructions\n"})
+	p, err := lib.Get("plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Version != "v1" {
+		t.Errorf("an unversioned prompt defaults to v1, got %q", p.Version)
+	}
+}
+
+func TestTwoPromptsCannotShareAnId(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a.md", "b.md"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("---\nid: same\n---\nx\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Load(config.PromptPolicy{Dir: dir}); err == nil {
+		t.Fatal("a pin that resolves to two files resolves to neither, so this must be refused")
+	}
+}
+
+// TestThePreambleIsAssembledAboveEveryRole pins the single edit point for
+// fleet-wide policy.
+func TestThePreambleIsAssembledAboveEveryRole(t *testing.T) {
+	lib := library(t, map[string]string{"_preamble.md": preamble, "builder.md": builder})
+	a, err := lib.Assemble("builder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(a.Text, "FLEET POLICY") {
+		t.Fatal("the preamble did not reach the role")
+	}
+	if !strings.Contains(a.Text, "# Builder") {
+		t.Fatal("the role text is missing")
+	}
+	if strings.Index(a.Text, "FLEET POLICY") > strings.Index(a.Text, "# Builder") {
+		t.Fatal("the preamble comes first — a role is written to be read starting at the seam")
+	}
+	if !strings.Contains(a.Text, "\n---\n") {
+		t.Error("the seam between policy and role should be visible")
+	}
+}
+
+func TestVariablesAreSubstituted(t *testing.T) {
+	lib := library(t, map[string]string{"builder.md": builder})
+	a, err := lib.Assemble("builder", map[string]string{
+		"work_item_id": "S1-001", "workdir": "/tmp/run",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(a.Text, "S1-001") || !strings.Contains(a.Text, "/tmp/run") {
+		t.Fatalf("substitution failed: %q", a.Text)
+	}
+	if strings.Contains(a.Text, "{{") {
+		t.Error("an unfilled placeholder would reach an agent as literal template text")
+	}
+}
+
+// TestTheDigestAddressesExactlyTheBytesThatAreStored pins the content-address
+// contract: the digest recorded on a run is the key its retained prompt is
+// filed under, so the two must hash identical bytes.
+func TestTheDigestAddressesExactlyTheBytesThatAreStored(t *testing.T) {
+	lib := library(t, map[string]string{"builder.md": builder})
+	a, err := lib.Assemble("builder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.SHA) != 64 {
+		t.Fatalf("the digest doubles as a content address and must not be truncated; got %d chars", len(a.SHA))
+	}
+	if digest(string(a.Bytes())) != a.SHA {
+		t.Fatal("Bytes() must hash to SHA, or a retained prompt is filed under an address nothing will look up")
+	}
+
+	// Line endings are normalised on both sides, so a checkout that converts
+	// them does not change a prompt's identity.
+	crlf := Assembled{Text: strings.ReplaceAll(a.Text, "\n", "\r\n")}
+	if string(crlf.Bytes()) != string(a.Bytes()) {
+		t.Fatal("CRLF and LF forms of one prompt must produce identical bytes")
+	}
+	if digest(crlf.Text) != a.SHA {
+		t.Fatal("CRLF and LF forms of one prompt must produce identical digests")
+	}
+}
+
+func TestAssemblyIsStable(t *testing.T) {
+	lib := library(t, map[string]string{"_preamble.md": preamble, "builder.md": builder})
+	first, _ := lib.Assemble("builder", map[string]string{"work_item_id": "S1-001"})
+	for i := 0; i < 20; i++ {
+		again, _ := lib.Assemble("builder", map[string]string{"work_item_id": "S1-001"})
+		if again.SHA != first.SHA {
+			t.Fatalf("the same inputs produced a different prompt on attempt %d — a pin must stay resolvable", i)
+		}
+	}
+}
+
+// TestAMissingClauseIsReported pins the rule that a run cannot delete a safety
+// clause from its own instructions.
+func TestAMissingClauseIsReported(t *testing.T) {
+	clauses := []string{"You never write the ledger.", "You never mark your own work done."}
+
+	lib := library(t, map[string]string{"_preamble.md": preamble, "builder.md": builder})
+	findings := lib.CheckClauses(clauses)
+	// The clause is missing from the preamble, so every prompt in the library
+	// is short one — the report is per prompt, because the fix might be in any
+	// of them.
+	if len(findings) != len(lib.IDs()) {
+		t.Fatalf("every prompt should be reported, got %d findings for %d prompts", len(findings), len(lib.IDs()))
+	}
+	for _, f := range findings {
+		if !strings.Contains(f.Missing, "mark your own work done") {
+			t.Errorf("the finding should name the missing clause, got %q", f.Missing)
+		}
+		if f.Path == "" {
+			t.Error("the finding should name the file to edit")
+		}
+	}
+
+	// Clean case: a preamble carrying both satisfies every role at once, so
+	// this check cannot be passing vacuously.
+	full := preamble + "You never mark your own work done.\n"
+	lib2 := library(t, map[string]string{"_preamble.md": full, "builder.md": builder})
+	if got := lib2.CheckClauses(clauses); len(got) != 0 {
+		t.Fatalf("a complete preamble should satisfy every role, got %+v", got)
+	}
+}
+
+func TestNoDeclaredClausesMeansNoFindings(t *testing.T) {
+	lib := library(t, map[string]string{"builder.md": builder})
+	if got := lib.CheckClauses(nil); got != nil {
+		t.Fatalf("a project declaring no mandatory clauses has nothing to fail, got %+v", got)
+	}
+}
+
+func TestABomDoesNotChangeAPromptsIdentity(t *testing.T) {
+	withBOM := string([]byte{0xEF, 0xBB, 0xBF}) + builder
+	a := library(t, map[string]string{"builder.md": builder})
+	b := library(t, map[string]string{"builder.md": withBOM})
+	pa, _ := a.Get("builder")
+	pb, _ := b.Get("builder")
+	if pa.SHA() != pb.SHA() {
+		t.Fatal("a byte-order mark must not change a prompt's digest, or the pin breaks on a Windows edit")
+	}
+}

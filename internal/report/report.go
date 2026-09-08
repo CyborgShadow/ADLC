@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/authority"
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/ledger"
-	"github.com/CyborgShadow/adlc/internal/spend"
+	"github.com/CyborgShadow/ADLC/internal/authority"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/spend"
 )
 
 // Fleet renders the whole-project report.

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/lease"
-	"github.com/CyborgShadow/adlc/internal/ledger"
-	"github.com/CyborgShadow/adlc/internal/prompt"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/lease"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/prompt"
 )
 
 var testNow = time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
@@ -165,10 +165,10 @@ func specialists() ([]config.WorkerDecl, map[string]string) {
 	return workers, routing
 }
 
-// TestTheAreaDecidesTheWorkerNotTheAlphabet pins the fix for a real gap: the
-// picker used to take whichever worker with the right capability sorted first,
-// which makes a specialist roster decorative — a security reviewer and a
-// general reviewer both hold validate, and "backend" sorts before both.
+// TestTheAreaDecidesTheWorkerNotTheAlphabet pins routing. A specialist roster
+// is decorative if the picker takes whichever worker with the right capability
+// sorts first — a security reviewer and a general reviewer both hold validate,
+// so the area has to decide between them.
 func TestTheAreaDecidesTheWorkerNotTheAlphabet(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)

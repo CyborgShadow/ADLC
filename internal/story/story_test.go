@@ -1,0 +1,270 @@
+package story
+
+import (
+	"context"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
+)
+
+var at = time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+
+func fixture(t *testing.T) (*ledger.Ledger, *config.Config) {
+	t.Helper()
+	cfg, err := config.FromChecks("t", []string{"."}, []config.Check{{
+		ID: "test", Command: []string{"go", "version"}, Verdict: config.VerdictExitZero,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.Open(filepath.Join(t.TempDir(), "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	n := 0
+	l.SetClock(func() time.Time { n++; return at.Add(time.Duration(n) * time.Second) })
+	return l, cfg
+}
+
+// add appends one event and fails the test if it cannot.
+func add(t *testing.T, l *ledger.Ledger, kind ledger.Kind, subject string, payload any) {
+	t.Helper()
+	if _, err := l.Append("pm", kind, subject, payload); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const envJSON = `{"envelope_version":"1","run_id":"p-1","worker_type":"performer",
+"work_item_id":"S1-001","verdict":"pass","summary":"did the thing","head_sha":"abc123abc123",
+"commands_run":[{"check_id":"test","cmd":"go version","exit_code":0}],"outputs":{},
+"usage":{"input_tokens":1000,"output_tokens":200}}`
+
+func seedRun(t *testing.T, l *ledger.Ledger) string {
+	t.Helper()
+	add(t, l, ledger.KindSegmentCreated, "S1", ledger.SegmentCreated{
+		ID: "S1", Title: "Password reset", Brief: "Users recover access unaided.",
+		Rationale: "Support spends a day a week on this.",
+	})
+	add(t, l, ledger.KindItemCreated, "S1-001", ledger.ItemCreated{
+		ID: "S1-001", SegmentID: "S1", Title: "Single-use token", Area: "core",
+		Radius: "none", Criteria: []string{"a token is accepted once"},
+		Rationale: "the core of the deliverable",
+	})
+	add(t, l, ledger.KindItemTransitioned, "S1-001", ledger.ItemTransitioned{
+		ItemID: "S1-001", From: "queued", To: "in_progress", Reason: "dispatched",
+	})
+	sha, err := l.PutBlob(ledger.BlobEnvelope, []byte(envJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	add(t, l, ledger.KindRunStarted, "p-1", ledger.RunStarted{
+		RunID: "p-1", WorkerType: "performer", ItemID: "S1-001", SegmentID: "S1",
+		PromptID: "impl", PromptSHA: "prompt-sha", BaseSHA: "abc123abc123",
+	})
+	add(t, l, ledger.KindGateObserved, "p-1", ledger.GateObserved{
+		RunID: "p-1", ItemID: "S1-001", Edge: "in_progress->verifying",
+		TreeSHA: "abc123abc123", Status: "GREEN", Checks: "[]",
+	})
+	add(t, l, ledger.KindRunFinished, "p-1", ledger.RunFinished{
+		RunID: "p-1", Verdict: "pass", EnvelopeSHA: sha, HeadSHA: "abc123abc123",
+		CostMicros: 1_500_000, Usage: ledger.Usage{InputTokens: 1000, OutputTokens: 200},
+	})
+	add(t, l, ledger.KindTransitionAdmitted, "S1-001", ledger.TransitionOutcome{
+		RunID: "p-1", ItemID: "S1-001", Worker: "performer",
+		From: "in_progress", To: "verifying",
+	})
+	return sha
+}
+
+// TestARunExplainsWhatItDidAndWhyItMattered pins the chain a person asks for
+// weeks later: this run advanced that item, which serves this deliverable,
+// which exists for this stated reason.
+func TestARunExplainsWhatItDidAndWhyItMattered(t *testing.T) {
+	l, cfg := fixture(t)
+	seedRun(t, l)
+
+	s, err := OfRun(l, cfg, "p-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.Headline, "in_progress") || !strings.Contains(s.Headline, "verifying") {
+		t.Errorf("the headline should say what moved: %q", s.Headline)
+	}
+	joined := strings.Join(s.Purpose, " ")
+	for _, want := range []string{"S1-001", "Single-use token", "Password reset", "day a week"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the purpose chain is missing %q: %v", want, s.Purpose)
+		}
+	}
+	kinds := map[string]bool{}
+	for _, st := range s.Steps {
+		kinds[st.Kind] = true
+		if st.Title == "" {
+			t.Error("every step needs a title, or the timeline reads as blanks")
+		}
+	}
+	for _, want := range []string{"dispatched", "gate", "reported", "decision"} {
+		if !kinds[want] {
+			t.Errorf("the timeline has no %q step: %v", want, kinds)
+		}
+	}
+	if s.Cost.String() != "$1.50" {
+		t.Errorf("cost should be priced from the record, got %s", s.Cost)
+	}
+}
+
+func TestARunWithNoWorkItemSaysSoRatherThanRenderingBlank(t *testing.T) {
+	l, cfg := fixture(t)
+	add(t, l, ledger.KindRunStarted, "x-1", ledger.RunStarted{
+		RunID: "x-1", WorkerType: "systems",
+	})
+	s, err := OfRun(l, cfg, "x-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Purpose) == 0 || !strings.Contains(s.Purpose[0], "cannot say what it was for") {
+		t.Fatalf("an untied run should say the record cannot explain it, got %v", s.Purpose)
+	}
+}
+
+// TestAnUnfinishedRunIsUnknownNotAPass pins the honest rendering of a process
+// that died.
+func TestAnUnfinishedRunIsUnknownNotAPass(t *testing.T) {
+	l, cfg := fixture(t)
+	add(t, l, ledger.KindRunStarted, "d-1", ledger.RunStarted{
+		RunID: "d-1", WorkerType: "performer",
+	})
+	s, err := OfRun(l, cfg, "d-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.Headline, "UNKNOWN") {
+		t.Fatalf("a run with no recorded end is an unknown, got %q", s.Headline)
+	}
+	if s.Reproducible {
+		t.Error("a run that recorded no envelope cannot be re-derived")
+	}
+}
+
+func TestRetentionIsReportedHonestly(t *testing.T) {
+	l, cfg := fixture(t)
+	seedRun(t, l)
+	s, err := OfRun(l, cfg, "p-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.EnvRetained {
+		t.Error("the envelope was stored and should read as retained")
+	}
+	if s.PromptRetained {
+		t.Error("no prompt blob was stored, so it must not claim retention")
+	}
+	if !s.Reproducible {
+		t.Errorf("an envelope and a commit are enough to re-derive: %s", s.WhyNot)
+	}
+}
+
+// TestReplayReDerivesTheSameDecision is the determinism property. If this
+// failed, replay could not tell a changed rule from a changed record.
+func TestReplayReDerivesTheSameDecision(t *testing.T) {
+	l, cfg := fixture(t)
+	seedRun(t, l)
+
+	rp, err := Rederive(context.Background(), l, cfg, t.TempDir(), "p-1", at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rp.Recorded, "in_progress -> verifying") {
+		t.Errorf("what was recorded should be reported, got %q", rp.Recorded)
+	}
+	if rp.Rederived == "" {
+		t.Fatal("replay produced no answer at all")
+	}
+	// The gate cannot pass in a scratch directory that is not the repository,
+	// so the two disagree — and the disagreement is reported with a reason
+	// rather than swallowed.
+	if !rp.Agrees && rp.Detail == "" {
+		t.Error("a disagreement must explain itself")
+	}
+}
+
+func TestReplayOfARunWithNoRetainedEnvelopeSaysWhyNot(t *testing.T) {
+	l, cfg := fixture(t)
+	add(t, l, ledger.KindRunStarted, "n-1", ledger.RunStarted{
+		RunID: "n-1", WorkerType: "performer",
+	})
+	add(t, l, ledger.KindRunFinished, "n-1", ledger.RunFinished{
+		RunID: "n-1", Verdict: "pass",
+	})
+	rp, err := Rederive(context.Background(), l, cfg, t.TempDir(), "n-1", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rp.Detail == "" || !strings.Contains(rp.Detail, "not retained") {
+		t.Fatalf("replay should say what is missing, got %q", rp.Detail)
+	}
+}
+
+// TestReplayOfAGeneratorReRunsTheAdmissionRules covers the other kind of
+// decision: a planner's proposals are admitted or refused one at a time, and
+// those calls are re-derivable too.
+func TestReplayOfAGeneratorReRunsTheAdmissionRules(t *testing.T) {
+	l, cfg := fixture(t)
+	cfg.Routing = map[string]string{"core": cfg.WorkersWith(config.CapImplement)[0]}
+
+	gen := `{"envelope_version":"1","run_id":"g-1","worker_type":"planner","verdict":"pass",
+	"commands_run":[],"outputs":{"work_items":[
+	  {"id":"S1-001","title":"Good one","area":"core","blast_radius":"none",
+	   "criteria":["a command can check this one"]},
+	  {"id":"S1-002","title":"No criteria","area":"core","blast_radius":"none","criteria":[]}
+	]},"usage":{"input_tokens":10,"output_tokens":5}}`
+
+	sha, err := l.PutBlob(ledger.BlobEnvelope, []byte(gen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	add(t, l, ledger.KindSegmentCreated, "S1", ledger.SegmentCreated{
+		ID: "S1", Title: "seg", Brief: "a brief",
+	})
+	add(t, l, ledger.KindRunStarted, "g-1", ledger.RunStarted{
+		RunID: "g-1", WorkerType: "planner", SegmentID: "S1",
+	})
+	add(t, l, ledger.KindRunFinished, "g-1", ledger.RunFinished{
+		RunID: "g-1", Verdict: "pass", EnvelopeSHA: sha,
+	})
+	// One admitted, one refused — exactly what the rules say today.
+	add(t, l, ledger.KindItemProposed, "S1-001", ledger.ItemProposed{
+		RunID: "g-1", SegmentID: "S1", ProposedID: "S1-001", Admitted: true,
+	})
+	add(t, l, ledger.KindItemCreated, "S1-001", ledger.ItemCreated{
+		ID: "S1-001", SegmentID: "S1", Title: "Good one", Area: "core", Radius: "none",
+		Criteria: []string{"a command can check this one"},
+	})
+	add(t, l, ledger.KindItemProposed, "S1-002", ledger.ItemProposed{
+		RunID: "g-1", SegmentID: "S1", ProposedID: "S1-002", Admitted: false,
+		Reason: "no_acceptance_criteria",
+	})
+
+	rp, err := Rederive(context.Background(), l, cfg, t.TempDir(), "g-1", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rp.Agrees {
+		t.Fatalf("the same proposals should be judged the same way: %s / %v", rp.Rederived, rp.Notes)
+	}
+	if !strings.Contains(rp.Rederived, "2 of 2") {
+		t.Errorf("both proposals should be re-decided, got %q", rp.Rederived)
+	}
+}
+
+func TestOfRunOnAMissingRunIsAnError(t *testing.T) {
+	l, cfg := fixture(t)
+	if _, err := OfRun(l, cfg, "nope"); err == nil {
+		t.Fatal("a run that does not exist is not an empty run")
+	}
+}

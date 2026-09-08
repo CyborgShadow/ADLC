@@ -3,7 +3,7 @@ package authority
 import (
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // Gather reads the facts a decision needs out of the ledger.

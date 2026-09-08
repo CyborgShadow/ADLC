@@ -5,7 +5,7 @@ Fifteen minutes from nothing to a fleet building something.
 ## 1. Install and initialise
 
 ```bash
-go install github.com/CyborgShadow/adlc/cmd/adlc@latest
+go install github.com/CyborgShadow/ADLC/cmd/adlc@latest
 cd /path/to/your/project
 ```
 
@@ -13,7 +13,7 @@ Copy a config to start from. There are two in the repository: `adlc.json` for a 
 `examples/infra.adlc.json` for provisioning and hardening work.
 
 ```bash
-curl -O https://raw.githubusercontent.com/CyborgShadow/adlc/main/adlc.json
+curl -O https://raw.githubusercontent.com/CyborgShadow/ADLC/main/adlc.json
 mkdir agents && cd agents
 # copy the prompt files from the repository's agents/ directory
 ```

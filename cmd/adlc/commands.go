@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/authority"
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/lease"
-	"github.com/CyborgShadow/adlc/internal/ledger"
-	"github.com/CyborgShadow/adlc/internal/prompt"
-	"github.com/CyborgShadow/adlc/internal/report"
+	"github.com/CyborgShadow/ADLC/internal/authority"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/lease"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/prompt"
+	"github.com/CyborgShadow/ADLC/internal/report"
 )
 
 // listFlag collects a repeatable string flag.
@@ -308,7 +308,7 @@ func cmdRun(e *env, args []string) int {
 			return fail("%v", err)
 		}
 		if taken {
-			return fail("run id %s is already in the ledger. Ids are checked when minted and again when work lands, because a run once started under an id the record already carried and it was found by accident", *id)
+			return fail("run id %s is already in the ledger. An id is checked when it is minted and again when work lands, because a duplicate makes two runs indistinguishable in the record", *id)
 		}
 		var segID string
 		if *item != "" {
@@ -575,7 +575,7 @@ func cmdLease(e *env, args []string) int {
 			return exitUsage
 		}
 		if _, err := e.led.Item(*key); err != nil {
-			return fail("no item %q. The lease key is the item's own id: two runs once held one defect under free-text keys sharing not a single word, so every overlap check stayed silent", *key)
+			return fail("no item %q. The lease key is the item's own id, not a phrase: free-text keys for one subject can share no words at all, and then every overlap check stays silent", *key)
 		}
 		out, err := e.leases.Acquire(lease.Lease{
 			Key: *key, RunID: *runID, Worker: *worker, Resources: res, Subject: *subject,

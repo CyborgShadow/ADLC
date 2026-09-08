@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/CyborgShadow/adlc/internal/config"
-	"github.com/CyborgShadow/adlc/internal/ledger"
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // Micros is a cost in millionths of a currency unit.
