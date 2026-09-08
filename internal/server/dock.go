@@ -58,7 +58,9 @@ type dockData struct {
 }
 
 func (s *Server) dock(r *http.Request) dockData {
-	d := dockData{Show: s.Cfg.Console.Enabled}
+	// Never on Home: that page IS the console, and a floating copy of it in the
+	// corner of itself gives one conversation two input boxes.
+	d := dockData{Show: s.Cfg.Console.Enabled && r.URL.Path != "/"}
 	if !d.Show {
 		return d
 	}

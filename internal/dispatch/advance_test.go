@@ -1,9 +1,11 @@
 package dispatch
 
 import (
+	"context"
 	"testing"
 
 	"github.com/CyborgShadow/ADLC/internal/authority"
+	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
@@ -148,5 +150,49 @@ func TestReworkStopsAtTheLimitRatherThanLooping(t *testing.T) {
 	}
 	if it, _ := h.Led.Item("S1-001"); it.State != string(authority.StateRejected) {
 		t.Fatalf("past the attempt limit an item escalates rather than looping, got %s", it.State)
+	}
+}
+
+// TestAnImproversProposalsAreActuallyCreated closes a gap that was silent in
+// the worst way: the improver prompt asks for self-improvements as work items,
+// the agent produced them, they were parsed and stored in the envelope — and
+// nothing ever looked at them, because item admission ran only for planning
+// runs. Work that looks done and is not is the thing this system exists to
+// make impossible.
+func TestAnImproversProposalsAreActuallyCreated(t *testing.T) {
+	ws, routing := specialists()
+	ws = append(ws, config.WorkerDecl{Type: "improver", Layer: "stewardship",
+		Prompt: "implementer", Capabilities: []string{config.CapImprove}})
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "merged")
+
+	h.Run.envelope = `{"envelope_version":"1","run_id":"{{run_id}}","worker_type":"improver",
+		"work_item_id":"S1-001","verdict":"pass","summary":"recorded what it taught",
+		"commands_run":[],"outputs":{"work_items":[
+		  {"id":"S1-900","title":"Make the refusal message name the failing check",
+		   "area":"ui","blast_radius":"none",
+		   "criteria":["a refused transition names which check was red"]},
+		  {"id":"S1-901","title":"Nice to have","area":"kernel","blast_radius":"none",
+		   "criteria":["the kernel is rewritten"]}
+		]},"usage":{"input_tokens":1,"output_tokens":1}}`
+
+	if _, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapImprove}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Led.Item("S1-900"); err != nil {
+		t.Fatalf("an improver's admissible proposal must be created: %v", err)
+	}
+	// And it faces the same rules a planner's proposals face — an area nobody
+	// owns is refused however it was raised.
+	if _, err := h.Led.Item("S1-901"); err == nil {
+		t.Error("an item in an area nobody owns must be refused, whoever proposed it")
+	}
+	created, err := h.Led.Item("S1-900")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.SegmentID != "S1" {
+		t.Errorf("a self-improvement belongs to the deliverable whose work provoked it, got %q", created.SegmentID)
 	}
 }

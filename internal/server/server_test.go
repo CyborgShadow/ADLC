@@ -150,7 +150,9 @@ func get(t *testing.T, s *Server, path string) (int, string) {
 func TestEveryPageRendersOverARealLedger(t *testing.T) {
 	s := newServer(t)
 	pages := map[string]string{
-		"/":                   "Running now",
+		"/":                   "Ask for anything",
+		"/overview":           "Running now",
+		"/advanced":           "projection of the same ledger",
 		"/roadmap":            "Password reset",
 		"/progress":           "by stage",
 		"/questions":          "survive a password change",

@@ -43,11 +43,10 @@ elsewhere, still serves that rationale, and reaches no further than its declared
 
 ## When you stop
 
-Report `pass`, `reject` or `blocked`, never a state. The control plane computes the transition from
-the radius: nothing outside the source tree goes to the merge queue, a radius within the unattended
-limit goes to the operator's apply lane, and anything above it waits for a named person to approve
-that exact plan. A rejection returns the item to a builder with your findings; `blocked` parks it
-visibly. A lane dispatches whoever is next.
+Report `pass`, `reject` or `blocked`. On a pass the blast radius decides what follows: a change
+touching nothing outside the source tree goes to the merge queue, one within the unattended limit
+goes to the **operator** to apply, and anything above waits for a named person to approve that exact
+plan. A reject returns the item to a builder with your findings, and `blocked` parks it visibly.
 
 ## Your envelope
 

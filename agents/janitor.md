@@ -39,9 +39,9 @@ else. Done when each deletion cites its reader search and `adlc gate run` is gre
 
 ## When you stop
 
-Report `pass` when the pass is complete, including when it removed nothing; report `fail` when what
-you found is wrong rather than untidy, and it goes back to a builder. You do not name a state: the
-control plane records the verdict, computes the transition, and the arbitrate lane sends the arbiter.
+Report `pass` when the pass is complete, including when it removed nothing, and `fail` when what you
+found is wrong rather than untidy. On a pass the **arbiter** judges the change against the system
+next; on a fail it goes back to a builder. Either way the lane picks it up without you handing over.
 
 ## Your envelope
 

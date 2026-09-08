@@ -79,7 +79,9 @@ func Bind(addr string) (net.Listener, error) {
 // Handler builds the routes.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.page("overview", s.overview))
+	mux.HandleFunc("/", s.home2)
+	mux.HandleFunc("/overview", s.page("overview", s.overview))
+	mux.HandleFunc("/advanced", s.page("advanced", s.advanced))
 	mux.HandleFunc("/roadmap", s.page("roadmap", s.roadmap))
 	mux.HandleFunc("/progress", s.page("progress", s.progress))
 	mux.HandleFunc("/questions", s.page("questions", s.questions))
@@ -258,21 +260,33 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 			}
 		}
 	}
-	nav := []navItem{
-		{Href: "/", Label: "Overview"},
-		{Href: "/roadmap", Label: "Roadmap"},
-		{Href: "/progress", Label: "Progress"},
-		{Href: "/questions", Label: "Questions", Count: attn.Questions, Alarm: attn.Questions > 0},
-		{Href: "/approvals", Label: "Approvals", Count: attn.Approvals, Alarm: attn.Approvals > 0},
-		{Href: "/coordination", Label: "Coordination"},
-		{Href: "/roles", Label: "Roles"},
-		{Href: "/config", Label: "Config", Count: attn.DarkLoops, Alarm: attn.DarkLoops > 0},
-		{Href: "/history", Label: "History"},
-		{Href: "/about", Label: "About the ADLC"},
+	// The nav has two shapes. On Home it is one way out and nothing else: most
+	// of what somebody wants is answered by asking, and a row of eleven tabs is
+	// what makes a tool look like it has to be learned before it can be used.
+	// Everywhere else it is the full set, because the moment you are on one of
+	// those pages is the moment you want to move between them.
+	nav := []navItem{{Href: "/", Label: "Home"}}
+	if page == "home" {
+		nav = append(nav, navItem{Href: "/advanced", Label: "Advanced",
+			Count: attn.Questions + attn.Approvals,
+			Alarm: attn.Questions+attn.Approvals > 0})
+	} else {
+		nav = append(nav,
+			navItem{Href: "/overview", Label: "Overview"},
+			navItem{Href: "/roadmap", Label: "Roadmap"},
+			navItem{Href: "/progress", Label: "Progress"},
+			navItem{Href: "/questions", Label: "Questions", Count: attn.Questions, Alarm: attn.Questions > 0},
+			navItem{Href: "/approvals", Label: "Approvals", Count: attn.Approvals, Alarm: attn.Approvals > 0},
+			navItem{Href: "/coordination", Label: "Coordination"},
+			navItem{Href: "/roles", Label: "Roles"},
+			navItem{Href: "/config", Label: "Config", Count: attn.DarkLoops, Alarm: attn.DarkLoops > 0},
+			navItem{Href: "/history", Label: "History"},
+			navItem{Href: "/about", Label: "About"},
+		)
 	}
 	for i := range nav {
-		nav[i].Active = (page == "overview" && nav[i].Href == "/") ||
-			(page != "overview" && strings.HasPrefix(nav[i].Href, "/"+page))
+		nav[i].Active = (page == "home" && nav[i].Href == "/") ||
+			(nav[i].Href != "/" && strings.HasPrefix(nav[i].Href, "/"+page))
 	}
 	return &pageData{
 		Page: page, Title: title, Refresh: s.Cfg.Server.RefreshSeconds, Project: s.Cfg.Project,

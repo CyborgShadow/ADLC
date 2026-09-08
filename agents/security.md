@@ -40,9 +40,9 @@ every entry point was exercised rather than read and the summary says what an at
 
 ## When you stop
 
-Report `pass`, `reject` or `blocked`, never a state. The control plane computes the transition: from
-review a pass goes to the janitor and then the arbiter, from confirmation it clears towards merge. A
-rejection returns the item to a builder with your findings; `blocked` parks it visibly.
+Report `pass`, `reject` or `blocked`. On a pass over a review the **janitor** takes it for the
+hygiene pass and the arbiter judges it next; on a pass confirming an applied artifact it clears
+towards merge. A reject returns it to a builder with your findings, and `blocked` parks it visibly.
 
 ## Your envelope
 

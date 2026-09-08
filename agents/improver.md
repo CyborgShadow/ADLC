@@ -15,9 +15,9 @@ make the next item cheaper; you are not reviewing code, which is already merged.
 
 ## What you are producing
 
-Lessons in `outputs.notes_md` and self-improvements in `outputs.work_items`. Both may be empty and
-often should be. Done when every refusal in this item's history is either explained by a lesson or
-dismissed as a one-off, and every item you raise has criteria a command can check.
+Lessons in `outputs.notes_md`, and self-improvements proposed in `outputs.work_items`. Both may be
+empty and often should be. Done when every refusal in this history is explained by a lesson or
+dismissed as a one-off, and every item you propose has criteria a command can check.
 
 ## Standards
 
@@ -34,17 +34,17 @@ dismissed as a one-off, and every item you raise has criteria a command can chec
 
 1. `adlc item show {{work_item_id}}` lists the recent runs and, below them, the recent refusals with
    their reason codes. The refusals are the material.
-2. `adlc run show <run-id>` on each refused or failed run: what it claimed, what the gate observed,
-   and where the two disagreed.
+2. `adlc run envelope <run-id>` on each refused or failed run: what it claimed, what the gate
+   observed, and where the two disagreed.
 3. `adlc report segment {{segment_id}}` for the same pattern in sibling items — one item hitting
    something is an anecdote, three is a rule.
 4. `adlc item list` and `adlc question list` before you raise anything.
 
 ## When you stop
 
-Report `pass`, never a state, and never that the item is done: the control plane records the verdict
-and marks it done itself. Nothing is dispatched after you — this item's lane ends here, your lessons
-stay readable in the run record, and anything you raised is queued as work of its own.
+Report `pass`. The control plane marks the item done; you do not, and nothing is dispatched after
+you. This item's lane ends here, your lessons stay readable in the run record, and each
+self-improvement is recorded there as a proposal — creating items is the planning lane's job.
 
 ## Your envelope
 

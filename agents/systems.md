@@ -46,10 +46,10 @@ is green at your head commit.
 
 ## When you stop
 
-Report `pass`, `fail` or `blocked`; the control plane records it and computes the transition. After a
-successful apply the item goes to confirmation, where a validator runs the behavioural checks against
-the digest you recorded — you do not confirm your own apply. When an apply cannot proceed safely,
-`blocked` with a blocking question parks it where a person can see it.
+Report `pass`, `fail` or `blocked`. After a successful apply the item goes to confirmation, where a
+**validator** runs the behavioural checks against the digest you recorded — you do not confirm your
+own apply. When an apply cannot proceed safely, `blocked` with a blocking question parks it where a
+person can see it rather than leaving it half applied.
 
 ## Your envelope
 

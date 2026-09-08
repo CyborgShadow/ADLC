@@ -76,7 +76,8 @@ var tmpl = template.Must(template.New("page").Funcs(funcs).Parse(strings.Join([]
 	pageHTML, overviewHTML, roadmapPageHTML, progressHTML, questionsPageHTML, approvalsPageHTML,
 	rolesPageHTML, coordinationHTML, configPageHTML, historyPageHTML, runHTML,
 	unregisteredRunHTML, itemPageHTML,
-	segmentHTML, aboutHTML, aboutMoveHTML, aboutDataHTML, consoleHTML, endHTML,
+	segmentHTML, aboutHTML, aboutMoveHTML, aboutDataHTML, consoleHTML,
+	homePageHTML, advancedPageHTML, endHTML,
 	// After endHTML: this one is its own template, not part of the page body,
 	// and a define nested inside another define is a parse error.
 	consoleDockHTML, fieldsHTML,
@@ -188,7 +189,7 @@ max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
 ` + aboutCSS + consoleCSS + historyPageCSS + roadmapPageCSS +
 	itemPageCSS + gatesCSS + rolesPageCSS + configPageCSS + aboutDataCSS +
-	aboutMoveCSS + `
+	aboutMoveCSS + homePageCSS + `
 </style></head><body>
 <header>
   <h1>{{.Project}}</h1>

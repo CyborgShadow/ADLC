@@ -509,6 +509,23 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		return res, true, d.advanceSegment(c.Segment.ID, runID, c.Capability, env.Verdict, created)
 	}
 
+	// An improver raises self-improvements as work items, and until this existed
+	// nothing looked at them: they were parsed, stored in the envelope blob, and
+	// dropped. The prompt asked for them, the agent produced them, and the fleet
+	// silently did nothing — which is the exact failure this system is built to
+	// make impossible everywhere else.
+	//
+	// They face the identical admission rules a planner's proposals face. An item
+	// that is easier to create because of who proposed it is how a backlog fills
+	// with work nobody can act on.
+	if c.Capability == config.CapImprove && len(env.Outputs.WorkItems) > 0 {
+		if n, gerr := d.admitProposedItems(runID, c, env); gerr != nil {
+			return res, true, gerr
+		} else {
+			res.Created = n
+		}
+	}
+
 	// The tool decides where the item goes. The agent reported a verdict; it was
 	// never asked to name a state, so it cannot name a wrong one.
 	adv := authority.NextState(c.From, c.Capability, env.Verdict,
@@ -566,14 +583,24 @@ func (d *Dispatcher) admitProposedItems(runID string, c Candidate, env *envelope
 	for _, it := range all {
 		existing[it.ID] = true
 	}
+	// A planning run carries its segment on the candidate; an improver run
+	// carries an item, so the segment is the one that item belongs to. Filing a
+	// self-improvement under the deliverable whose work provoked it keeps the
+	// reason and the work in the same place.
+	seg := c.Segment
+	if seg.ID == "" && c.Item.SegmentID != "" {
+		if s, err := d.Led.Segment(c.Item.SegmentID); err == nil {
+			seg = s
+		}
+	}
 	facts := authority.GenerationFacts{
-		SegmentID: c.Segment.ID, SegmentBrief: c.Segment.Brief, ExistingIDs: existing,
+		SegmentID: seg.ID, SegmentBrief: seg.Brief, ExistingIDs: existing,
 	}
 	created := 0
 	for _, p := range env.Outputs.WorkItems {
 		dec := authority.AdmitItem(d.Cfg, p, facts)
 		if _, err := d.Led.Append(d.Actor, ledger.KindItemProposed, p.ID, ledger.ItemProposed{
-			RunID: runID, Worker: c.Worker, SegmentID: c.Segment.ID, ProposedID: p.ID,
+			RunID: runID, Worker: c.Worker, SegmentID: seg.ID, ProposedID: p.ID,
 			Title: p.Title, Admitted: dec.Admitted,
 			Reason: string(dec.Reason), Detail: dec.Detail,
 		}); err != nil {
@@ -588,7 +615,7 @@ func (d *Dispatcher) admitProposedItems(runID string, c Candidate, env *envelope
 			radius = string(config.RadiusNone)
 		}
 		if _, err := d.Led.Append(d.Actor, ledger.KindItemCreated, p.ID, ledger.ItemCreated{
-			ID: p.ID, SegmentID: c.Segment.ID, Title: p.Title, Area: p.Area, Radius: radius,
+			ID: p.ID, SegmentID: seg.ID, Title: p.Title, Area: p.Area, Radius: radius,
 			Resources: p.Resources, FileScope: p.FileScope, DependsOn: p.DependsOn, Criteria: p.Criteria,
 		}); err != nil {
 			return created, err
