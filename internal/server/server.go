@@ -82,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/roles", s.page("roles", s.roles))
 	mux.HandleFunc("/role/", s.page("role", s.role))
 	mux.HandleFunc("/coordination", s.page("coordination", s.coordination))
+	mux.HandleFunc("/about", s.page("about", s.about))
 	mux.HandleFunc("/config", s.page("config", s.configPage))
 	mux.HandleFunc("/history", s.page("history", s.history))
 	mux.HandleFunc("/run/", s.page("run", s.run))
@@ -231,6 +232,7 @@ func (s *Server) shell(page, title string, body any) (*pageData, error) {
 		{Href: "/roles", Label: "Roles"},
 		{Href: "/config", Label: "Config", Count: attn.DarkLoops, Alarm: attn.DarkLoops > 0},
 		{Href: "/history", Label: "History"},
+		{Href: "/about", Label: "About the ADLC"},
 	}
 	for i := range nav {
 		nav[i].Active = (page == "overview" && nav[i].Href == "/") ||

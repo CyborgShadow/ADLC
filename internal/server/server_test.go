@@ -156,6 +156,7 @@ func TestEveryPageRendersOverARealLedger(t *testing.T) {
 		"/questions":          "survive a password change",
 		"/approvals":          "Rotates the signing key",
 		"/coordination":       "Arbitrate",
+		"/about":              "The guards, and what each one prevents",
 		"/roles":              "performer",
 		"/role/impl":          "Builder",
 		"/config":             "Safety policy",

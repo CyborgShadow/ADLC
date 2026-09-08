@@ -1,5 +1,5 @@
 {
-  "_comment": "This is the config the ADLC uses on itself. It is also the worked example: a full specialist roster, an area routing map that is machine-enforced, and five staggered lanes. Concurrency here is N scheduled lanes rather than a thread pool, and every lane firing writes a ledger tick so a lane that quietly stops shows as STALE instead of looking like a lane with nothing to report.",
+  "_comment": "This is the config the ADLC uses on itself, and it doubles as the worked example: the full specialist roster, an area routing map that is machine-enforced, and one scheduled lane per stage. Concurrency here is N scheduled lanes rather than a thread pool, and every lane firing writes a ledger tick — so a lane that quietly stops shows as STALE instead of looking like a lane with nothing to report.",
 
   "version": 1,
   "project": "adlc",
@@ -13,21 +13,36 @@
       "kind": "source",
       "command": ["gofmt", "-l", "./cmd", "./internal"],
       "verdict": "output_empty",
-      "required_for": ["in_progress->verifying", "verifying->validating"]
+      "required_for": [
+        "in_progress->ready_for_testing",
+        "testing->ready_for_review",
+        "judging->ready_for_validation",
+        "merging->merged"
+      ]
     },
     {
       "id": "vet",
       "kind": "source",
       "command": ["go", "vet", "./..."],
       "verdict": "exit_zero",
-      "required_for": ["in_progress->verifying", "verifying->validating"]
+      "required_for": [
+        "in_progress->ready_for_testing",
+        "testing->ready_for_review",
+        "judging->ready_for_validation",
+        "merging->merged"
+      ]
     },
     {
       "id": "build",
       "kind": "source",
       "command": ["go", "build", "./..."],
       "verdict": "exit_zero",
-      "required_for": ["in_progress->verifying", "verifying->validating"]
+      "required_for": [
+        "in_progress->ready_for_testing",
+        "testing->ready_for_review",
+        "judging->ready_for_validation",
+        "merging->merged"
+      ]
     },
     {
       "_comment": "go_test_json counts the tests that reported a result. Zero is a FAILURE: a filter matching nothing converts 'I ran nothing' into 'everything passed'.",
@@ -36,25 +51,41 @@
       "command": ["go", "test", "-count=1", "-json", "./..."],
       "verdict": "go_test_json",
       "timeout_seconds": 900,
-      "required_for": ["in_progress->verifying", "verifying->validating"]
+      "required_for": [
+        "in_progress->ready_for_testing",
+        "testing->ready_for_review",
+        "judging->ready_for_validation",
+        "merging->merged"
+      ]
     },
     {
       "id": "prompt-clauses",
       "kind": "source",
       "command": ["go", "run", "./cmd/adlc", "prompt", "check"],
       "verdict": "exit_zero",
-      "required_for": ["in_progress->verifying", "verifying->validating"]
+      "required_for": [
+        "in_progress->ready_for_testing",
+        "judging->ready_for_validation"
+      ]
     }
   ],
 
   "workers": [
     {
-      "type": "planner",
-      "layer": "direction",
-      "description": "Decomposes a segment brief into work items with checkable acceptance criteria. Writes no code.",
-      "prompt": "generator",
-      "capabilities": ["generate"]
+      "type": "researcher",
+      "layer": "planning",
+      "description": "Turns an intent into a written approach: what exists, what the options are, which one and why. Creates no work items.",
+      "prompt": "researcher",
+      "capabilities": ["research"]
     },
+    {
+      "type": "planner",
+      "layer": "planning",
+      "description": "Decomposes an approach into work items with checkable acceptance criteria. Writes no code.",
+      "prompt": "planner",
+      "capabilities": ["plan"]
+    },
+
     {
       "_comment": "The generalist implementer. It declares no areas, so it takes anything a specialist does not claim — which is what keeps an item in an unclaimed area from being handed to whichever specialist happens to sort first.",
       "type": "engineer",
@@ -74,39 +105,30 @@
     {
       "type": "docs-writer",
       "layer": "worker",
-      "description": "Implements documentation items: the README, the register, the prompts' own prose.",
+      "description": "Implements documentation items: the README, the user docs, the prompts' own prose.",
       "prompt": "implementer",
       "capabilities": ["implement"],
       "areas": ["docs"]
     },
+
     {
-      "type": "test-author",
-      "layer": "worker",
-      "description": "Writes tests as work items in their own right, for coverage the performer did not add.",
-      "prompt": "implementer",
-      "capabilities": ["implement"],
-      "areas": ["testing"]
-    },
-    {
-      "type": "janitor",
-      "layer": "worker",
-      "description": "Hygiene only: stale docs, dead references, duplicated statements of one fact. Runs rarely and changes little.",
-      "prompt": "janitor",
-      "capabilities": ["implement"],
-      "areas": ["hygiene"],
-      "low_cadence": true
+      "type": "tester",
+      "layer": "verification",
+      "description": "Executes the tests and reports what ran. A suite that matched nothing is a failure, not a pass.",
+      "prompt": "tester",
+      "capabilities": ["test"]
     },
     {
       "type": "judge",
       "layer": "verification",
-      "description": "Independently checks an item against its acceptance criteria by executing commands. Never the run that wrote the code.",
-      "prompt": "verifier",
-      "capabilities": ["verify"]
+      "description": "Checks an item against its acceptance criteria by executing commands. Never the run that wrote the code.",
+      "prompt": "judge",
+      "capabilities": ["judge"]
     },
     {
       "type": "validator",
       "layer": "verification",
-      "description": "Adversarial review against the project's invariants. May propose done; may reject.",
+      "description": "Adversarial review against the project's invariants, and validation of a plan against the intent that produced it. The only role that may reject.",
       "prompt": "validator",
       "capabilities": ["validate"]
     },
@@ -134,6 +156,32 @@
       "capabilities": ["validate"],
       "areas": ["resilience"]
     },
+
+    {
+      "type": "janitor",
+      "layer": "stewardship",
+      "description": "Hygiene only: stale docs, dead references, duplicated statements of one fact. Runs rarely and changes little.",
+      "prompt": "janitor",
+      "capabilities": ["curate"],
+      "areas": ["hygiene"],
+      "low_cadence": true
+    },
+    {
+      "type": "arbiter",
+      "layer": "stewardship",
+      "description": "Judges a change against the system rather than against the item. The only role that looks wider than one unit of work.",
+      "prompt": "arbiter",
+      "capabilities": ["arbitrate"]
+    },
+    {
+      "type": "improver",
+      "layer": "stewardship",
+      "description": "Reads a landed item's own history, records what it taught, and raises self-improvements as their own work items.",
+      "prompt": "improver",
+      "capabilities": ["improve"],
+      "low_cadence": true
+    },
+
     {
       "type": "operator",
       "layer": "platform",
@@ -150,7 +198,7 @@
     "core": "engineer",
     "cli": "cli-dev",
     "docs": "docs-writer",
-    "testing": "test-author",
+    "testing": "tester",
     "hygiene": "janitor",
     "verification": "judge",
     "review": "validator",
@@ -163,27 +211,59 @@
 
   "loops": [
     {
-      "_comment": "Verification fires more often than implementation, and first. Verification that competes with building for capacity loses, and a fleet that builds faster than it checks piles up unverified work that looks exactly like progress.",
-      "name": "verify",
+      "_comment": "Lanes are ordered by how near the finish line their work is, and staggered so two never fire on the same second and contend for the same lease. Work closest to done drains first: a fleet that builds faster than it checks piles up unverified work that looks exactly like progress.",
+      "name": "improve",
       "enabled": true,
-      "every_seconds": 180,
+      "every_seconds": 900,
       "offset_seconds": 0,
-      "capability": "verify",
-      "max_per_tick": 2
+      "capability": "improve",
+      "max_per_tick": 1
+    },
+    {
+      "name": "arbitrate",
+      "enabled": true,
+      "every_seconds": 300,
+      "offset_seconds": 15,
+      "capability": "arbitrate",
+      "max_per_tick": 1
+    },
+    {
+      "name": "curate",
+      "enabled": true,
+      "every_seconds": 900,
+      "offset_seconds": 30,
+      "capability": "curate",
+      "max_per_tick": 1
     },
     {
       "name": "review",
       "enabled": true,
       "every_seconds": 240,
-      "offset_seconds": 20,
+      "offset_seconds": 45,
       "capability": "validate",
+      "max_per_tick": 2
+    },
+    {
+      "name": "judge",
+      "enabled": true,
+      "every_seconds": 180,
+      "offset_seconds": 60,
+      "capability": "judge",
+      "max_per_tick": 2
+    },
+    {
+      "name": "test",
+      "enabled": true,
+      "every_seconds": 180,
+      "offset_seconds": 75,
+      "capability": "test",
       "max_per_tick": 2
     },
     {
       "name": "build",
       "enabled": true,
       "every_seconds": 300,
-      "offset_seconds": 40,
+      "offset_seconds": 90,
       "capability": "implement",
       "max_per_tick": 1
     },
@@ -191,17 +271,25 @@
       "name": "apply",
       "enabled": true,
       "every_seconds": 600,
-      "offset_seconds": 60,
+      "offset_seconds": 105,
       "capability": "operate",
       "max_per_tick": 1
     },
     {
-      "_comment": "Generation is demand-driven as well as scheduled: a segment at its target asks for nothing, so this lane fires, finds no need, and records an idle tick.",
+      "_comment": "Planning is demand-driven as well as scheduled: a deliverable at its target asks for nothing, so this lane fires, finds no need, and records an idle tick rather than inventing work to justify its own cadence.",
       "name": "plan",
       "enabled": true,
       "every_seconds": 1800,
-      "offset_seconds": 80,
-      "capability": "generate",
+      "offset_seconds": 120,
+      "capability": "plan",
+      "max_per_tick": 1
+    },
+    {
+      "name": "research",
+      "enabled": true,
+      "every_seconds": 1800,
+      "offset_seconds": 135,
+      "capability": "research",
       "max_per_tick": 1
     }
   ],
@@ -237,6 +325,7 @@
   "dispatch": {
     "command": ["claude", "-p", "--dangerously-skip-permissions", "@{{prompt}}"],
     "workdir_template": ".adlc/workspaces/{{run_id}}",
+    "trunk": "main",
     "max_concurrent": 1,
     "max_attempts": 3,
     "timeout_seconds": 3600,

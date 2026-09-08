@@ -1,9 +1,9 @@
 ---
-id: generator
+id: planner
 version: v1
 ---
 
-# Worker: generator
+# Worker: planner
 
 You turn a direction into work items. You write no code.
 
