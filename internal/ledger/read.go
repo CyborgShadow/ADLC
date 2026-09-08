@@ -688,3 +688,17 @@ func (l *Ledger) Abandonment(runID string) (RunAbandoned, bool, error) {
 	}
 	return p, true, nil
 }
+
+// Question returns one question by id.
+func (l *Ledger) Question(id string) (Question, error) {
+	qs, err := l.Questions("", false)
+	if err != nil {
+		return Question{}, err
+	}
+	for _, q := range qs {
+		if q.ID == id {
+			return q, nil
+		}
+	}
+	return Question{}, fmt.Errorf("no question %q is on the record", id)
+}

@@ -7,7 +7,7 @@ package server
 // the same thing, and the dashboard was not saying so.
 //
 // A question is an agent stopping. It hit a decision it was not equipped to
-// make — a design fork, an ambiguity in the spec — and the rule says raise it
+// make â a design fork, an ambiguity in the spec â and the rule says raise it
 // rather than guess, because a guess parked in a comment is a decision nobody
 // reviewed. Any agent can raise one, about anything, at any point. Answering it
 // unblocks analysis.
@@ -43,7 +43,7 @@ const questionsPageHTML = `
 {{if eq .Page "questions"}}{{with .Body}}
 <div class="gates">
   <div class="here">
-    <h3>Questions — an agent could not decide</h3>
+    <h3>Questions â an agent could not decide</h3>
     <p>A run stopped because it hit a call it was not equipped to make: a design fork, a policy
       question, an ambiguity in the spec. The rule is to ask rather than guess, because a guess
       parked in a comment is a decision nobody ever reviewed.</p>
@@ -52,28 +52,59 @@ const questionsPageHTML = `
   </div>
   <div>
     <h3>Not this page: <a href="/approvals">Approvals</a></h3>
-    <p>An approval is not a question. Nothing there is unclear — the work is done and about to touch
+    <p>An approval is not a question. Nothing there is unclear â the work is done and about to touch
       something real, and policy says a named person clears that specific plan first.</p>
     <p class="dim small">Answering a question unblocks thinking. Approving authorises consequence.</p>
   </div>
 </div>
 {{range .Items}}
-<div class="q">
-  <h3>{{if .Blocking}}<span class="pill bad">blocking</span> {{else}}<span class="pill mute">not blocking</span> {{end}}{{.Text}}</h3>
-  <div class="dim mono small">{{.ID}}{{if .ItemID}} · <a href="/item/{{.ItemID}}">{{.ItemID}}</a>{{end}}
-    {{if .RaisedBy}} · raised by <a href="/run/{{.RaisedBy}}">{{.RaisedBy}}</a>{{end}}</div>
-  {{if .Lean}}<div class="lean"><b>Their recommendation:</b> {{.Lean}}</div>
+<div class="q{{if not .Blocking}} settled{{end}}">
+  <div class="qhead">
+    {{if .Blocking}}<span class="pill bad">blocking</span>{{else}}<span class="pill mute">not blocking</span>{{end}}
+    <span class="dim mono small">{{.ID}}</span>
+    {{if .RaisedBy}}<span class="dim small">raised by <a href="/run/{{.RaisedBy}}">{{.RaisedBy}}</a></span>{{end}}
+  </div>
+
+  {{if .Text}}<div class="qtext">{{.Text}}</div>
+  {{else}}<div class="qtext missing">This question was raised with no question in it — only a
+    recommendation. Nothing states what is being asked, so answering it means guessing at the
+    question, and your answer is recorded forever against something nobody can read.
+    <span class="dim small">The run that raised it is
+    <a href="/run/{{.RaisedBy}}">{{.RaisedBy}}</a>; its role prompt is what needs fixing.</span></div>{{end}}
+
+  {{if or .ItemID .SegmentID}}<div class="qctx">
+    {{if .ItemID}}<div><span class="k">Work</span>
+      <a href="/item/{{.ItemID}}">{{.ItemID}}</a>{{if .ItemTitle}} â {{.ItemTitle}}{{end}}</div>{{end}}
+    {{if .SegmentID}}<div><span class="k">For</span>
+      <a href="/segment/{{.SegmentID}}">{{.SegmentID}}</a>{{if .SegmentTitle}} â {{.SegmentTitle}}{{end}}</div>{{end}}
+    <div><span class="k">Until answered</span> {{.Blocked}}</div>
+  </div>{{end}}
+
+  {{if .HasLean}}<div class="lean"><b>What the agent would do, if you let it:</b>
+    <div class="leantext">{{.Lean}}</div>
+    <div class="dim small">This is its recommendation, not a finding. Accepting it is your decision and
+      the record will say you made it.</div></div>
   {{else}}<div class="lean dim">No recommendation offered. A question with no lean and no evidence hands
-    back the analysis the run was dispatched to do — worth saying so when you answer it.</div>{{end}}
-  {{if .Evidence}}<div class="dim small">{{.Evidence}}</div>{{end}}
-  {{if .Blocking}}<div class="dim small">Nothing moves on this item until this is answered.</div>
-  {{else}}<div class="dim small">Work continues without this. It was raised so the decision is on the
-    record rather than made quietly inside a run.</div>{{end}}
-  <form method="post" action="/answer">
+    back the analysis the run was dispatched to do â worth saying so when you answer it.</div>{{end}}
+
+  {{if .Evidence}}<details class="qev"><summary>What it had already established</summary>
+    <div class="dim small">{{.Evidence}}</div></details>{{end}}
+
+  <form method="post" action="/answer" class="qform">
     <input type="hidden" name="id" value="{{.ID}}">
-    <textarea name="answer" placeholder="Your answer, recorded verbatim. Say why, not only what — the reasoning sets the severity of everything decomposed from it." required></textarea>
-    <div class="inline"><input type="text" name="who" placeholder="your name">
-      <button type="submit">Answer and unblock</button></div>
+    <textarea name="answer" placeholder="{{if .HasLean}}Only needed if you are deciding something other than their recommendation.{{else}}Your decision, recorded word for word.{{end}}"></textarea>
+    <div class="qwhy">
+      <input type="text" name="why" placeholder="Why â the reasoning sets the severity of everything decomposed from this" required>
+    </div>
+    <div class="inline">
+      <input type="text" name="who" placeholder="your name" required>
+      {{if .HasLean}}<button type="submit" name="choice" value="accept">Go with their recommendation</button>
+      <button type="submit" name="choice" value="reject" class="sec">No â do what I have written</button>
+      {{else}}<button type="submit" name="choice" value="own">Answer and unblock</button>{{end}}
+    </div>
+    <p class="dim small">Whichever you press, your words go on the record verbatim and the run that
+    stopped is dispatchable again. Nothing here decides the work itself â it decides what the next
+    run is told.</p>
   </form>
 </div>
 {{else}}<div class="card dim">No open questions. Every run so far has had what it needed to decide.</div>{{end}}
@@ -87,7 +118,7 @@ const approvalsPageHTML = `
 {{if eq .Page "approvals"}}{{with .Body}}
 <div class="gates">
   <div class="here">
-    <h3>Approvals — a change reaches something real</h3>
+    <h3>Approvals â a change reaches something real</h3>
     <p>The work is finished and its declared blast radius is above what this project applies
       unattended, so the control plane stopped it. You are clearing <b>one specific plan</b>, named by
       the digest of the dry run below.</p>
@@ -105,13 +136,13 @@ const approvalsPageHTML = `
 {{range .Rows}}
 <div class="q{{if .Decided}} settled{{end}}">
   <h3>{{if .Item.Title}}{{.Item.Title}}{{else}}<span class="dim">untitled item</span>{{end}}</h3>
-  <div class="dim mono small">{{.ID}} · <a href="/item/{{.ItemID}}">{{.ItemID}}</a> ·
-    radius <b>{{.Radius}}</b> · plan {{short .PlanDigest}} · requested {{ago .RequestedMS}}</div>
+  <div class="dim mono small">{{.ID}} Â· <a href="/item/{{.ItemID}}">{{.ItemID}}</a> Â·
+    radius <b>{{.Radius}}</b> Â· plan {{short .PlanDigest}} Â· requested {{ago .RequestedMS}}</div>
   {{if .Summary}}<div class="lean">{{.Summary}}</div>{{end}}
   {{if .Item.Resources}}<div class="dim small">touches: <span class="mono">{{join .Item.Resources}}</span></div>{{end}}
   {{if .Decided}}
     <div style="margin-top:7px"><span class="pill {{if eq .Verdict "approve"}}ok{{else}}bad{{end}}">{{.Verdict}}d</span>
-      by {{if .Approver}}{{.Approver}}{{else}}<span class="dim">nobody named</span>{{end}} {{ago .DecidedMS}}{{if .Note}} — {{.Note}}{{end}}</div>
+      by {{if .Approver}}{{.Approver}}{{else}}<span class="dim">nobody named</span>{{end}} {{ago .DecidedMS}}{{if .Note}} â {{.Note}}{{end}}</div>
     <div class="dim small" style="margin-top:4px">This decision covers plan {{short .PlanDigest}} only.
       If the item is replanned it comes back here.</div>
   {{else}}
@@ -129,4 +160,21 @@ const approvalsPageHTML = `
 {{else}}<div class="card dim">Nothing is waiting for approval. Either nothing in flight reaches past the
   source tree, or everything that did has already been decided.</div>{{end}}
 {{end}}{{end}}
+`
+
+// questionsCSS is what the richer question card adds.
+const questionsCSS = `
+.qhead{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.qtext{font-size:16px;line-height:1.5;font-weight:600;margin-bottom:11px;white-space:pre-wrap}
+.qtext.missing{font-weight:400;font-size:14px;color:var(--bad)}
+.qctx{display:grid;gap:3px;font-size:13px;margin-bottom:11px;padding-left:11px;
+border-left:2px solid var(--line)}
+.qctx .k{color:var(--dim);display:inline-block;min-width:110px}
+.leantext{white-space:pre-wrap;margin:5px 0 6px;line-height:1.55}
+.qev{margin-bottom:11px}
+.qev summary{cursor:pointer;color:var(--accent);font-size:13px}
+.qform textarea{min-height:64px}
+.qwhy{margin-top:8px}
+.qwhy input{width:100%}
+.qform .inline{margin-top:9px}
 `

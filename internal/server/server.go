@@ -540,6 +540,27 @@ func (s *Server) progress(r *http.Request) (string, any, error) {
 	return "Progress", v, nil
 }
 
+// questionRow is one blocking question with the context needed to answer it.
+//
+// The page used to show the question's text, the agent's recommendation and a
+// box. That is enough to answer a question you already understand and not
+// enough to answer one you are meeting for the first time: what work it came
+// out of, what that work is for, and what stops until you reply were all ids
+// you had to go and look up, which in practice means nobody did.
+type questionRow struct {
+	ledger.Question
+	// ItemTitle and SegmentTitle name the work rather than identify it. An id
+	// is not context.
+	ItemTitle    string
+	SegmentID    string
+	SegmentTitle string
+	// Blocked is what stands still until this is answered, in a sentence.
+	Blocked string
+	// Lean is repeated here only so the accept control can send it back
+	// verbatim without the page having to re-type it.
+	HasLean bool
+}
+
 func (s *Server) questions(*http.Request) (string, any, error) {
 	qs, err := s.Led.Questions("", true)
 	if err != nil {
@@ -551,7 +572,29 @@ func (s *Server) questions(*http.Request) (string, any, error) {
 		}
 		return qs[i].ID < qs[j].ID
 	})
-	return "Questions", struct{ Items []ledger.Question }{qs}, nil
+	rows := make([]questionRow, 0, len(qs))
+	for _, q := range qs {
+		row := questionRow{Question: q, HasLean: strings.TrimSpace(q.Lean) != ""}
+		if q.ItemID != "" {
+			if it, ierr := s.Led.Item(q.ItemID); ierr == nil {
+				row.ItemTitle = it.Title
+				row.SegmentID = it.SegmentID
+				if seg, serr := s.Led.Segment(it.SegmentID); serr == nil {
+					row.SegmentTitle = seg.Title
+				}
+			}
+		}
+		switch {
+		case !q.Blocking:
+			row.Blocked = "Nothing is waiting. This was raised so the decision is on the record rather than made quietly inside a run."
+		case row.ItemTitle != "":
+			row.Blocked = "Nothing moves on " + q.ItemID + " (" + row.ItemTitle + ") until this is answered."
+		default:
+			row.Blocked = "The work this came out of is stopped until this is answered."
+		}
+		rows = append(rows, row)
+	}
+	return "Questions", struct{ Items []questionRow }{rows}, nil
 }
 
 type approvalRow struct {
@@ -704,6 +747,14 @@ func (s *Server) segment(r *http.Request) (string, any, error) {
 
 // ------------------------------------------------------------------ writes
 
+// answer records a decision on a question.
+//
+// Three shapes, because a question with a recommendation attached is usually
+// answered by accepting or rejecting it, and a free-text box made both of those
+// into a retyping exercise. Whichever is pressed, what lands on the record says
+// which happened: "a person decided this" and "a person agreed with what the
+// agent proposed" are different facts, and a record that renders them the same
+// cannot answer why a decision was made.
 func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Redirect(w, r, "/questions", http.StatusSeeOther)
@@ -711,20 +762,79 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.FormValue("id"))
 	text := strings.TrimSpace(r.FormValue("answer"))
-	who := orDefault(strings.TrimSpace(r.FormValue("who")), s.Actor)
-	if id == "" || text == "" {
-		redirect(w, r, "/questions", "an answer needs both the question and some text", true)
+	why := strings.TrimSpace(r.FormValue("why"))
+	choice := strings.TrimSpace(r.FormValue("choice"))
+	who := strings.TrimSpace(r.FormValue("who"))
+	if id == "" {
+		redirect(w, r, "/questions", "an answer needs to say which question it is about", true)
 		return
 	}
-	// Recorded verbatim. Summarising a human's note loses the reasoning that sets
-	// the severity of everything decomposed from it.
+	// A name is required rather than defaulted: the record names whoever
+	// decided, and a decision attributed to whatever the process was started as
+	// answers that question with the name of a service.
+	if who == "" {
+		redirect(w, r, "/questions", "say who you are — an answer nobody is named on cannot be weighed later", true)
+		return
+	}
+	q, err := s.Led.Question(id)
+	if err != nil {
+		redirect(w, r, "/questions", err.Error(), true)
+		return
+	}
+	if q.Answered {
+		redirect(w, r, "/questions", id+" was already answered; reload and read what it says", true)
+		return
+	}
+
+	var recorded string
+	switch choice {
+	case "accept":
+		if strings.TrimSpace(q.Lean) == "" {
+			redirect(w, r, "/questions", "there is no recommendation to accept on "+id, true)
+			return
+		}
+		// Required HERE and not on a free-text answer. Pressing accept
+		// contributes nothing of your own to the record — without a reason the
+		// chain would say a person agreed and be unable to say why anybody
+		// thought it was right. A written answer already is the reasoning, and
+		// demanding it twice is friction that teaches people to type "ok".
+		if why == "" {
+			redirect(w, r, "/questions", "say why you are accepting it — otherwise the record shows agreement with no reasoning behind it, which is the part that is useful in six months", true)
+			return
+		}
+		// The agent's words, quoted as its words, with the person's reasoning
+		// under them. Recording the lean alone would leave the record unable to
+		// say whether anybody had actually read it.
+		recorded = "Accepted the recommendation as raised.\n\n" + q.Lean + "\n\nWhy: " + why
+	case "reject":
+		if text == "" {
+			redirect(w, r, "/questions", "rejecting the recommendation needs the decision you are making instead", true)
+			return
+		}
+		recorded = "Did NOT take the recommendation.\n\n" + text
+	default:
+		if text == "" {
+			redirect(w, r, "/questions", "an answer needs some text", true)
+			return
+		}
+		// Verbatim, and nothing appended when there is nothing to append: a
+		// written answer IS the reasoning, and demanding it twice is friction
+		// that teaches people to type "ok".
+		recorded = text
+	}
+	if why != "" && choice != "accept" {
+		recorded += "\n\nWhy: " + why
+	}
+
+	// Recorded verbatim. Summarising a human's note loses the reasoning that
+	// sets the severity of everything decomposed from it.
 	if _, err := s.Led.Append(who, ledger.KindQuestionAnswered, id, ledger.QuestionAnswered{
-		ID: id, Answer: text, AnsweredBy: who,
+		ID: id, Answer: recorded, AnsweredBy: who,
 	}); err != nil {
 		redirect(w, r, "/questions", err.Error(), true)
 		return
 	}
-	redirect(w, r, "/questions", "answered "+id+" — the item it was blocking is dispatchable again", false)
+	redirect(w, r, "/questions", "answered "+id+" — the run it stopped is dispatchable again", false)
 }
 
 func (s *Server) decide(w http.ResponseWriter, r *http.Request) {

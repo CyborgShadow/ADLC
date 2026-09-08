@@ -325,3 +325,68 @@ func TestPausingALaneIsPersistedAndRecorded(t *testing.T) {
 		t.Log("in-memory state changed; the redirect reported the save failure")
 	}
 }
+
+// Accepting an agent's recommendation is a decision, and the record has to be
+// able to say who made it and why.
+//
+// "A person decided this" and "a person agreed with what the agent proposed"
+// are different facts. The page used to offer one free-text box, so accepting
+// meant retyping the agent's words — and what landed on the chain could not
+// tell the two apart.
+func TestAcceptingARecommendationSaysSoAndNeedsAReason(t *testing.T) {
+	s := newServer(t)
+	if _, err := s.Led.Append("r-1", ledger.KindQuestionRaised, "Q-9", ledger.QuestionRaised{
+		ID: "Q-9", Blocking: true, Text: "Floor or exact count?",
+		Lean: "A floor.", RaisedBy: "r-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without a reason, accepting is refused: it would put agreement on the
+	// record with nothing behind it.
+	if _, loc := post(t, s, "/answer", url.Values{
+		"id": {"Q-9"}, "choice": {"accept"}, "who": {"brandon"},
+	}); !strings.Contains(loc, "bad=1") {
+		t.Fatal("accepting with no reason was allowed")
+	}
+
+	if _, loc := post(t, s, "/answer", url.Values{
+		"id": {"Q-9"}, "choice": {"accept"}, "who": {"brandon"},
+		"why": {"the bijection is where the strictness belongs"},
+	}); strings.Contains(loc, "bad=1") {
+		t.Fatalf("accepting was refused: %s", loc)
+	}
+
+	q, err := s.Led.Question("Q-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(q.Answer, "Accepted the recommendation") {
+		t.Errorf("the record cannot tell acceptance from an independent decision: %q", q.Answer)
+	}
+	if !strings.Contains(q.Answer, "A floor.") {
+		t.Errorf("the recommendation that was accepted is not in the answer: %q", q.Answer)
+	}
+	if !strings.Contains(q.Answer, "the bijection") {
+		t.Errorf("the reason is missing: %q", q.Answer)
+	}
+	if q.AnsweredBy != "brandon" {
+		t.Errorf("answered by %q — accepting is a person's decision and is attributed to them", q.AnsweredBy)
+	}
+}
+
+// A question raised with no question in it is still recorded — losing a
+// blocking one is worse — but the page must not render a blank heading over a
+// recommendation nobody can evaluate. It happened, twice, on a real run.
+func TestAQuestionWithNoTextIsShownAsDefective(t *testing.T) {
+	s := newServer(t)
+	if _, err := s.Led.Append("r-1", ledger.KindQuestionRaised, "Q-8", ledger.QuestionRaised{
+		ID: "Q-8", Blocking: true, Lean: "Do the thing.", RaisedBy: "r-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := get(t, s, "/questions")
+	if !strings.Contains(body, "raised with no question in it") {
+		t.Fatal("a question with no text renders as a blank heading over a recommendation")
+	}
+}

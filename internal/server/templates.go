@@ -203,7 +203,7 @@ footer{color:var(--dim);font-size:12px;padding:18px 24px;border-top:1px solid va
 max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
 ` + aboutCSS + consoleCSS + historyPageCSS + roadmapPageCSS +
-	itemPageCSS + gatesCSS + rolesPageCSS + configPageCSS + aboutDataCSS +
+	itemPageCSS + gatesCSS + questionsCSS + rolesPageCSS + configPageCSS + aboutDataCSS +
 	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + tileCSS + saidCSS + `
 </style></head><body>
 <header>

@@ -100,6 +100,21 @@ goes in `questions` carrying **your own lean and the evidence for it**, so answe
 decision rather than the analysis you were dispatched to do. Set `"blocking": true` when you
 cannot continue without the answer; it parks the item visibly.
 
+Every field, and `text` above all:
+
+```json
+{ "id": "S1-Q1",
+  "blocking": true,
+  "text": "THE QUESTION ITSELF, as a question, readable by somebody who has not seen your run.",
+  "lean": "What you would do and why, with the trade-off named.",
+  "evidence": "What you already established that makes this a real fork rather than a guess." }
+```
+
+`text` is the question. Leaving it empty and putting the whole thing in `lean` produces a card on
+somebody's screen that offers a recommendation about nothing — they cannot tell what they are
+agreeing to, and the answer they give is recorded forever against a question nobody can read. Write
+the question first and the lean second.
+
 ## Blast radius and your lease
 
 Every item declares how far it reaches if it is wrong: `none`, `host`, `fleet`, `region`,

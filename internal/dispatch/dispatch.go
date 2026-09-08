@@ -750,10 +750,24 @@ func (d *Dispatcher) recordQuestions(runID string, c Candidate, env *envelope.En
 		if id == "" {
 			id = fmt.Sprintf("Q-%s-%d", runID, i+1)
 		}
-		_, _ = d.Led.Append(d.Actor, ledger.KindQuestionRaised, id, ledger.QuestionRaised{
+		// A question with no question in it is still recorded, because losing a
+		// blocking one is worse than showing a defective one — but it is said
+		// out loud rather than discovered by somebody staring at a card that
+		// recommends something about nothing. It happened: two questions were
+		// raised carrying only a lean, and the page rendered a blank heading
+		// above a recommendation nobody could evaluate.
+		if strings.TrimSpace(q.Text) == "" {
+			d.log("MALFORMED QUESTION %s from %s (%s) — no `text`, so nothing states what is being asked. Whoever answers it is guessing at the question. Fix the role's prompt: `text` is the question, `lean` is only what the agent would do about it.",
+				id, runID, c.Worker)
+		}
+		if _, err := d.Led.Append(d.Actor, ledger.KindQuestionRaised, id, ledger.QuestionRaised{
 			ID: id, ItemID: c.Item.ID, Blocking: q.Blocking, Text: q.Text,
 			Lean: q.Lean, Evidence: q.Evidence, RaisedBy: runID,
-		})
+		}); err != nil {
+			// Swallowing this left a blocking question that nobody would ever
+			// see, on an item that would sit still with no stated reason.
+			d.log("QUESTION %s from %s could not be recorded: %v — the item it was raised against will look idle for no reason", id, runID, err)
+		}
 	}
 }
 
