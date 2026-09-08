@@ -45,22 +45,24 @@ const liveHTML = `
 // reload the page would have done anyway.
 const liveScript = `<script>
 (function(){
-  // A page that reloads itself throws away whatever was half-written in its
-  // text box, and the console — on Home, on its own page, and in the panel that
-  // rides on every other page — is mostly a text box. Home and the console page
-  // stop refreshing on the server side when nothing is running; this covers the
-  // rest.
+  // Two jobs, both about not making a person repeat themselves: stream a
+  // running turn, and never reload the page out from under somebody who is
+  // part-way through writing in it.
   //
-  // "Somebody is typing" is read from the DOM at the moment it matters, not
-  // remembered from an event. A browser autofilling a name field fires the same
-  // input event a person does, and a flag set that way had the page announcing
-  // that a turn had finished because you were part-way through typing, to
-  // somebody who had typed nothing at all. An unsent question is a textarea
-  // with something in it; nothing else counts.
-  var watchdog;
+  // "Somebody is typing" is the difference between the field's value NOW and
+  // the value it held when this page loaded. Not an event flag, and not merely
+  // "the box has text in it": reloading a page makes the browser RESTORE what
+  // was in its fields, so a box refilled by the browser looked exactly like a
+  // box somebody was typing in — and the page then refused to reload itself
+  // ever again, telling the reader it was because they were part-way through
+  // typing something they had never typed.
+  var watchdog, before = [];
+  var boxes = document.getElementsByTagName("textarea");
+  for (var b = 0; b < boxes.length; b++) before.push(boxes[b].value);
   function typing(){
-    var t = document.getElementsByTagName("textarea");
-    for (var i = 0; i < t.length; i++) if (t[i].value.trim()) return true;
+    for (var i = 0; i < boxes.length; i++) {
+      if (boxes[i].value.trim() && boxes[i].value !== before[i]) return true;
+    }
     return false;
   }
   function stopRefresh(){
@@ -69,34 +71,48 @@ const liveScript = `<script>
   }
   function reload(){ if (!typing()) location.reload(); }
   document.addEventListener("input", function(ev){
-    var t = ev.target;
-    if (t && t.tagName === "TEXTAREA" && t.value) stopRefresh();
+    if (ev.target && ev.target.tagName === "TEXTAREA" && typing()) stopRefresh();
   }, true);
 
   var nodes = document.querySelectorAll("[data-live]");
   if (!nodes.length || !window.EventSource) return;
 
-  // Cancelled on OPEN, not on the first byte. An agent can spend ten seconds
-  // starting up before it says anything, and a two-second meta refresh running
-  // through that window reloads the whole page five times in front of somebody
-  // trying to read it. A connection that opened is proof the fallback is not
-  // needed; waiting for output is proof of nothing except that the agent is
-  // still thinking.
+  // The meta refresh is cancelled on OPEN, not on the first byte: an agent can
+  // spend ten seconds starting up, and a two-second refresh running through
+  // that window reloads the page five times in front of somebody reading it.
   function takeOver(){
     stopRefresh();
     clearTimeout(watchdog);
-    // If the stream then goes quiet for a minute, fall back to a reload rather
-    // than sitting on a page that has stopped being told anything.
-    watchdog = setTimeout(reload, 60000);
+    // A stream that has said nothing at all for two minutes — not even the
+    // server's ping — is a stream nobody is going to hear from. Falling back to
+    // a reload beats sitting on a page that has stopped being told anything.
+    watchdog = setTimeout(reload, 120000);
   }
   Array.prototype.forEach.call(nodes, function(node){
     var id = node.getAttribute("data-live");
     var out = node.querySelector(".livetext");
-    var started = false;
+    var wait = node.querySelector(".livewait");
+    var started = false, since = Date.now();
     var es;
     try { es = new EventSource("/console/live?turn=" + encodeURIComponent(id)); }
     catch (e) { return; }
+    // The elapsed time was rendered by the server and frozen at page load, so
+    // it went on claiming the same figure for as long as the page stayed up.
+    // Once the stream is running, the page owns it.
+    var ticking = setInterval(function(){
+      if (!wait) return;
+      var s = Math.round((Date.now() - since) / 1000);
+      var m = Math.floor(s / 60);
+      wait.textContent = "Working — " + (m ? m + "m " + (s % 60) + "s" : s + "s") +
+        " so far. A turn is a full agent run, and you are watching it as it happens.";
+    }, 1000);
+    function ended(text){
+      clearInterval(ticking);
+      clearTimeout(watchdog);
+      if (wait) wait.textContent = text;
+    }
     es.onopen = takeOver;
+    es.addEventListener("ping", takeOver);
     es.addEventListener("text", function(ev){
       var t;
       try { t = JSON.parse(ev.data); } catch (e) { return; }
@@ -112,14 +128,12 @@ const liveScript = `<script>
     });
     es.addEventListener("done", function(){
       es.close();
-      clearTimeout(watchdog);
+      ended("The turn finished.");
       // Reload into the record: the reply, what it did and what it cost are all
       // read from the ledger, and nothing on screen came from this script. The
       // exception is somebody mid-sentence — losing what they typed to show
       // them an answer they can reach with one click is a bad trade.
       if (typing()) {
-        var w = node.querySelector(".livewait");
-        if (w) w.textContent = "The turn finished.";
         var a = node.querySelector(".liveready");
         if (a) a.hidden = false;
         return;
@@ -127,7 +141,7 @@ const liveScript = `<script>
       location.reload();
     });
     es.onerror = function(){
-      if (es.readyState === 2) setTimeout(reload, 5000);
+      if (es.readyState === 2) { ended("The stream ended."); setTimeout(reload, 5000); }
     };
   });
 })();

@@ -93,7 +93,7 @@ const homePageHTML = `
     </div>
 
     <form class="compose" method="post" action="/console/ask">
-      <textarea name="text" placeholder="Ask for anything — or describe something you want built." required></textarea>
+      <textarea name="text" autocomplete="off" placeholder="Ask for anything — or describe something you want built." required></textarea>
       <input type="hidden" name="back" value="/">
       <div class="row2">
         <input type="text" name="who" placeholder="your name" required>

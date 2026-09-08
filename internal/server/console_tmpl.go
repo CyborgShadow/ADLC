@@ -91,7 +91,7 @@ const consoleDockHTML = `
       {{else}}<div class="msg"><div class="body wait">Ask about anything on screen. Try “what needs me?”</div></div>{{end}}
     </div>
     <form class="foot" method="post" action="/console/ask">
-      <textarea name="text" placeholder="Ask about what you are looking at…" required></textarea>
+      <textarea name="text" autocomplete="off" placeholder="Ask about what you are looking at…" required></textarea>
       <input type="hidden" name="back" value="{{.Here}}">
       <div class="row">
         <input type="text" name="who" placeholder="your name">

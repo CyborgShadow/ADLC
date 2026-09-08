@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -252,5 +253,47 @@ func TestTypingPagesDoNotReloadThemselvesWhileIdle(t *testing.T) {
 	}
 	if d.Refresh != 2 {
 		t.Errorf("a running turn must keep the no-JavaScript fallback alive, got %d", d.Refresh)
+	}
+}
+
+// The keepalive has to be an event, not an SSE comment.
+//
+// A comment keeps the connection open but is never delivered to the page, so a
+// page watching for a dead stream could not tell one from an agent thinking
+// quietly — and reloaded itself, on a healthy turn, roughly every minute.
+func TestLiveKeepaliveIsDeliverable(t *testing.T) {
+	src, err := os.ReadFile("live.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(src), `": still here`) {
+		t.Fatal("the keepalive is an SSE comment again; the page cannot see it")
+	}
+	if !strings.Contains(string(src), "event: ping") {
+		t.Fatal("no ping event: a quiet stream is indistinguishable from a dead one")
+	}
+	// And the page has to listen for it, or the watchdog fires anyway.
+	if !strings.Contains(liveScript, `es.addEventListener("ping"`) {
+		t.Fatal("the page does not listen for the ping it is being sent")
+	}
+}
+
+// A reload makes the browser restore what was in a form's fields, so "the box
+// has text in it" is not the same question as "somebody is typing". Getting
+// that wrong told a reader the page would not refresh because they were
+// part-way through typing something they had never typed.
+func TestTypingIsMeasuredAgainstWhatLoaded(t *testing.T) {
+	if !strings.Contains(liveScript, "before.push") ||
+		!strings.Contains(liveScript, "!== before[i]") {
+		t.Fatal("typing() no longer compares against the value the field loaded with")
+	}
+	// And the boxes say not to restore them in the first place.
+	for _, tmpl := range []struct{ name, body string }{
+		{"home", homePageHTML}, {"console", consoleHTML},
+	} {
+		if strings.Contains(tmpl.body, `<textarea name="text"`) &&
+			!strings.Contains(tmpl.body, `autocomplete="off"`) {
+			t.Errorf("the %s compose box will be refilled by the browser on reload", tmpl.name)
+		}
 	}
 }

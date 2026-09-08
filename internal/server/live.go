@@ -195,9 +195,11 @@ func (s *Server) consoleLive(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-time.After(20 * time.Second):
-			// A comment keeps the connection from being reaped while an agent
-			// is thinking without saying anything.
-			fmt.Fprint(w, ": still here\n\n")
+			// A real event, not an SSE comment. A comment keeps the connection
+			// open but is never delivered to the page, so a page watching for a
+			// dead stream cannot tell one from an agent thinking quietly — and
+			// reloaded itself, on a perfectly healthy turn, every minute.
+			fmt.Fprint(w, "event: ping\ndata: \"\"\n\n")
 		}
 	}
 }
