@@ -133,3 +133,9 @@ const liveScript = `<script>
 })();
 </script>
 `
+
+// tileCSS marks a stage an agent is inside right now.
+const tileCSS = `
+.livetile{border-left:3px solid var(--live)}
+.tilenote{display:block;margin:-2px 0 16px;color:var(--dim);font-size:12.5px;line-height:1.5}
+`

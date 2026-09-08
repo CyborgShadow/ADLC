@@ -239,3 +239,35 @@ func Progress(items []ledger.Item) SegmentProgress {
 	}
 	return p
 }
+
+// Label is the stage in a person's words. The state name is what the record
+// keeps; a surface that shows "signed_off" is showing its own internals.
+func (s SegmentState) Label() string {
+	switch s {
+	case SegTheory:
+		return "An idea"
+	case SegRoadmap:
+		return "On the roadmap"
+	case SegSignedOff:
+		return "Signed off"
+	case SegResearching:
+		return "Being researched"
+	case SegResearched:
+		return "Researched"
+	case SegPlanning:
+		return "Being planned"
+	case SegPlanned:
+		return "Planned"
+	case SegValidating:
+		return "Plan being checked"
+	case SegReady:
+		return "Ready to build"
+	case SegBuilding:
+		return "Being built"
+	case SegDelivered:
+		return "Delivered"
+	case SegPaused:
+		return "Paused"
+	}
+	return string(s)
+}

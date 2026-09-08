@@ -192,7 +192,7 @@ max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
 ` + aboutCSS + consoleCSS + historyPageCSS + roadmapPageCSS +
 	itemPageCSS + gatesCSS + rolesPageCSS + configPageCSS + aboutDataCSS +
-	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + `
+	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + tileCSS + `
 </style></head><body>
 <header>
   <h1>{{.Project}}</h1>
@@ -246,6 +246,12 @@ const overviewHTML = `
 </table></div>
 
 <h2>Where the work is <span class="sub">every tile opens the work behind it</span></h2>
+{{if .Deliverables}}<div class="grid">
+  {{range .Deliverables}}<a class="card tile{{if .Live}} livetile{{end}}" href="/roadmap?stage={{.Key}}"><div class="n">{{.N}}</div>
+    <div class="l">{{.Label}}</div></a>{{end}}
+</div>
+<div class="sub tilenote">Deliverables. Work exists here before any work item does — a deliverable
+being researched has no items yet, so the row below reads zero while an agent is running on it.</div>{{end}}
 <div class="grid">
   {{range .Stages}}<a class="card tile" href="/progress?stage={{.Key}}"><div class="n">{{.N}}</div>
     <div class="l">{{.Label}}</div></a>{{end}}

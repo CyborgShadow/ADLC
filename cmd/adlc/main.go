@@ -58,7 +58,13 @@ var (
 func main() {
 	fs := flag.NewFlagSet("adlc", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	fs.StringVar(&flagDB, "db", filepath.Join(".adlc", "ledger.db"), "path to the ledger database")
+	// ADLC_DB, when set, is the default. It is how an agent working in an
+	// isolated worktree reaches the project's real ledger: the relative default
+	// would resolve inside the worktree, where there is no ledger, so every read
+	// came back empty rather than failing — and an empty answer that means "no
+	// ledger here" is indistinguishable from one that means "nothing happened".
+	fs.StringVar(&flagDB, "db", orEnv("ADLC_DB", filepath.Join(".adlc", "ledger.db")),
+		"path to the ledger database (defaults to $ADLC_DB when that is set)")
 	fs.StringVar(&flagConfig, "config", "adlc.json", "path to the project's declared config")
 	fs.StringVar(&flagActor, "actor", "", "actor recorded on every row this invocation writes")
 	fs.StringVar(&flagRepo, "repo", ".", "repository root")
@@ -221,4 +227,12 @@ func joinNonEmpty(parts []string, sep string) string {
 		}
 	}
 	return strings.Join(out, sep)
+}
+
+// orEnv prefers an environment variable over a built-in default.
+func orEnv(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
 }

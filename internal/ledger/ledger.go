@@ -299,6 +299,11 @@ type NoteRecorded struct {
 type Ledger struct {
 	db  *sql.DB
 	now func() time.Time
+	// path is where this ledger lives, absolute. An agent runs in an isolated
+	// worktree; told only the relative default it would open a NEW, empty
+	// ledger there and every question it asked of the record would come back
+	// empty — indistinguishable from a project where nothing had happened.
+	path string
 	// OnAppend is called after a row has committed. It is how the fleet learns
 	// that something moved without waiting for a timer to come round again.
 	//
@@ -336,7 +341,11 @@ func Open(path string) (*Ledger, error) {
 	}
 	// One writer at a time.
 	db.SetMaxOpenConns(1)
-	l := &Ledger{db: db, now: time.Now}
+	abs, aerr := filepath.Abs(path)
+	if aerr != nil {
+		abs = path
+	}
+	l := &Ledger{db: db, now: time.Now, path: abs}
 	if _, err := db.Exec(schemaSQL); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
@@ -873,3 +882,6 @@ func (l *Ledger) LoopHealthAll() (map[string]LoopHealth, error) {
 	}
 	return out, nil
 }
+
+// Path is where this ledger lives, absolute.
+func (l *Ledger) Path() string { return l.path }

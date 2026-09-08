@@ -68,6 +68,19 @@ func (r *ExecRunner) Invoke(ctx context.Context, in Invocation) (Result, error) 
 		"ADLC_ENVELOPE="+in.EnvelopePath,
 		"ADLC_PROMPT="+in.PromptPath,
 	)
+	if in.LedgerPath != "" {
+		// The agent works in an isolated worktree, and the ledger is not in it —
+		// it is deliberately outside version control. Told only the relative
+		// default, every `adlc` command the agent ran opened a NEW ledger in its
+		// own directory and answered every question about the record with
+		// nothing, which is indistinguishable from a project where nothing had
+		// happened. It read the record for a whole run and learned nothing, and
+		// no error said so.
+		//
+		// Read access only in practice: the agent has no path that appends, and
+		// the control plane remains the only writer.
+		cmd.Env = append(cmd.Env, "ADLC_DB="+in.LedgerPath)
+	}
 	out := NewTailBuffer(4000)
 	lines := NewLineWriter(in.OnOutput)
 	var sink io.Writer = out

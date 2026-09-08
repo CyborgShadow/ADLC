@@ -353,12 +353,16 @@ type activeRun struct {
 }
 
 type overviewView struct {
-	Active   []activeRun
-	Recent   []recentRun
-	Stages   []stageCount
-	Spend    spend.Report
-	Blobs    int
-	Refusals []ledger.Proposal
+	Active []activeRun
+	Recent []recentRun
+	Stages []stageCount
+	// Deliverables are the roadmap stages that hold something. Work exists
+	// before any work item does, and a row that shows only items reads as an
+	// idle fleet while a researcher is running.
+	Deliverables []segStage
+	Spend        spend.Report
+	Blobs        int
+	Refusals     []ledger.Proposal
 	// Cost is re-derived from each run's recorded usage rather than summed
 	// from the stored column, so a project whose runs were unpriced when they
 	// ran still reports a figure — and says which pricing it used.
@@ -368,6 +372,19 @@ type overviewView struct {
 type stageCount struct {
 	authority.Stage
 	N int
+}
+
+// segStage is one deliverable stage, counted.
+//
+// The item stages alone were the whole of "where the work is", and a
+// deliverable being researched has no items yet — so every tile read zero
+// while a researcher was running, and the row said the fleet was empty about a
+// fleet that was working.
+type segStage struct {
+	Key   string
+	Label string
+	N     int
+	Live  bool
 }
 
 type recentRun struct {
@@ -409,6 +426,24 @@ func (s *Server) overview(*http.Request) (string, any, error) {
 	byStage := map[string]int{}
 	for _, it := range items {
 		byStage[authority.StageOf(authority.State(it.State)).Key]++
+	}
+	segs, _ := s.Led.Segments()
+	bySeg := map[string]int{}
+	for _, sg := range segs {
+		bySeg[sg.State]++
+	}
+	for _, st := range authority.SegmentStages() {
+		n := bySeg[string(st)]
+		if n == 0 {
+			continue
+		}
+		// Only the stages holding something. Eleven tiles of zero is not a
+		// picture of the roadmap, it is a picture of the state machine.
+		v.Deliverables = append(v.Deliverables, segStage{
+			Key: string(st), Label: st.Label(), N: n,
+			Live: st == authority.SegResearching || st == authority.SegPlanning ||
+				st == authority.SegValidating || st == authority.SegBuilding,
+		})
 	}
 	for _, st := range authority.Stages() {
 		v.Stages = append(v.Stages, stageCount{Stage: st, N: byStage[st.Key]})

@@ -49,6 +49,10 @@ type Invocation struct {
 	WorkDir      string
 	EnvelopePath string
 	Timeout      time.Duration
+	// LedgerPath is the absolute path of the real ledger, so an agent running in
+	// an isolated worktree reads the project's record rather than creating an
+	// empty one beside itself.
+	LedgerPath string
 	// OnOutput, when set, receives the agent's output as it arrives rather than
 	// once at the end. It exists for the console, where a person is waiting on
 	// the other side of a turn; a lane leaves it nil and nothing changes.
@@ -457,6 +461,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		RunID: runID, WorkerType: c.Worker, ItemID: c.Item.ID, SegmentID: segID,
 		PromptPath: promptPath, PromptText: asm.Text,
 		WorkDir: ws.Dir, EnvelopePath: ws.EnvelopePath, Timeout: timeout,
+		LedgerPath: d.Led.Path(),
 	})
 	d.limit().leave()
 
