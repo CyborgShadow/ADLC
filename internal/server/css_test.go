@@ -142,3 +142,50 @@ func TestEveryClassUsedInMarkupIsDefined(t *testing.T) {
 		}
 	}
 }
+
+// A tooltip inside a horizontally scrolling table is clipped by the scroller,
+// and no z-index can lift it out: an ancestor's overflow clips its absolutely
+// positioned descendants whatever their stacking order. Half of the Config
+// page's tips were cut in half by exactly this.
+//
+// The fix is a `.wrap tips` variant that wraps instead of scrolling. This walks
+// the templates and refuses a tip that has been put back inside a plain one.
+func TestNoTooltipInsideAScrollingTable(t *testing.T) {
+	pages := map[string]string{
+		"config": configPageHTML, "overview": overviewHTML, "roadmap": roadmapPageHTML,
+		"progress": progressHTML, "roles": rolesPageHTML, "history": historyPageHTML,
+		"item": itemPageHTML, "about": aboutHTML, "console": consoleHTML,
+	}
+	// Every one of these wrappers holds exactly one table, so the region to
+	// search is from the opening div to the end of that table.
+	scan := func(body string) int {
+		bad, rest := 0, body
+		for {
+			i := strings.Index(rest, `<div class="wrap"`)
+			if i < 0 {
+				return bad
+			}
+			rest = rest[i+len(`<div class="wrap"`):]
+			end := strings.Index(rest, "</table>")
+			if end < 0 {
+				end = len(rest)
+			}
+			if strings.Contains(rest[:end], `class="tip"`) {
+				bad++
+			}
+		}
+	}
+	for name, body := range pages {
+		if n := scan(body); n > 0 {
+			t.Errorf("%s: %d tooltip(s) sit inside a plain .wrap, which clips them — use `wrap tips`", name, n)
+		}
+	}
+	// The clean case, so this cannot pass by finding no tooltips anywhere: the
+	// Config page has them, and they are in wrappers that do not clip.
+	if !strings.Contains(configPageHTML, `class="tip"`) {
+		t.Fatal("no tooltips on the Config page — this guard would pass vacuously")
+	}
+	if !strings.Contains(configPageHTML, `<div class="wrap tips"`) {
+		t.Fatal("no non-clipping wrapper on the Config page — the fix has been removed")
+	}
+}

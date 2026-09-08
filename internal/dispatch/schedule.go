@@ -149,6 +149,14 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		defer wg.Done()
 		s.runMergeLane(ctx)
 	}()
+	// And so does the reaper. It is not a lane — it dispatches nothing and needs
+	// no capability — but it is the thing that makes a killed control plane
+	// recoverable rather than merely visible.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.runReaper(ctx)
+	}()
 	wg.Wait()
 	return ctx.Err()
 }
@@ -260,4 +268,32 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// reapEvery is how often the fleet looks for runs nobody is waiting on. Short,
+// because the cost of a pass is one directory listing and the cost of missing
+// one is an item claimed by a process that no longer exists.
+const reapEvery = 30 * time.Second
+
+// runReaper closes orphaned runs and wakes the lanes when it frees any.
+//
+// It runs on every control plane, including the one that just started after the
+// last one was killed — which is the case it exists for. The first pass happens
+// immediately rather than after a cadence, because at startup the orphans are
+// already there and waiting thirty seconds to notice helps nobody.
+func (s *Scheduler) runReaper(ctx context.Context) {
+	for {
+		if n, err := s.D.Reap(); err != nil {
+			s.D.log("REAPER could not run: %v", err)
+		} else if n > 0 {
+			// Something was freed, so the lanes should look now rather than at
+			// the end of whatever cadence they happen to be in.
+			s.Wake()
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(reapEvery):
+		}
+	}
 }

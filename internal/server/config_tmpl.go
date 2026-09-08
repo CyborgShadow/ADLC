@@ -60,7 +60,7 @@ const configPageHTML = `
     <h3>Lanes<span class="tip" data-tip="A lane is a timer that picks up one kind of work. Saving rewrites the config and takes effect on that lane&#39;s next tick — no restart, and nothing already in flight is interrupted. The cadence floor is 15 seconds; below that a lane spends more time starting runs than doing them.">?</span></h3>
     {{if .AllDark}}<div class="sub2">Every lane reads NEVER RUN because the scheduler is not
       running. Start it with <span class="mono">adlc schedule run</span>.</div>{{end}}
-    <div class="wrap"><table class="lanes">
+    <div class="wrap tips"><table class="lanes">
       <tr><th>lane</th><th>drains</th><th>status</th><th>last fired</th>
         <th class="num">ticks<span class="tip" data-tip="Every firing writes a tick, including the ones that found nothing to do. That is what makes a silent lane detectable: no ticks means the lane stopped, not that there was no work.">?</span></th>
         <th class="num">dispatched</th><th>cadence · max per tick</th></tr>
@@ -97,7 +97,7 @@ const configPageHTML = `
         <input type="number" name="ttl" value="{{.Blast.ApprovalTTLMinutes}}" min="1"></div>
       <button type="submit">Save safety</button>
     </form>
-    <div class="wrap" style="margin-top:11px"><table>
+    <div class="wrap tips" style="margin-top:11px"><table>
       <tr><th>radius</th><th>what it reaches</th><th>before it is applied</th></tr>
       {{range .Radii2}}<tr>
         <td class="mono">{{.Radius}}</td><td class="dim">{{.Reaches}}</td>
@@ -123,7 +123,7 @@ const configPageHTML = `
     </form>
     <div class="dim small" style="margin-top:9px">Spent in the last 24 hours: <b>{{.Money.SpentToday}}</b>
       against a daily cap of {{.Money.DayCap}}.</div>
-    <div class="wrap" style="margin-top:9px"><table>
+    <div class="wrap tips" style="margin-top:9px"><table>
       <tr><th>model</th><th>rate from<span class="tip left" data-tip="A rate you set is one somebody here checked. A default is one that shipped in this binary and may be out of date. Unpriced means neither, and a run on that model reports its cost as unknown rather than as zero.">?</span></th>
         <th class="num">input</th><th class="num">output</th>
         <th class="num">cache read</th><th class="num">cache write</th><th>set your own</th></tr>

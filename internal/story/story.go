@@ -54,8 +54,11 @@ type Run struct {
 	Proposals []ledger.Proposal
 	Questions []ledger.Question
 
-	Cost           spend.Micros
-	Duration       time.Duration
+	Cost     spend.Micros
+	Duration time.Duration
+	// Timeout is the dispatch budget this run was given, so an unfinished run
+	// can be told apart from one nobody will ever finish.
+	Timeout        time.Duration
 	PromptRetained bool
 	EnvRetained    bool
 	// Reproducible reports whether this run's decision can be re-derived. It
@@ -71,7 +74,8 @@ func OfRun(l *ledger.Ledger, cfg *config.Config, runID string) (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Run{Run: r, Worker: cfg.Worker(r.WorkerType)}
+	s := &Run{Run: r, Worker: cfg.Worker(r.WorkerType),
+		Timeout: time.Duration(cfg.Dispatch.TimeoutSeconds) * time.Second}
 	s.Cost = spend.Micros(r.CostMicros)
 	if r.Finished() {
 		s.Duration = time.UnixMilli(r.FinishedMS).Sub(time.UnixMilli(r.StartedMS))
@@ -136,6 +140,16 @@ func headline(s *Run) string {
 	r := s.Run
 	who := r.WorkerType
 	switch {
+	// An agent inside its timeout is working. Saying it "never recorded an end"
+	// about a run three minutes into a thirty-minute budget describes a failure
+	// that has not happened — and reads as one.
+	//
+	// Only when a timeout is declared. With nothing to measure against there is
+	// no evidence either way, and UNKNOWN is the honest answer rather than a
+	// cheerful guess that it is fine.
+	case s.Timeout > 0 && r.StandingAt(time.Now(), s.Timeout) == ledger.StandingWorking:
+		return fmt.Sprintf("%s is running. It started %s ago and has not reported yet — an absent verdict here means not finished, not failed.",
+			who, time.Since(time.UnixMilli(r.StartedMS)).Round(time.Second))
 	case !r.Finished():
 		return fmt.Sprintf("%s started and never recorded an end. That is an UNKNOWN, not a failure and not a pass — nobody knows what it did.", who)
 	case len(s.Proposals) > 0 && s.Proposals[0].Admitted:

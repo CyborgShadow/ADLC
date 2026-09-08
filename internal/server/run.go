@@ -37,11 +37,28 @@ type runMention struct {
 	Link    string
 }
 
+// runPage carries whichever of the two shapes this id turned out to be.
+//
+// One page name, two body types, and the fragments have to tell them apart. An
+// earlier version did it by asking whether a field existed — {{with .Mentions}}
+// — and that is not a type test: on the OTHER body the field is simply absent,
+// which is a template execution error, and the page executes straight into the
+// ResponseWriter. So the error arrived after the headers and half the HTML were
+// already on the wire: the page truncated mid-sentence with the reason printed
+// in the body, and no 500 anywhere.
+//
+// Both fields exist on this type and one of them is nil, so {{with}} is a
+// question the template can actually answer.
+type runPage struct {
+	Registered   *story.Run
+	Unregistered *unregisteredRun
+}
+
 func (s *Server) run(r *http.Request) (string, any, error) {
 	id := strings.TrimPrefix(r.URL.Path, "/run/")
 	st, err := story.OfRun(s.Led, s.Cfg, id)
 	if err == nil {
-		return "Run " + id, st, nil
+		return "Run " + id, &runPage{Registered: st}, nil
 	}
 	if !errors.Is(err, ledger.ErrNotFound) {
 		return "", nil, err
@@ -50,7 +67,7 @@ func (s *Server) run(r *http.Request) (string, any, error) {
 	if ferr != nil {
 		return "", nil, err
 	}
-	return "Run " + id, v, nil
+	return "Run " + id, &runPage{Unregistered: v}, nil
 }
 
 // unregisteredRun gathers everything the record says about an id that has no

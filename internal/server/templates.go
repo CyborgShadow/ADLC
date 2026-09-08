@@ -150,7 +150,19 @@ transition:opacity .12s;z-index:60;box-shadow:0 6px 18px rgba(0,0,0,.55);pointer
 .tip:hover::after{opacity:1;visibility:visible}
 .tip.up::after{bottom:auto;top:calc(100% + 7px)}
 .tip.left::after{left:auto;right:0;transform:none}
-tr:nth-last-child(-n+3) .tip::after{bottom:auto;top:calc(100% + 7px)}
+/* A tip inside a horizontally scrolling table was clipped by the scroller and
+   not by anything z-index could lift it above: an ancestor's overflow clips its
+   absolutely positioned descendants whatever their stacking order. So a table
+   carrying tips does not scroll — it wraps instead, which costs nothing on a
+   form-shaped table and is the difference between a tip you can read and one
+   that is cut in half. .wrap is still the scroller everywhere else. */
+.wrap.tips{overflow:visible}
+.wrap.tips table{table-layout:auto}
+.wrap.tips td,.wrap.tips th{white-space:normal;overflow-wrap:anywhere}
+/* Header tips open downward, into the table, rather than up into whatever sits
+   above it. */
+th .tip::after{bottom:auto;top:calc(100% + 7px)}
+tr:nth-last-child(-n+3) td .tip::after{bottom:calc(100% + 7px);top:auto}
 .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
 .bar>i{display:block;height:100%;background:var(--ok)}
 form.inline{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:9px}
@@ -378,7 +390,7 @@ is unreachable, and an unreachable item looks exactly like one nobody has got ro
 `
 
 const unregisteredRunHTML = `
-{{if eq .Page "run"}}{{with .Body}}{{with .Mentions}}{{end}}
+{{if eq .Page "run"}}{{with .Body}}{{with .Unregistered}}
 <div class="banner bad"><b>There is no run under this id.</b> {{.Why}}</div>
 <h2>What the record says about <span class="mono">{{.RunID}}</span>
   <span class="sub">{{len .Mentions}} event(s) name it</span></h2>
@@ -390,11 +402,11 @@ const unregisteredRunHTML = `
     <td>{{.Says}}</td><td class="dim small">{{.When}}</td>
   </tr>{{else}}<tr><td colspan="5" class="dim">Nothing.</td></tr>{{end}}
 </table></div>
-{{end}}{{end}}
+{{end}}{{end}}{{end}}
 `
 
 const runHTML = `
-{{if eq .Page "run"}}{{with .Body}}
+{{if eq .Page "run"}}{{with .Body}}{{with .Registered}}
 <div class="card">
   <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
     <b class="mono">{{.Run.RunID}}</b>
@@ -428,7 +440,7 @@ const runHTML = `
    · envelope {{short .Run.EnvelopeSHA}} {{if .EnvRetained}}(retained){{else}}(not retained){{end}}
    · base {{short .Run.BaseSHA}} · head {{short .Run.HeadSHA}}</p>
 </div>
-{{end}}{{end}}
+{{end}}{{end}}{{end}}
 `
 
 const segmentHTML = `

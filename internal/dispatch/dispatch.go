@@ -448,6 +448,15 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	if err := os.WriteFile(promptPath, []byte(asm.Text), 0o644); err != nil {
 		return res, true, err
 	}
+	// The heartbeat starts before the agent does and stops however this run
+	// ends. While it is warm, some process is waiting on this run; once it goes
+	// cold, nobody is, and the reaper closes the run rather than leaving the
+	// item claimed by something that no longer exists.
+	hb := d.startBeat(beatFile{
+		RunID: runID, ItemID: c.Item.ID, LeaseKey: c.Key(), Worker: c.Worker,
+	})
+	defer hb.done()
+
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
