@@ -101,9 +101,13 @@ func (s *Server) sessionID() string { return console.SessionID(s.Cfg.Project) }
 // one; the console borrows it rather than configuring a second, so a project
 // with a working fleet has a working console by construction.
 func (s *Server) runner() dispatch.Runner {
-	if s.Runner != nil {
-		return s.Runner
-	}
+	// console.command is checked FIRST, ahead of the runner the caller supplied.
+	// It is the more specific declaration — somebody wrote a conversational
+	// command for the console specifically — and every entry point that starts a
+	// dashboard also hands it the fleet's one-shot runner. Preferring that one
+	// meant a configured session command was never used by anything, which is a
+	// setting that reads as applied and is not.
+	//
 	// A conversational command gets a runner that holds one thread across turns.
 	// Built once and kept: rebuilt per turn, every turn would be turn one.
 	if len(s.Cfg.Console.Command) > 0 {
@@ -116,6 +120,9 @@ func (s *Server) runner() dispatch.Runner {
 				}}
 		})
 		return s.sess
+	}
+	if s.Runner != nil {
+		return s.Runner
 	}
 	if s.Sched != nil && s.Sched.D != nil {
 		return s.Sched.D.Runner
@@ -262,6 +269,11 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 // because an ask with no reply and no explanation looks exactly like a console
 // that quietly stopped working.
 func (s *Server) runTurn(sid, turnID string, run dispatch.Runner) {
+	// Registered first so it runs LAST. The page reloads when the stream ends,
+	// and a reload that arrives before the reply is appended shows an empty
+	// answer to a question that was, in fact, answered.
+	s.live.open(turnID)
+	defer s.live.finish(turnID)
 	defer s.turns.done(turnID)
 
 	reply := ledger.ConsoleReplied{SessionID: sid, TurnID: turnID}
@@ -415,11 +427,17 @@ func (s *Server) consoleInvoke(sid, turnID string, run dispatch.Runner) ([]byte,
 		time.Duration(s.Cfg.Console.TimeoutSeconds)*time.Second)
 	defer cancel()
 
+	dec := &streamDecoder{}
+
 	res, rerr := run.Invoke(ctx, dispatch.Invocation{
 		RunID: runID, WorkerType: s.Cfg.Console.Worker,
 		PromptPath: promptPath, PromptText: asm.Text,
 		WorkDir: s.Repo, EnvelopePath: envPath,
 		Timeout: time.Duration(s.Cfg.Console.TimeoutSeconds) * time.Second,
+		// OnOutput hands over one line at a time. Decoding happens here rather
+		// than inside a runner so that every runner streams the same way, and so
+		// that a runner stays a thing that starts a process and reads a file.
+		OnOutput: func(line string) { s.live.write(turnID, dec.Line(line)) },
 	})
 	verdict := "pass"
 	if rerr != nil || len(res.Envelope) == 0 {

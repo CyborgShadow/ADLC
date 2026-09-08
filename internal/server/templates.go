@@ -66,12 +66,15 @@ var funcs = template.FuncMap{
 	},
 }
 
-// The dashboard is one page of HTML with no JavaScript and no external assets.
+// The dashboard is one page of HTML with no external assets.
 //
 // That is a constraint rather than a taste. This surface has to work when
 // something has gone wrong — which is the only time anybody opens it — so
-// it must not depend on a network fetch, a bundler or a browser feature. Every
-// control is a plain form and the refresh is a meta tag.
+// it must not depend on a network fetch or a bundler. Every control is a plain
+// form and the refresh is a meta tag.
+//
+// The one script on it streams a console turn as the agent writes it, and is
+// built so that losing it costs the streaming and nothing else: see live.go.
 var tmpl = template.Must(template.New("page").Funcs(funcs).Parse(strings.Join([]string{
 	pageHTML, overviewHTML, roadmapPageHTML, progressHTML, questionsPageHTML, approvalsPageHTML,
 	rolesPageHTML, coordinationHTML, configPageHTML, historyPageHTML, runHTML,
@@ -80,7 +83,7 @@ var tmpl = template.Must(template.New("page").Funcs(funcs).Parse(strings.Join([]
 	homePageHTML, advancedPageHTML, endHTML,
 	// After endHTML: this one is its own template, not part of the page body,
 	// and a define nested inside another define is a parse error.
-	consoleDockHTML, fieldsHTML,
+	consoleDockHTML, fieldsHTML, liveHTML,
 }, "")))
 
 const pageHTML = `
@@ -189,7 +192,7 @@ max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
 ` + aboutCSS + consoleCSS + historyPageCSS + roadmapPageCSS +
 	itemPageCSS + gatesCSS + rolesPageCSS + configPageCSS + aboutDataCSS +
-	aboutMoveCSS + homePageCSS + `
+	aboutMoveCSS + homePageCSS + liveCSS + `
 </style></head><body>
 <header>
   <h1>{{.Project}}</h1>
@@ -215,7 +218,7 @@ const endHTML = `
 <footer>Every figure here is read from the hash-chained ledger. Nothing is self-reported —
 a worker that has never run is counted from the registry, not inferred from its silence.</footer>
 {{template "dock" .}}
-</body></html>{{end}}
+` + liveScript + `</body></html>{{end}}
 `
 
 const overviewHTML = `

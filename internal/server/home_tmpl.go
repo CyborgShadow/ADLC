@@ -70,9 +70,7 @@ const homePageHTML = `
         <div class="bubble mine"><div class="who3">{{.AskedBy}}</div><div class="say">{{.Asked}}</div></div>
         <div class="bubble">
           <div class="who3">console</div>
-          {{if .Running}}<div class="say dimmed">Working — {{.Waited}} so far. A turn is a full agent
-            run, so thirty to ninety seconds is normal. This page is checking every two seconds
-            while it runs; you do not need to do anything.</div>
+          {{if .Running}}<div class="say dimmed">{{template "live" .}}</div>
           {{else if not .Replied}}<div class="say dimmed">This turn was interrupted and never
             answered. Nobody knows what it would have said, so nothing was recorded as if they did.</div>
           {{else if .Failure}}<div class="say bad2">The turn failed: {{.Failure}}</div>

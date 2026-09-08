@@ -8,9 +8,22 @@ the authority.
   from.
 - `workspace.go` — the per-run git worktree.
 - `runner.go` — `ExecRunner`, the default way an agent process is started.
+- `stream.go` — `LineWriter` and `TailBuffer`, for a caller watching a run in progress.
 - `merge.go` — the merge lane's use of `internal/merge`.
 
 ## What goes wrong here
+
+**Treating streamed output as a result.** `Invocation.OnOutput` exists so the console can show a
+turn as it happens. It is a view: the envelope is still read from the FILE the runner named, for
+the reason it always was — an agent that narrates its reasoning would otherwise bury its own
+result, and a parser reading stdout would end up guessing which JSON object was the real one. A
+runner that ignores `OnOutput` entirely is still a correct runner.
+
+**Decoding inside a runner.** `OnOutput` hands over one line at a time, without its newline, and
+nothing more. Whoever is watching decides what a line means — the console does, in
+`internal/server/stream_json.go`. Putting a particular agent's output format in here would be the
+first vendor in a control plane that has none, and it would make two runners behave differently
+for no reason. (They did, briefly, and the console dropped every newline on one of the two paths.)
 
 **Picking from the wrong end.** Work is drained from the *finished* end: `authority.CapabilityFor`
 returns a priority and a lower number is dispatched first, so verification is picked before new

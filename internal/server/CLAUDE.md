@@ -31,9 +31,23 @@ which listens on every interface.
 projection or the report is wrong; a value patched on the way to the page is a second answer to a
 question the record already answers.
 
-**No JavaScript, no external assets.** Every control is a plain form and the refresh is a meta tag.
-This is a constraint, not a taste: the dashboard has to work when something has gone wrong, which
-is the only time anybody opens it.
+**No JavaScript, no external assets — with one named exception.** Every control is a plain form
+and the refresh is a meta tag. This is a constraint, not a taste: the dashboard has to work when
+something has gone wrong, which is the only time anybody opens it.
+
+The exception is `live.go` / `live_tmpl.go`, which stream a console turn as the agent produces it.
+A turn is a full agent run, and "the answer will appear shortly" repeated for ninety seconds is
+indistinguishable from a console that has stopped working. The exception is kept narrow and it is
+the shape any future one has to take: the script only replaces a *working…* placeholder with the
+output of the run that placeholder is about; nothing it shows is authoritative; the meta refresh is
+still emitted and is cancelled only once bytes have actually arrived; every failure it has — no
+`EventSource`, a dead connection, a silent stream, an unknown turn id — ends in the reload the page
+would have done anyway. Delete the whole thing and the console still works.
+
+**Streaming something that is not a view.** The live buffer is in memory, bounded, and dropped two
+minutes after the turn ends. An in-flight turn is not a fact about the project, and the reply, the
+actions and the cost are all appended to the ledger by `runTurn` exactly as before. Agent output
+reaches the browser JSON-encoded, so a reply containing a newline cannot forge an event boundary.
 
 **Writing on a GET.** The write paths check the method. A dashboard whose links mutate state gets
 mutated by a browser prefetch.

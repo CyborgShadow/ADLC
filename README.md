@@ -131,9 +131,10 @@ you whether it still holds.
 
 ## The dashboard
 
-`adlc serve`, or automatically with `adlc schedule run`. Loopback only, no JavaScript, no
-external assets — it has to work when something has gone wrong, which is the only time anyone
-opens it.
+`adlc serve`, or automatically with `adlc schedule run`. Loopback only and no external assets — it
+has to work when something has gone wrong, which is the only time anyone opens it. Every control is
+a plain form and the refresh is a meta tag; the single piece of JavaScript streams a console turn as
+the agent writes it, and removing it costs you the streaming and nothing else.
 
 | page | answers |
 |---|---|

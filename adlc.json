@@ -378,12 +378,12 @@
   },
 
   "console": {
-    "_comment": "authority is propose | act | full. 'act' lets it do anything the control plane could do on its own, each through the same authority as everything else, and leaves the three gates a person owns as drafts you press. 'full' lets it press those too, which removes the only human checkpoint in the system — the record still says the agent did it.",
+    "_comment": "authority is propose | act | full. 'act' lets it do anything the control plane could do on its own, each through the same authority as everything else, and leaves the three gates a person owns as drafts you press. 'full' lets it press those too, which removes the only human checkpoint in the system — the record still says the agent did it. command: {{session_args}} keeps one conversation across turns, and --output-format stream-json --include-partial-messages is what makes the console show a turn as it happens rather than after it finishes. Those flags are written here rather than added by the tool, because the command is yours — an agent that simply prints what it is doing streams fine without them.",
     "enabled": true,
     "authority": "act",
     "worker": "console",
-    "command": ["claude", "-p", "{{session_args}}", "--dangerously-skip-permissions", "--add-dir", "."],
-    "timeout_seconds": 180,
+    "command": ["claude", "-p", "{{session_args}}", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions", "--add-dir", "."],
+    "timeout_seconds": 300,
     "history_turns": 20
   },
 

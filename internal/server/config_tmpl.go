@@ -173,7 +173,7 @@ const configPageHTML = `
         <input type="number" name="attempts" value="{{.Attempts}}" min="1"></div>
       <div class="fld"><label>run timeout (s)<span class="tip" data-tip="How long one agent may run. A run killed at this limit is recorded as UNKNOWN rather than failed, because nobody knows how it was going — which is accurate, and why setting this too low is expensive.">?</span></label>
         <input type="number" name="timeout" value="{{.Timeout}}" min="60"></div>
-      <div class="fld"><label>page refresh (s)<span class="tip" data-tip="How often this dashboard reloads itself. It is also how quickly a console answer appears, since the panel has no JavaScript. 0 stops it refreshing.">?</span></label>
+      <div class="fld"><label>page refresh (s)<span class="tip" data-tip="How often this dashboard reloads itself. It is also the fallback for watching a console turn, for a browser that cannot stream. 0 stops it refreshing.">?</span></label>
         <input type="number" name="refresh" value="{{.Refresh}}" min="0"></div>
       <button type="submit">Save limits</button>
     </form>

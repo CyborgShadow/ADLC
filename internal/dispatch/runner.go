@@ -1,9 +1,9 @@
 package dispatch
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,14 +68,22 @@ func (r *ExecRunner) Invoke(ctx context.Context, in Invocation) (Result, error) 
 		"ADLC_ENVELOPE="+in.EnvelopePath,
 		"ADLC_PROMPT="+in.PromptPath,
 	)
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
+	out := NewTailBuffer(4000)
+	lines := NewLineWriter(in.OnOutput)
+	var sink io.Writer = out
+	if in.OnOutput != nil {
+		// Both: the caller watching a run in progress gets each line as it
+		// arrives, and the Result still carries the tail that explains a failure.
+		sink = io.MultiWriter(out, lines)
+	}
+	cmd.Stdout, cmd.Stderr = sink, sink
 	// The prompt reaches the agent by path AND on stdin, because the two common
 	// shapes of coding CLI disagree about which one they read.
 	cmd.Stdin = strings.NewReader(in.PromptText)
 
 	err := cmd.Run()
-	res := Result{Stderr: tail(out.String(), 4000)}
+	_ = lines.Close()
+	res := Result{Stderr: out.String()}
 	if cmd.ProcessState != nil {
 		res.ExitCode = cmd.ProcessState.ExitCode()
 	}

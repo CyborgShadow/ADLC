@@ -49,6 +49,13 @@ type Invocation struct {
 	WorkDir      string
 	EnvelopePath string
 	Timeout      time.Duration
+	// OnOutput, when set, receives the agent's output as it arrives rather than
+	// once at the end. It exists for the console, where a person is waiting on
+	// the other side of a turn; a lane leaves it nil and nothing changes.
+	//
+	// It is a view, never a result. A runner that ignores it entirely is still a
+	// correct runner — the envelope is read from a file, as it always was.
+	OnOutput func(text string)
 }
 
 // Result is what a runner produced.

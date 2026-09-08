@@ -47,6 +47,10 @@ type Server struct {
 	Runner dispatch.Runner
 	Log    func(string)
 	turns  turnState
+	// live holds the output of the turns currently running, so the page can
+	// show one as it happens. It is a view of work in flight and never a
+	// source of truth; see live.go.
+	live liveStore
 
 	// The conversational runner, built once from console.command.
 	sess     *sessionRunner
@@ -118,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/console/ask", s.ask)
 	mux.HandleFunc("/console/toggle", s.toggleDock)
 	mux.HandleFunc("/console/do", s.consoleDo)
+	mux.HandleFunc("/console/live", s.consoleLive)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		rep, err := s.Led.Verify()
 		if err != nil {

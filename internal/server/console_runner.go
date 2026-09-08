@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -176,12 +177,20 @@ func (r *sessionRunner) run(ctx context.Context, in dispatch.Invocation, sess []
 		"ADLC_ENVELOPE="+in.EnvelopePath,
 		"ADLC_PROMPT="+in.PromptPath,
 	)
-	var out strings.Builder
-	cmd.Stdout, cmd.Stderr = &out, &out
+	// Two consumers of the same output. The tail explains a failure after the
+	// fact; the line writer is what somebody is watching while it happens.
+	out := dispatch.NewTailBuffer(4000)
+	lines := dispatch.NewLineWriter(in.OnOutput)
+	var sink io.Writer = out
+	if in.OnOutput != nil {
+		sink = io.MultiWriter(out, lines)
+	}
+	cmd.Stdout, cmd.Stderr = sink, sink
 	cmd.Stdin = strings.NewReader(in.PromptText)
 
 	err := cmd.Run()
-	res := dispatch.Result{Stderr: tailN(out.String(), 4000)}
+	_ = lines.Close()
+	res := dispatch.Result{Stderr: out.String()}
 	if cmd.ProcessState != nil {
 		res.ExitCode = cmd.ProcessState.ExitCode()
 	}
@@ -193,13 +202,6 @@ func (r *sessionRunner) run(ctx context.Context, in dispatch.Invocation, sess []
 			res.ExitCode, firstLines(res.Stderr, 3))
 	}
 	return res, nil
-}
-
-func tailN(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return "…" + s[len(s)-n:]
 }
 
 // firstLines surfaces what the agent actually said, because "exit status 1" on
