@@ -101,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/loop", s.setLoop)
 	mux.HandleFunc("/signoff", s.signoff)
 	mux.HandleFunc("/console/ask", s.ask)
+	mux.HandleFunc("/console/toggle", s.toggleDock)
 	mux.HandleFunc("/console/do", s.consoleDo)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		rep, err := s.Led.Verify()
@@ -145,6 +146,8 @@ type pageData struct {
 	Now      string
 	Flash    string
 	FlashBad bool
+	// Dock is the console panel, rendered on every page.
+	Dock dockData
 }
 
 type navItem struct {
@@ -179,7 +182,7 @@ func (s *Server) page(name string, fn func(*http.Request) (string, any, error)) 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		d, err := s.shell(name, title, body)
+		d, err := s.shell(r, name, title, body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -193,7 +196,7 @@ func (s *Server) page(name string, fn func(*http.Request) (string, any, error)) 
 	}
 }
 
-func (s *Server) shell(page, title string, body any) (*pageData, error) {
+func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData, error) {
 	seq, _, err := s.Led.Head()
 	if err != nil {
 		return nil, err
@@ -257,7 +260,6 @@ func (s *Server) shell(page, title string, body any) (*pageData, error) {
 		{Href: "/roles", Label: "Roles"},
 		{Href: "/config", Label: "Config", Count: attn.DarkLoops, Alarm: attn.DarkLoops > 0},
 		{Href: "/history", Label: "History"},
-		{Href: "/console", Label: "Console", Count: attn.ConsolePending, Alarm: attn.ConsolePending > 0},
 		{Href: "/about", Label: "About the ADLC"},
 	}
 	for i := range nav {
@@ -267,7 +269,7 @@ func (s *Server) shell(page, title string, body any) (*pageData, error) {
 	return &pageData{
 		Page: page, Title: title, Refresh: s.Cfg.Server.RefreshSeconds, Project: s.Cfg.Project,
 		Verdict: string(rep.Verdict), HeadSeq: seq, Attn: attn, Body: body,
-		Now: s.now().Format("15:04:05"), Nav: nav,
+		Now: s.now().Format("15:04:05"), Nav: nav, Dock: s.dock(r),
 	}, nil
 }
 

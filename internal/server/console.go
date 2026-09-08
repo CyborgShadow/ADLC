@@ -104,6 +104,8 @@ type consoleActionRow struct {
 	ledger.ConsoleAction
 	// Pressable marks an action still waiting for somebody.
 	Pressable bool
+	// Human is what this action is, in a person's words.
+	Human string
 }
 
 func (s *Server) consolePage(*http.Request) (string, any, error) {
@@ -122,7 +124,10 @@ func (s *Server) consolePage(*http.Request) (string, any, error) {
 			if p {
 				pending++
 			}
-			r.Actions = append(r.Actions, consoleActionRow{ConsoleAction: a, Pressable: p})
+			r.Actions = append(r.Actions, consoleActionRow{
+				ConsoleAction: a, Pressable: p,
+				Human: console.ActionKind(a.Kind).Human(),
+			})
 		}
 		rows = append(rows, r)
 	}
@@ -148,9 +153,9 @@ func (s *Server) consolePage(*http.Request) (string, any, error) {
 		AuthWhat  string
 		Worker    string
 		Pending   int
-		Actions   string
+		Vocab     []console.HumanAction
 	}{rows, blocked, string(s.Cfg.Console.Authority), s.Cfg.Console.Authority.Describe(),
-		s.Cfg.Console.Worker, pending, console.Vocabulary(s.Cfg.Console.Authority)}, nil
+		s.Cfg.Console.Worker, pending, console.HumanVocabulary(s.Cfg.Console.Authority)}, nil
 }
 
 // consolePrompt is the prompt id the console worker uses.
@@ -175,17 +180,20 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	}
 	text := strings.TrimSpace(r.FormValue("text"))
 	who := orDefault(strings.TrimSpace(r.FormValue("who")), s.Actor)
+	// Back to the page the question was about. An answer that arrives somewhere
+	// else is an answer you have to carry back to the thing you were looking at.
+	back := safeBack(orDefault(r.FormValue("back"), "/console"))
 	if text == "" {
-		redirect(w, r, "/console", "nothing to ask", true)
+		redirect(w, r, back, "nothing to ask", true)
 		return
 	}
 	if !s.Cfg.Console.Enabled {
-		redirect(w, r, "/console", "the console is off in this project's config", true)
+		redirect(w, r, back, "the console is off in this project's config", true)
 		return
 	}
 	run := s.runner()
 	if run == nil {
-		redirect(w, r, "/console", "no agent runner is available, so a turn has nothing to invoke", true)
+		redirect(w, r, back, "no agent runner is available, so a turn has nothing to invoke", true)
 		return
 	}
 	sid := s.sessionID()
@@ -193,12 +201,12 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.Led.Append(who, ledger.KindConsoleAsked, sid, ledger.ConsoleAsked{
 		SessionID: sid, TurnID: turnID, Text: text, AskedBy: who,
 	}); err != nil {
-		redirect(w, r, "/console", err.Error(), true)
+		redirect(w, r, back, err.Error(), true)
 		return
 	}
 	s.turns.start(turnID, s.now())
 	go s.runTurn(sid, turnID, run)
-	redirect(w, r, "/console", "asked — the answer appears here when the turn finishes", false)
+	redirect(w, r, back, "asked — the answer appears in the console when the turn finishes", false)
 }
 
 // runTurn invokes the agent and records what came back, whatever came back.
@@ -386,15 +394,16 @@ func (s *Server) consoleDo(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.FormValue("action"))
 	press := r.FormValue("press")
 	who := orDefault(strings.TrimSpace(r.FormValue("who")), s.Actor)
+	back := safeBack(orDefault(r.FormValue("back"), "/console"))
 	sid := s.sessionID()
 
 	turn, a, err := s.Led.ConsoleAction(sid, id)
 	if err != nil {
-		redirect(w, r, "/console", err.Error(), true)
+		redirect(w, r, back, err.Error(), true)
 		return
 	}
 	if a.Outcome != ledger.ActionPending {
-		redirect(w, r, "/console", fmt.Sprintf(
+		redirect(w, r, back, fmt.Sprintf(
 			"%s was already %s; reload and look at where it stands now", id, a.Outcome), true)
 		return
 	}
@@ -406,8 +415,8 @@ func (s *Server) consoleDo(w http.ResponseWriter, r *http.Request) {
 		SessionID: sid, TurnID: turn.TurnID, ActionID: id, Kind: a.Kind,
 		Outcome: outcome, Detail: detail, By: who,
 	}); err != nil {
-		redirect(w, r, "/console", err.Error(), true)
+		redirect(w, r, back, err.Error(), true)
 		return
 	}
-	redirect(w, r, "/console", detail, outcome == ledger.ActionRefused)
+	redirect(w, r, back, detail, outcome == ledger.ActionRefused)
 }

@@ -76,6 +76,9 @@ var tmpl = template.Must(template.New("page").Funcs(funcs).Parse(strings.Join([]
 	pageHTML, overviewHTML, roadmapHTML, progressHTML, questionsHTML, approvalsHTML,
 	rolesHTML, roleHTML, coordinationHTML, configHTML, historyHTML, runHTML, itemHTML,
 	segmentHTML, aboutHTML, consoleHTML, endHTML,
+	// After endHTML: this one is its own template, not part of the page body,
+	// and a define nested inside another define is a parse error.
+	consoleDockHTML,
 }, "")))
 
 const pageHTML = `
@@ -187,6 +190,7 @@ const endHTML = `
 </main>
 <footer>Every figure here is read from the hash-chained ledger. Nothing is self-reported —
 a worker that has never run is counted from the registry, not inferred from its silence.</footer>
+{{template "dock" .}}
 </body></html>{{end}}
 `
 
