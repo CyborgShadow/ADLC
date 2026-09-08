@@ -96,7 +96,7 @@ type Outputs struct {
 	Findings     []Finding   `json:"findings,omitempty"`
 	Notes        string      `json:"notes_md,omitempty"`
 	Deferred     []string    `json:"deferred,omitempty"`
-	// WorkItems is what a generator run produces. They are PROPOSALS: the control
+	// WorkItems is what a planning run produces. They are PROPOSALS: the control
 	// plane admits or refuses each one and records both answers. An agent that
 	// could create work items directly would be an agent that could invent its
 	// own scope.
@@ -123,7 +123,7 @@ type Finding struct {
 	Required  string `json:"required_change"`
 }
 
-// ProposedItem is one work item a generator run proposes.
+// ProposedItem is one work item a planning run proposes.
 type ProposedItem struct {
 	ID        string   `json:"id"`
 	Title     string   `json:"title"`

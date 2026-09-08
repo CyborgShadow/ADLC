@@ -371,7 +371,7 @@ func shortSHA(s string) string {
 
 // rederiveGeneration re-runs the item-admission rules over the same proposals.
 //
-// A generator's decision is not a transition, it is a set of admit/refuse
+// A planning run's decision is not a transition, it is a set of admit/refuse
 // calls — one per proposed work item — and those are just as much a pure
 // function of recorded inputs as anything else here. Re-deriving them answers
 // a question worth asking: would the same breakdown be accepted by today's
@@ -423,7 +423,7 @@ func rederiveGeneration(l *ledger.Ledger, cfg *config.Config, s *Run, env *envel
 	rp.Rederived = fmt.Sprintf("%d of %d proposal(s) decided the same way", agree, agree+differ)
 	rp.Agrees = differ == 0
 	if rp.Agrees {
-		rp.Detail = "every proposal this generator made is judged the same way by today's rules"
+		rp.Detail = "every proposal this planning run made is judged the same way by today's rules"
 	}
 	return rp, nil
 }

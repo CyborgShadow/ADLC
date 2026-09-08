@@ -32,7 +32,7 @@ type ItemDecision struct {
 // GenerationFacts are what admitting a proposed item needs beyond the config.
 type GenerationFacts struct {
 	SegmentID string
-	// SegmentBrief is the direction the generator was given. It is carried here
+	// SegmentBrief is the direction the planner was given. It is carried here
 	// so that a refusal can say what the item was supposed to be about.
 	SegmentBrief string
 	// ExistingIDs are every item id already in the ledger, plus the ids admitted
@@ -117,7 +117,7 @@ func AdmitItem(cfg *config.Config, p envelope.ProposedItem, f GenerationFacts) I
 
 // SegmentNeedsWork reports how many more items a segment's brief calls for.
 //
-// Generation is demand-driven rather than continuous. A generator that runs on
+// Generation is demand-driven rather than continuous. A planner that runs on
 // a timer regardless of backlog depth invents work to justify its own cadence,
 // and the backlog stops being a statement of what is left to do.
 func SegmentNeedsWork(targetOpen, openItems int) int {

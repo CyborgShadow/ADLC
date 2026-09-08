@@ -92,11 +92,11 @@ const (
 type SegmentCreated struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-	// Brief is the direction a work generator decomposes. It is the whole of what
+	// Brief is the intent a researcher works up and a planner decomposes. It is the whole of what
 	// turns this from a backlog someone typed in into something that can be
 	// pointed at a goal and left running.
 	Brief string `json:"brief"`
-	// TargetOpen is how many unfinished items the generator keeps in flight in
+	// TargetOpen is how many unfinished items the planner keeps in flight in
 	// this segment. Zero means the segment is hand-filled and generation never
 	// runs against it.
 	TargetOpen int `json:"target_open"`

@@ -90,7 +90,7 @@ func cmdSegment(e *env, args []string) int {
 		fs := sub("segment create")
 		id := fs.String("id", "", "segment id")
 		title := fs.String("title", "", "one line describing the segment")
-		brief := fs.String("brief", "", "the direction a generator decomposes into work items")
+		brief := fs.String("brief", "", "the intent a researcher works up and a planner decomposes into work items")
 		rationale := fs.String("why", "", "why this deliverable matters, in the language of whoever wanted it")
 		rank := fs.Int("rank", 0, "roadmap order; lower sorts first")
 		target := fs.Int("target", 0, "how many unfinished items to keep in flight here (0 = hand-filled)")
@@ -103,7 +103,7 @@ func cmdSegment(e *env, args []string) int {
 			return exitUsage
 		}
 		if *target > 0 && strings.TrimSpace(*brief) == "" {
-			return fail("-target %d with no -brief: a generator asked to keep work in flight with no direction will invent scope", *target)
+			return fail("-target %d with no -brief: a planner asked to keep work in flight with no direction will invent scope", *target)
 		}
 		if _, err := e.led.Append(e.actor, ledger.KindSegmentCreated, *id, ledger.SegmentCreated{
 			ID: *id, Title: *title, Brief: *brief, Rationale: *rationale,

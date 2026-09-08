@@ -92,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/answer", s.answer)
 	mux.HandleFunc("/decide", s.decide)
 	mux.HandleFunc("/loop", s.setLoop)
+	mux.HandleFunc("/signoff", s.signoff)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		rep, err := s.Led.Verify()
 		if err != nil {
@@ -345,6 +346,11 @@ type roadmapRow struct {
 	Stage    string
 	Class    string
 	Next     string
+	// NeedsYou marks the one planning gate no machine passes on its own, and
+	// carries the state the sign-off control would move it to.
+	NeedsYou bool
+	SignTo   string
+	SignVerb string
 }
 
 func (s *Server) roadmap(*http.Request) (string, any, error) {
@@ -360,8 +366,10 @@ func (s *Server) roadmap(*http.Request) (string, any, error) {
 		switch authority.SegmentState(sg.State) {
 		case authority.SegTheory:
 			r.Class, r.Next = "mute", "An idea. Nothing is committed to it yet."
+			r.NeedsYou, r.SignTo, r.SignVerb = true, string(authority.SegRoadmap), "Put on the roadmap"
 		case authority.SegRoadmap:
 			r.Class, r.Next = "warn", "On the roadmap, waiting for you to sign off the intent. Nothing moves until you do."
+			r.NeedsYou, r.SignTo, r.SignVerb = true, string(authority.SegSignedOff), "Sign it off"
 		case authority.SegSignedOff:
 			r.Class, r.Next = "live", "Signed off. A researcher will turn the intent into an approach."
 		case authority.SegResearching:

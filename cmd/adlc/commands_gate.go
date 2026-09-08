@@ -244,7 +244,7 @@ func cmdDispatch(e *env, args []string) int {
 	}
 
 	fs := sub("dispatch")
-	capability := fs.String("capability", "", "restrict to implement|verify|validate|operate|generate")
+	capability := fs.String("capability", "", "restrict to one capability, e.g. implement|test|judge|validate|arbitrate|operate")
 	worker := fs.String("worker", "", "restrict to one declared worker type")
 	areaCSV := fs.String("areas", "", "comma-separated areas to restrict to")
 	every := fs.Duration("every", 60*time.Second, "loop: how often to look for work")

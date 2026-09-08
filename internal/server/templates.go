@@ -245,9 +245,10 @@ re-derived rather than merely described. <span class="mono">adlc run replay &lt;
 
 const roadmapHTML = `
 {{if eq .Page "roadmap"}}
-<div class="banner calm">Each deliverable is broken down by a planner, and the breakdown is reviewed
-against the brief <b>before any of it is built</b>. A deliverable sitting at <b>planned</b> is waiting
-for that review — nothing under it will be dispatched until it passes.</div>
+<div class="banner calm">An idea is signed off, researched, decomposed, and the decomposition is
+checked against the intent <b>before any of it is built</b>. Signing off is the one planning gate no
+machine passes on its own; a deliverable at <b>planned</b> is waiting for the plan review, and
+nothing under it is dispatched until it passes.</div>
 {{range .Body}}
 <div class="card" style="margin-bottom:10px">
   <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
@@ -262,6 +263,13 @@ for that review — nothing under it will be dispatched until it passes.</div>
   <div class="dim small" style="margin-top:6px">{{.Next}}
     {{if .Progress.Blocked}}· <span class="pill bad">{{.Progress.Blocked}} blocked</span>{{end}}
     {{if .Progress.Waiting}}· <span class="pill warn">{{.Progress.Waiting}} awaiting approval</span>{{end}}</div>
+  {{if .NeedsYou}}<form class="inline" method="post" action="/signoff">
+    <input type="hidden" name="id" value="{{.ID}}">
+    <input type="hidden" name="to" value="{{.SignTo}}">
+    <input type="text" name="who" placeholder="your name">
+    <input type="text" name="why" placeholder="why, in your own words" style="flex:1;min-width:200px">
+    <button type="submit">{{.SignVerb}}</button>
+  </form>{{end}}
 </div>
 {{else}}<div class="card dim">No deliverables yet. Add one with a brief and a target and the planner lane
 will fill it:<br><span class="mono">adlc segment create -id S1 -title "…" -brief "…" -target 5</span></div>{{end}}

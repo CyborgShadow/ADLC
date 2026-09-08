@@ -115,7 +115,7 @@ type Candidate struct {
 }
 
 // Key is what a candidate leases: the item id, or the segment for generation,
-// so that two generators cannot both fill one backlog.
+// so that two planners cannot both fill one backlog.
 func (c Candidate) Key() string {
 	if c.Kind == KindSegment {
 		return "plan-" + c.Segment.ID

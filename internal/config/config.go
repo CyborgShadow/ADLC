@@ -672,7 +672,7 @@ type LoopDecl struct {
 	// the same second contend for leases and waste a pick each.
 	OffsetSeconds int `json:"offset_seconds,omitempty"`
 	// Capability restricts the loop to one kind of work: implement, verify,
-	// validate, operate, generate. Empty means anything.
+	// validate, curate, arbitrate, operate, improve. Empty means anything.
 	Capability string `json:"capability,omitempty"`
 	// Areas restricts the loop to items tagged with one of these. Empty means any
 	// area.
@@ -771,7 +771,7 @@ func (c *Config) OwnerFor(area, capability string) (string, bool) {
 // back to a generalist: an item that already exists has to reach somebody.
 // Generation is the opposite case — it is the one place an agent decides
 // what work exists, so it may only file under a taxonomy the project has
-// declared. Letting a generator invent an area is how a backlog fills with
+// declared. Letting a planner invent an area is how a backlog fills with
 // work nobody owns and nobody notices.
 func (c *Config) KnownArea(area string) bool {
 	if area == "" {
