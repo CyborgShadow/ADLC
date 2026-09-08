@@ -278,6 +278,8 @@ type DispatchPolicy struct {
 	// Isolation selects how a run's tree is prepared: "worktree" (git worktree
 	// per run), "copy", or "none".
 	Isolation string `json:"isolation"`
+	// Trunk is the branch the merge queue lands on. Empty means "main".
+	Trunk string `json:"trunk,omitempty"`
 }
 
 // PromptPolicy governs the prompt library.

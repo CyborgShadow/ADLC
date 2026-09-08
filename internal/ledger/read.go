@@ -55,6 +55,7 @@ type Run struct {
 	PromptSHA   string
 	BaseSHA     string
 	WorkDir     string
+	Branch      string
 	Model       string
 	StartedMS   int64
 	FinishedMS  int64
@@ -228,13 +229,13 @@ func (l *Ledger) Segments() ([]Segment, error) {
 	return out, rows.Err()
 }
 
-const runCols = `run_id,worker_type,actor,item_id,segment_id,prompt_id,prompt_sha,base_sha,workdir,model,
+const runCols = `run_id,worker_type,actor,item_id,segment_id,prompt_id,prompt_sha,base_sha,workdir,branch,model,
 	started_ms,finished_ms,verdict,envelope_sha,head_sha,artifact,tok_in,tok_out,tok_cache_r,tok_cache_w,cost_micros`
 
 func scanRun(s interface{ Scan(...any) error }) (Run, error) {
 	var r Run
 	err := s.Scan(&r.RunID, &r.WorkerType, &r.Actor, &r.ItemID, &r.SegmentID, &r.PromptID, &r.PromptSHA,
-		&r.BaseSHA, &r.WorkDir, &r.Model, &r.StartedMS, &r.FinishedMS, &r.Verdict, &r.EnvelopeSHA,
+		&r.BaseSHA, &r.WorkDir, &r.Branch, &r.Model, &r.StartedMS, &r.FinishedMS, &r.Verdict, &r.EnvelopeSHA,
 		&r.HeadSHA, &r.Artifact, &r.Usage.InputTokens, &r.Usage.OutputTokens,
 		&r.Usage.CacheReadTokens, &r.Usage.CacheWriteTokens, &r.CostMicros)
 	return r, err

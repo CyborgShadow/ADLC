@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS adlc_run (
   prompt_sha   TEXT NOT NULL DEFAULT '',
   base_sha     TEXT NOT NULL DEFAULT '',
   workdir      TEXT NOT NULL DEFAULT '',
+  branch       TEXT NOT NULL DEFAULT '',
   started_ms   INTEGER NOT NULL,
   finished_ms  INTEGER NOT NULL DEFAULT 0,
   verdict      TEXT NOT NULL DEFAULT '',
@@ -268,4 +269,5 @@ var migrations = []string{
 	`ALTER TABLE adlc_segment ADD COLUMN state TEXT NOT NULL DEFAULT 'drafted'`,
 	`ALTER TABLE adlc_segment ADD COLUMN rank INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE adlc_item ADD COLUMN rationale TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE adlc_run ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
 }

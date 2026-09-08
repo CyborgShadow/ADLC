@@ -166,7 +166,10 @@ type RunStarted struct {
 	PromptSHA  string `json:"prompt_sha"`
 	BaseSHA    string `json:"base_sha"`
 	WorkDir    string `json:"workdir"`
-	Model      string `json:"model"`
+	// Branch is the ref the run's commits live on. The merge queue needs it
+	// months later, when the workspace that produced them is long gone.
+	Branch string `json:"branch,omitempty"`
+	Model  string `json:"model"`
 }
 
 // Usage is the token accounting for one run.
@@ -567,10 +570,10 @@ func apply(tx *sql.Tx, ev Event) error {
 		if err := dec(&p); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO adlc_run(run_id,worker_type,actor,item_id,segment_id,prompt_id,prompt_sha,base_sha,workdir,model,started_ms,started_seq)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err := tx.Exec(`INSERT INTO adlc_run(run_id,worker_type,actor,item_id,segment_id,prompt_id,prompt_sha,base_sha,workdir,branch,model,started_ms,started_seq)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			p.RunID, p.WorkerType, ev.Actor, p.ItemID, p.SegmentID, p.PromptID, p.PromptSHA,
-			p.BaseSHA, p.WorkDir, p.Model, ev.TsMS, ev.Seq)
+			p.BaseSHA, p.WorkDir, p.Branch, p.Model, ev.TsMS, ev.Seq)
 		return err
 
 	case KindRunFinished:

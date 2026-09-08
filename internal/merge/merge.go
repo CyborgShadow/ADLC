@@ -76,6 +76,12 @@ type Queue struct {
 	Now func() time.Time
 	// Log receives progress lines.
 	Log func(string)
+
+	// diffOverride stands in for the rebased-tree diff so the clobber guard's
+	// refusal path can be driven end to end. A clean rebase cannot produce an
+	// unowned change, which is the guard's whole point, so the condition it
+	// exists for has to be injected rather than staged in git.
+	diffOverride func(dir, from, to string) ([]string, error)
 }
 
 func (q *Queue) now() time.Time {
@@ -158,14 +164,8 @@ func (q *Queue) Land(ctx context.Context, branch string) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	var clobbered []string
-	for _, p := range changed {
-		if !owned[p] {
-			clobbered = append(clobbered, p)
-		}
-	}
+	clobbered := Unowned(owned, changed)
 	if len(clobbered) > 0 {
-		sort.Strings(clobbered)
 		return Outcome{Reason: "stale_base_clobber", Clobbered: clobbered, RebasedSHA: rebased,
 			Detail: fmt.Sprintf(
 				"the rebased tree changes %d file(s) this branch never touched, which would silently revert work that landed after it started: %s. Rebase the branch yourself and look at what came back before trying again",
@@ -313,7 +313,32 @@ func (q *Queue) filesTouchedBy(base, branch string) (map[string]bool, error) {
 	return owned, nil
 }
 
+// Unowned is the clobber guard: the paths a rebased tree would change that the
+// branch's own commits never touched.
+//
+// For a branch that rebases cleanly onto the trunk this set is always empty,
+// which is the point — it is an assertion, not a heuristic. It stops being
+// empty when the rebase produced something other than the branch's own patch:
+// a commit dropped as already-upstream, a conflict resolved by a merge driver
+// or by recorded resolutions, a flattened merge commit, a submodule pointer
+// carried backwards. Those all silently revert work that landed after the
+// branch started, and every check stays green on the way through, so nothing
+// downstream would notice. The comparison is cheap and it is checked directly.
+func Unowned(owned map[string]bool, changed []string) []string {
+	var out []string
+	for _, p := range changed {
+		if !owned[p] {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (q *Queue) diffNames(dir, from, to string) ([]string, error) {
+	if q.diffOverride != nil {
+		return q.diffOverride(dir, from, to)
+	}
 	out, err := q.gitOut(dir, "diff", "--name-only", from, to)
 	if err != nil {
 		return nil, fmt.Errorf("diff %s..%s: %s", from, to, firstLine(out))

@@ -49,6 +49,11 @@ type Facts struct {
 	// ledger. A proposal from a run nobody registered has no prompt pin, no base
 	// commit and no attribution behind it.
 	RunStarted bool
+	// MergeClean reports that the merge queue rebased the work onto the trunk,
+	// re-ran the gate on the rebased tree, and found the branch changes only
+	// files its own commits touch. Nothing else may set it: it is a statement
+	// about a rebase that actually happened.
+	MergeClean bool
 }
 
 // Decision is the authority's answer.
@@ -195,6 +200,11 @@ func (a *Authority) check(r Requirement, req Request, f Facts, edge *Edge) Decis
 			return refuse(ReasonOpenQuestion, fmt.Sprintf(
 				"%d blocking question(s) on this item are unanswered, starting with %s: %s",
 				n, f.OpenBlockingQs[0].ID, firstLine(f.OpenBlockingQs[0].Text)))
+		}
+
+	case ReqMergeClean:
+		if !f.MergeClean {
+			return refuse(ReasonMergeConflict, "the merge queue has not established that this branch rebases onto the trunk, re-gates green on the rebased tree, and changes only files its own commits touch")
 		}
 
 	case ReqStatedReason:

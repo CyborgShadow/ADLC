@@ -398,7 +398,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	}
 	if _, err := d.Led.Append(d.Actor, ledger.KindRunStarted, runID, ledger.RunStarted{
 		RunID: runID, WorkerType: c.Worker, ItemID: c.Item.ID, SegmentID: segID,
-		PromptID: asm.PromptID, PromptSHA: asm.SHA, BaseSHA: baseSHA, WorkDir: ws.Dir,
+		PromptID: asm.PromptID, PromptSHA: asm.SHA, BaseSHA: baseSHA, WorkDir: ws.Dir, Branch: ws.Branch,
 		Model: d.Cfg.Budget.DefaultModel,
 	}); err != nil {
 		return TickResult{}, false, err
@@ -823,24 +823,32 @@ func (d *Dispatcher) Refresh() (int, error) {
 	return moved, nil
 }
 
-// claimForWork records the ready -> in_progress edge before an implementer
-// starts.
+// claimForWork records the waiting -> working edge before a run starts.
 //
 // Dispatching IS that transition: the moment a run holds the lease and has a
 // workspace, the item is being worked on, and saying so immediately means an
 // operator watching the board sees the state the fleet is actually in rather
 // than the state it was in before the run began.
+//
+// Which working state that is comes from authority.PickedUp, so every waiting
+// state in the lifecycle is claimed the same way and a stage added later cannot
+// quietly keep showing as queued while a run works it.
 func (d *Dispatcher) claimForWork(runID string, c *Candidate, now time.Time) error {
-	if c.Kind != KindItem || c.From != authority.StateReady {
+	if c.Kind != KindItem {
 		return nil
 	}
+	to, ok := authority.PickedUp(c.From)
+	if !ok {
+		return nil
+	}
+	reason := "dispatched to " + c.Worker
 	facts, err := authority.Gather(d.Led, c.Item.ID, "", nil, "", now)
 	if err != nil {
 		return err
 	}
 	dec := authority.New(d.Cfg).Decide(authority.Request{
-		Actor: d.Actor, RunID: runID, From: authority.StateReady, To: authority.StateInProgress,
-		Reason: "dispatched to " + c.Worker, Now: now,
+		Actor: d.Actor, RunID: runID, From: c.From, To: to,
+		Reason: reason, Now: now,
 	}, facts)
 	if !dec.Admitted {
 		d.recordRefusal(runID, *c, dec.Reason, dec.Detail)
@@ -848,17 +856,17 @@ func (d *Dispatcher) claimForWork(runID string, c *Candidate, now time.Time) err
 	}
 	if _, err := d.Led.Append(d.Actor, ledger.KindTransitionAdmitted, c.Item.ID, ledger.TransitionOutcome{
 		RunID: runID, ItemID: c.Item.ID, Worker: c.Worker,
-		From: string(authority.StateReady), To: string(authority.StateInProgress),
+		From: string(c.From), To: string(to),
 	}); err != nil {
 		return err
 	}
 	if _, err := d.Led.Append(d.Actor, ledger.KindItemTransitioned, c.Item.ID, ledger.ItemTransitioned{
-		ItemID: c.Item.ID, From: string(authority.StateReady), To: string(authority.StateInProgress),
-		RunID: runID, Reason: "dispatched to " + c.Worker,
+		ItemID: c.Item.ID, From: string(c.From), To: string(to),
+		RunID: runID, Reason: reason,
 	}); err != nil {
 		return err
 	}
-	c.From = authority.StateInProgress
-	c.Item.State = string(authority.StateInProgress)
+	c.From = to
+	c.Item.State = string(to)
 	return nil
 }
