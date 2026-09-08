@@ -1,0 +1,14 @@
+# Line endings are pinned to LF for everything the toolchain reads.
+#
+# This is not style. On Windows, git converts to CRLF on checkout by default, so
+# a run's isolated worktree gets CRLF sources while the developer's tree has LF —
+# and `gofmt -l` reports every converted file as needing a rewrite. The gate then
+# refuses every run with a red format check over a tree nobody edited, and the
+# fleet stalls with a message that describes the wrong problem entirely.
+*.go      text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+*.yml     text eol=lf
+*.sh      text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf

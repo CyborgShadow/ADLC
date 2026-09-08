@@ -1,0 +1,10 @@
+# The ledger is the record; the runtime state around it is not.
+.adlc/
+
+# Built binaries, anchored so the pattern cannot swallow cmd/adlc/.
+/adlc
+/adlc.exe
+
+*.db
+*.db-shm
+*.db-wal

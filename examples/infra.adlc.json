@@ -1,0 +1,203 @@
+{
+  "_comment": "A provisioning, hardening and patching pipeline. Copy to adlc.json and edit. Every check here is illustrative - replace the commands with yours, keep the verdict rules, because those are the part that was earned. Note the three depths: source checks judge the code, dryrun checks judge a proposed change, behavioural checks judge the running machine. Only the third one can tell you a host is hardened.",
+
+  "version": 1,
+  "project": "fleet-infrastructure",
+
+  "source_roots": ["terraform", "ansible", "packer", "policy", "scripts"],
+
+  "checks": [
+    {
+      "id": "tf-fmt",
+      "kind": "source",
+      "command": ["terraform", "fmt", "-check", "-recursive", "terraform"],
+      "verdict": "output_empty",
+      "required_for": ["in_progress->verifying"]
+    },
+    {
+      "id": "tf-validate",
+      "kind": "source",
+      "command": ["terraform", "validate", "-no-color"],
+      "dir": "terraform",
+      "verdict": "exit_zero",
+      "required_for": ["in_progress->verifying"]
+    },
+    {
+      "id": "ansible-lint",
+      "kind": "source",
+      "command": ["ansible-lint", "-p", "ansible"],
+      "verdict": "exit_zero",
+      "required_for": ["in_progress->verifying"]
+    },
+    {
+      "id": "policy",
+      "kind": "source",
+      "command": ["conftest", "test", "--all-namespaces", "terraform"],
+      "verdict": "exit_zero",
+      "required_for": ["in_progress->verifying", "verifying->validating"]
+    },
+    {
+      "id": "secrets",
+      "kind": "source",
+      "command": ["gitleaks", "detect", "--no-banner", "--redact", "--source", "."],
+      "verdict": "exit_zero",
+      "required_for": ["in_progress->verifying", "verifying->validating"]
+    },
+
+    {
+      "_comment": "A plan exits 2 when there ARE changes, which is a success. exit_zero here would refuse every change this pipeline exists to make.",
+      "id": "plan",
+      "kind": "dryrun",
+      "command": ["terraform", "plan", "-detailed-exitcode", "-lock=false", "-out=tfplan.bin"],
+      "dir": "terraform",
+      "verdict": "exit_in",
+      "allowed_exits": [0, 2],
+      "timeout_seconds": 900,
+      "required_for": ["verifying->validating"]
+    },
+    {
+      "_comment": "A --check run over the target hosts. count_min is doing real work: a play that reached zero hosts exits 0 and tells you nothing, and an inventory filter that silently matched nothing is the single most dangerous green in this file.",
+      "id": "ansible-check",
+      "kind": "dryrun",
+      "command": ["ansible-playbook", "-i", "ansible/inventory", "--check", "--diff", "ansible/site.yml", "--limit", "{{resources}}"],
+      "verdict": "count_min",
+      "count_pattern": "ok=(\\d+)",
+      "min_count": 1,
+      "timeout_seconds": 900,
+      "required_for": ["verifying->validating"]
+    },
+
+    {
+      "_comment": "Behavioural: this runs against the machine that was actually built or changed. binds_artifact is mandatory - an image id or a host state fingerprint - because a compliance scan whose subject nobody can identify later is not evidence of anything.",
+      "id": "cis-scan",
+      "kind": "behavioural",
+      "binds_artifact": true,
+      "command": ["scripts/cis-scan.sh", "--target", "{{artifact}}", "--profile", "level1-server"],
+      "verdict": "count_min",
+      "count_pattern": "([0-9]+) rules evaluated",
+      "min_count": 200,
+      "timeout_seconds": 1800,
+      "required_for": ["applying->confirming", "confirming->done"]
+    },
+    {
+      "id": "no-open-ports",
+      "kind": "behavioural",
+      "binds_artifact": true,
+      "command": ["scripts/portscan.sh", "--target", "{{artifact}}", "--allow", "22,443"],
+      "verdict": "output_not_matches",
+      "expect_pattern": "UNEXPECTED_OPEN",
+      "timeout_seconds": 600,
+      "required_for": ["confirming->done"]
+    },
+    {
+      "id": "patch-level",
+      "kind": "behavioural",
+      "binds_artifact": true,
+      "command": ["scripts/patch-report.sh", "--target", "{{artifact}}"],
+      "verdict": "output_matches",
+      "expect_pattern": "(?m)^PENDING_SECURITY_UPDATES=0$",
+      "timeout_seconds": 600,
+      "required_for": ["confirming->done"]
+    },
+    {
+      "id": "smoke",
+      "kind": "behavioural",
+      "binds_artifact": true,
+      "command": ["scripts/smoke.sh", "--target", "{{artifact}}"],
+      "verdict": "exit_zero",
+      "timeout_seconds": 600,
+      "required_for": ["applying->confirming"]
+    }
+  ],
+
+  "workers": [
+    {
+      "type": "performer",
+      "layer": "worker",
+      "description": "Writes the Terraform, the Ansible roles and the Packer templates for one item. Never applies anything.",
+      "prompt": "performer",
+      "capabilities": ["implement"],
+      "areas": ["terraform", "ansible", "packer", "scripts"]
+    },
+    {
+      "type": "verifier",
+      "layer": "verification",
+      "description": "Checks the item against its criteria by running the plan, the check run and the policy suite. Writes the policy tests the performer did not.",
+      "prompt": "verifier",
+      "capabilities": ["verify"],
+      "areas": ["verification"]
+    },
+    {
+      "type": "validator",
+      "layer": "verification",
+      "description": "Adversarial review. Reads the plan as a change to production rather than as a diff. The only worker that may propose done.",
+      "prompt": "validator",
+      "capabilities": ["validate"],
+      "areas": ["review", "security"]
+    },
+    {
+      "type": "operator",
+      "layer": "platform",
+      "description": "Performs the apply, after an approval that named this exact plan digest. Records the artifact digest everything downstream binds to.",
+      "prompt": "systems",
+      "capabilities": ["operate"],
+      "areas": ["apply", "platform"]
+    }
+  ],
+
+  "routing": {
+    "terraform": "performer",
+    "ansible": "performer",
+    "packer": "performer",
+    "scripts": "performer",
+    "verification": "verifier",
+    "review": "validator",
+    "security": "validator",
+    "apply": "operator",
+    "platform": "operator"
+  },
+
+  "blast": {
+    "_comment": "auto_apply_max none means NOTHING applies unattended until you deliberately raise it. Start here. Move to host once you have watched a few cycles, and think hard before fleet.",
+    "auto_apply_max": "none",
+    "named_approver_min": "host",
+    "two_approvals_min": "region",
+    "approval_ttl_minutes": 240
+  },
+
+  "budget": {
+    "_comment": "Empty on purpose: with no price entry a run reports UNPRICED - cost unknown, not zero - rather than printing $0.00 over real spend. Fill in from your provider's current pricing. A cap of 0 is unlimited, which is not the same as exhausted.",
+    "price_micros_per_mtok": {},
+    "default_model": "claude-opus-5",
+    "per_run_micros": 0,
+    "per_day_micros": 0,
+    "per_segment_micros": 0
+  },
+
+  "lease": {
+    "_comment": "Resources are hierarchical and '/'-separated. Leasing fleet:prod refuses a claim on fleet:prod/host:web-01, and the other way round. Two agents editing one file conflict at merge; two agents patching one host cause an outage.",
+    "dir": ".adlc/leases",
+    "ttl_minutes": 120,
+    "strip_tokens": ["host", "fleet", "server", "node", "instance", "cluster"]
+  },
+
+  "dispatch": {
+    "command": ["claude", "-p", "--dangerously-skip-permissions", "@{{prompt}}"],
+    "workdir_template": ".adlc/workspaces/{{run_id}}",
+    "max_concurrent": 1,
+    "max_attempts": 3,
+    "timeout_seconds": 5400,
+    "isolation": "worktree"
+  },
+
+  "prompts": {
+    "dir": "agents",
+    "preamble_file": "agents/_preamble.md",
+    "mandatory_clauses": [
+      "You never write the ledger.",
+      "You never weaken, skip or delete a check to make a gate pass.",
+      "You never mark your own work done.",
+      "If you could not run something, say so."
+    ]
+  }
+}

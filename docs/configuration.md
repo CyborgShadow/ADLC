@@ -1,0 +1,264 @@
+# Configuration
+
+Everything project-specific lives in one file, `adlc.json`. It is a gated artefact: the fleet
+reads it, and changing it is an ordinary reviewable edit. Only two things are ever writable from
+the dashboard — a lane's cadence and its pause switch.
+
+Any object may carry a `_comment` string; it is ignored.
+
+## source_roots
+
+```json
+"source_roots": ["cmd", "internal", "agents"]
+```
+
+Scopes every tree-walking guard. An unscoped walk counts vendored dependencies, build output and
+generated files as uncommitted work, and refuses runs over a tree nobody edited. Required.
+
+## checks
+
+A check is a command, the channel its verdict is read from, and the lifecycle edges it gates.
+
+```json
+{
+  "id": "fmt",
+  "kind": "source",
+  "command": ["gofmt", "-l", "./cmd", "./internal"],
+  "verdict": "output_empty",
+  "required_for": ["in_progress->verifying", "verifying->validating"]
+}
+```
+
+| field | meaning |
+|---|---|
+| `id` | Stable. The envelope's `commands_run[].check_id` joins to it. |
+| `kind` | `source`, `dryrun` or `behavioural`. |
+| `command` | argv. Never passed through a shell — a shell would make the recorded command and the executed command two different strings. |
+| `dir` | Working directory, relative to the run's workspace. |
+| `verdict` | Which channel carries the answer. See below. |
+| `required_for` | Edges as `"from->to"`. A check gates only the edges it names. |
+| `timeout_seconds` | Default 900. A timeout is `RED`, never pending. |
+
+### Verdict rules
+
+| rule | the verdict is |
+|---|---|
+| `exit_zero` | the exit code |
+| `exit_in` | the exit code, against `allowed_exits` |
+| `output_empty` | **the output.** For a tool that lists problems and exits 0 either way |
+| `output_nonempty` | the output |
+| `output_matches` | `expect_pattern` matched the output |
+| `output_not_matches` | it did not |
+| `go_test_json` | how many tests reported a result. **Zero is a failure** |
+| `count_min` | an integer captured by `count_pattern`, against `min_count` |
+
+`count_min` is the one to reach for whenever a tool can succeed having examined nothing — a test
+filter that matched no tests, a play that reached no hosts, a scanner given an empty scope. Those
+exit 0 and tell you nothing, and a green that means "I ran nothing" is worse than a red.
+
+`exit_in` exists because some tools use exit codes as information rather than as failure — a plan
+that exits 2 for "there are changes" is a success.
+
+### Behavioural checks
+
+```json
+{
+  "id": "cis-scan",
+  "kind": "behavioural",
+  "binds_artifact": true,
+  "command": ["scripts/scan.sh", "--target", "{{artifact}}"],
+  "verdict": "count_min",
+  "count_pattern": "([0-9]+) rules evaluated",
+  "min_count": 200,
+  "required_for": ["confirming->done"]
+}
+```
+
+A behavioural check runs against the assembled artifact — a booted image, a provisioned host —
+rather than against source. It must set `binds_artifact`, and the gate refuses to record its
+result without a digest: a scan of "the host" means nothing if nobody can say which host, at what
+state, later.
+
+This is the difference between "the plan is valid" and "the machine is actually hardened", and it
+is the only kind of check that can answer the second one.
+
+## workers
+
+A role declares **capabilities** and, optionally, **areas**.
+
+```json
+{
+  "type": "security",
+  "layer": "verification",
+  "description": "Reviews items whose area says security is the risk.",
+  "prompt": "security",
+  "capabilities": ["validate"],
+  "areas": ["security", "auth"]
+}
+```
+
+| capability | what it may do |
+|---|---|
+| `generate` | decompose a brief into proposed work items |
+| `implement` | build one item |
+| `verify` | check an item against its criteria |
+| `validate` | review adversarially; the only capability that can reach `done` |
+| `operate` | perform an apply against a real resource |
+
+`low_cadence: true` marks a role expected to run rarely, so the never-run roll call reports it
+without raising it as an alarm.
+
+At least one role must declare `validate`, or nothing can ever finish.
+
+## routing
+
+```json
+"routing": { "api": "backend", "ui": "frontend", "security": "security" }
+```
+
+Maps an area to the role that owns it. Selection order:
+
+1. the area's declared owner, if it holds the needed capability
+2. any role holding that capability which lists the area
+3. a **generalist** — a role declaring no areas at all
+4. anyone with the capability
+
+The generalist fallback is deliberate: dispatch must never strand a live item, so work in an
+unclaimed area still reaches somebody sensible rather than whichever specialist sorts first.
+Declare at least one generalist per capability you use.
+
+Generation is stricter. A planner may only file work under an area you have **declared**,
+because generation is the one place an agent decides what work exists.
+
+An area with no owner is a configuration error, not a warning.
+
+## loops
+
+Concurrency is N scheduled lanes, not a thread pool.
+
+```json
+{
+  "name": "verify",
+  "enabled": true,
+  "every_seconds": 180,
+  "offset_seconds": 0,
+  "capability": "verify",
+  "max_per_tick": 2
+}
+```
+
+| field | meaning |
+|---|---|
+| `name` | Stable — the tick record keys on it, so renaming restarts its liveness history |
+| `enabled` | Editable from the dashboard; takes effect on the lane's next tick |
+| `every_seconds` | Cadence. Minimum 15 |
+| `offset_seconds` | Stagger. Two lanes firing on the same second contend for leases |
+| `capability` / `areas` / `worker` | Scope. Empty means anything |
+| `max_per_tick` | Dispatches per firing |
+
+Give verification a shorter cadence than building, and put it first. Verification that competes
+with building for capacity loses, and a fleet that builds faster than it checks accumulates
+unverified work that looks exactly like progress.
+
+Every firing writes a ledger tick, including the idle ones, so a lane that quietly stops shows as
+`STALE` rather than looking like a lane with nothing to report.
+
+## blast
+
+```json
+"blast": {
+  "auto_apply_max": "none",
+  "named_approver_min": "host",
+  "two_approvals_min": "region",
+  "approval_ttl_minutes": 1440
+}
+```
+
+| setting | meaning |
+|---|---|
+| `auto_apply_max` | The largest radius applied with no approval. Anything above stops and waits |
+| `named_approver_min` | From here up, the approval must name a person |
+| `two_approvals_min` | From here up, two distinct approvers |
+| `approval_ttl_minutes` | How long an approval stays valid even if the plan has not moved |
+
+Start at `none`, so nothing applies unattended until you raise it deliberately. An unrecognised
+radius fails closed.
+
+## budget
+
+```json
+"budget": {
+  "price_micros_per_mtok": { "your-model": { "input": 3000000, "output": 15000000 } },
+  "default_model": "your-model",
+  "per_run_micros": 0,
+  "per_day_micros": 50000000,
+  "per_segment_micros": 0
+}
+```
+
+Prices are in millionths of a currency unit per million tokens. A model with no entry reports
+`UNPRICED` — cost unknown, not zero.
+
+A cap of `0` means unlimited and reports as unlimited. "No budget configured" and "budget
+exhausted" are opposite facts and must not collapse into one number.
+
+## lease
+
+```json
+"lease": { "dir": ".adlc/leases", "ttl_minutes": 180, "strip_tokens": ["host", "fleet"] }
+```
+
+Leases are files with a TTL, outside version control. A run claims its item and every resource
+the item touches before it starts.
+
+Resources are hierarchical and `/`-separated: leasing `fleet:prod` refuses a claim on
+`fleet:prod/host:web-01`, and the reverse. Two agents editing one file conflict at merge, which
+is loud and cheap. Two agents changing one machine cause an outage.
+
+`strip_tokens` are words removed before two claims are compared for descriptive overlap — add
+your project's common vocabulary so it does not trigger advisories on every pair.
+
+## dispatch
+
+```json
+"dispatch": {
+  "command": ["claude", "-p", "@{{prompt}}"],
+  "workdir_template": ".adlc/workspaces/{{run_id}}",
+  "max_attempts": 3,
+  "timeout_seconds": 3600,
+  "isolation": "worktree"
+}
+```
+
+`workdir_template` must contain `{{run_id}}`. A run wears one name — its id, its workspace and
+its lease key are the same string — and a workspace named for anything else is invisible to every
+guard that keys on the run.
+
+`isolation` is `worktree` (a git worktree per run, the default), `copy` (for a tree that is not a
+repository), or `none` (the shared checkout; correct only for a single lane).
+
+`max_attempts` is how many times an item may be reworked before it escalates to a person instead
+of looping.
+
+## prompts
+
+```json
+"prompts": {
+  "dir": "agents",
+  "preamble_file": "agents/_preamble.md",
+  "mandatory_clauses": ["You never write the ledger."]
+}
+```
+
+`mandatory_clauses` must appear verbatim in every role prompt. `adlc prompt check` — which the
+gate runs — fails if any is missing, so a run cannot delete a safety clause from its own
+instructions.
+
+## server
+
+```json
+"server": { "addr": "127.0.0.1:8099", "refresh_seconds": 15 }
+```
+
+Must be loopback. The dashboard writes to the ledger and has no authentication, and those two
+facts stay welded together: `0.0.0.0:8099` and `:8099` are both refused by name.

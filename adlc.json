@@ -1,0 +1,256 @@
+{
+  "_comment": "This is the config the ADLC uses on itself. It is also the worked example: a full specialist roster, an area routing map that is machine-enforced, and five staggered lanes. Concurrency here is N scheduled lanes rather than a thread pool, and every lane firing writes a ledger tick so a lane that quietly stops shows as STALE instead of looking like a lane with nothing to report.",
+
+  "version": 1,
+  "project": "adlc",
+
+  "source_roots": ["cmd", "internal", "agents"],
+
+  "checks": [
+    {
+      "_comment": "gofmt -l exits 0 whether or not it printed anything, so its OUTPUT is the verdict. Reading its exit code reads a channel that carries no information.",
+      "id": "fmt",
+      "kind": "source",
+      "command": ["gofmt", "-l", "./cmd", "./internal"],
+      "verdict": "output_empty",
+      "required_for": ["in_progress->verifying", "verifying->validating"]
+    },
+    {
+      "id": "vet",
+      "kind": "source",
+      "command": ["go", "vet", "./..."],
+      "verdict": "exit_zero",
+      "required_for": ["in_progress->verifying", "verifying->validating"]
+    },
+    {
+      "id": "build",
+      "kind": "source",
+      "command": ["go", "build", "./..."],
+      "verdict": "exit_zero",
+      "required_for": ["in_progress->verifying", "verifying->validating"]
+    },
+    {
+      "_comment": "go_test_json counts the tests that reported a result. Zero is a FAILURE: a filter matching nothing converts 'I ran nothing' into 'everything passed'.",
+      "id": "test",
+      "kind": "source",
+      "command": ["go", "test", "-count=1", "-json", "./..."],
+      "verdict": "go_test_json",
+      "timeout_seconds": 900,
+      "required_for": ["in_progress->verifying", "verifying->validating"]
+    },
+    {
+      "id": "prompt-clauses",
+      "kind": "source",
+      "command": ["go", "run", "./cmd/adlc", "prompt", "check"],
+      "verdict": "exit_zero",
+      "required_for": ["in_progress->verifying", "verifying->validating"]
+    }
+  ],
+
+  "workers": [
+    {
+      "type": "planner",
+      "layer": "direction",
+      "description": "Decomposes a segment brief into work items with checkable acceptance criteria. Writes no code.",
+      "prompt": "generator",
+      "capabilities": ["generate"]
+    },
+    {
+      "_comment": "The generalist implementer. It declares no areas, so it takes anything a specialist does not claim — which is what keeps an item in an unclaimed area from being handed to whichever specialist happens to sort first.",
+      "type": "engineer",
+      "layer": "worker",
+      "description": "Implements work items in the core of the system.",
+      "prompt": "implementer",
+      "capabilities": ["implement"]
+    },
+    {
+      "type": "cli-dev",
+      "layer": "worker",
+      "description": "Implements the command-line surface and its output.",
+      "prompt": "implementer",
+      "capabilities": ["implement"],
+      "areas": ["cli"]
+    },
+    {
+      "type": "docs-writer",
+      "layer": "worker",
+      "description": "Implements documentation items: the README, the register, the prompts' own prose.",
+      "prompt": "implementer",
+      "capabilities": ["implement"],
+      "areas": ["docs"]
+    },
+    {
+      "type": "test-author",
+      "layer": "worker",
+      "description": "Writes tests as work items in their own right, for coverage the performer did not add.",
+      "prompt": "implementer",
+      "capabilities": ["implement"],
+      "areas": ["testing"]
+    },
+    {
+      "type": "janitor",
+      "layer": "worker",
+      "description": "Hygiene only: stale docs, dead references, duplicated statements of one fact. Runs rarely and changes little.",
+      "prompt": "janitor",
+      "capabilities": ["implement"],
+      "areas": ["hygiene"],
+      "low_cadence": true
+    },
+    {
+      "type": "judge",
+      "layer": "verification",
+      "description": "Independently checks an item against its acceptance criteria by executing commands. Never the run that wrote the code.",
+      "prompt": "verifier",
+      "capabilities": ["verify"]
+    },
+    {
+      "type": "validator",
+      "layer": "verification",
+      "description": "Adversarial review against the project's invariants. May propose done; may reject.",
+      "prompt": "validator",
+      "capabilities": ["validate"]
+    },
+    {
+      "type": "security",
+      "layer": "verification",
+      "description": "Validator specialising in what an attacker would do. Dispatched to items whose area says security is the risk.",
+      "prompt": "security",
+      "capabilities": ["validate"],
+      "areas": ["security"]
+    },
+    {
+      "type": "performance",
+      "layer": "verification",
+      "description": "Validator specialising in scale and load. A finding here needs a number.",
+      "prompt": "performance",
+      "capabilities": ["validate"],
+      "areas": ["performance"]
+    },
+    {
+      "type": "resilience",
+      "layer": "verification",
+      "description": "Validator specialising in what is left behind when something is killed halfway.",
+      "prompt": "resilience",
+      "capabilities": ["validate"],
+      "areas": ["resilience"]
+    },
+    {
+      "type": "operator",
+      "layer": "platform",
+      "description": "The build environment, dependencies, CI — and the apply step, after an approval that named the plan.",
+      "prompt": "systems",
+      "capabilities": ["operate"],
+      "areas": ["platform", "ci"],
+      "low_cadence": true
+    }
+  ],
+
+  "_routing_comment": "An area with no owner is a configuration error, not a warning: an item filed under one is unreachable, and an unreachable item looks exactly like one nobody has got round to yet.",
+  "routing": {
+    "core": "engineer",
+    "cli": "cli-dev",
+    "docs": "docs-writer",
+    "testing": "test-author",
+    "hygiene": "janitor",
+    "verification": "judge",
+    "review": "validator",
+    "security": "security",
+    "performance": "performance",
+    "resilience": "resilience",
+    "platform": "operator",
+    "ci": "operator"
+  },
+
+  "loops": [
+    {
+      "_comment": "Verification fires more often than implementation, and first. Verification that competes with building for capacity loses, and a fleet that builds faster than it checks piles up unverified work that looks exactly like progress.",
+      "name": "verify",
+      "enabled": true,
+      "every_seconds": 180,
+      "offset_seconds": 0,
+      "capability": "verify",
+      "max_per_tick": 2
+    },
+    {
+      "name": "review",
+      "enabled": true,
+      "every_seconds": 240,
+      "offset_seconds": 20,
+      "capability": "validate",
+      "max_per_tick": 2
+    },
+    {
+      "name": "build",
+      "enabled": true,
+      "every_seconds": 300,
+      "offset_seconds": 40,
+      "capability": "implement",
+      "max_per_tick": 1
+    },
+    {
+      "name": "apply",
+      "enabled": true,
+      "every_seconds": 600,
+      "offset_seconds": 60,
+      "capability": "operate",
+      "max_per_tick": 1
+    },
+    {
+      "_comment": "Generation is demand-driven as well as scheduled: a segment at its target asks for nothing, so this lane fires, finds no need, and records an idle tick.",
+      "name": "plan",
+      "enabled": true,
+      "every_seconds": 1800,
+      "offset_seconds": 80,
+      "capability": "generate",
+      "max_per_tick": 1
+    }
+  ],
+
+  "server": {
+    "_comment": "Loopback only. This surface writes to the ledger and has no authentication; those two facts have to stay welded together.",
+    "addr": "127.0.0.1:8099",
+    "refresh_seconds": 15
+  },
+
+  "blast": {
+    "auto_apply_max": "none",
+    "named_approver_min": "host",
+    "two_approvals_min": "region",
+    "approval_ttl_minutes": 1440
+  },
+
+  "budget": {
+    "_comment": "Empty on purpose. With no price entry a run reports UNPRICED — cost unknown, not zero — instead of printing $0.00 over real spend. Fill in from your provider's current pricing before running unattended.",
+    "price_micros_per_mtok": {},
+    "default_model": "claude-opus-5",
+    "per_run_micros": 0,
+    "per_day_micros": 0,
+    "per_segment_micros": 0
+  },
+
+  "lease": {
+    "dir": ".adlc/leases",
+    "ttl_minutes": 180,
+    "strip_tokens": ["adlc", "ledger", "gate"]
+  },
+
+  "dispatch": {
+    "command": ["claude", "-p", "--dangerously-skip-permissions", "@{{prompt}}"],
+    "workdir_template": ".adlc/workspaces/{{run_id}}",
+    "max_concurrent": 1,
+    "max_attempts": 3,
+    "timeout_seconds": 3600,
+    "isolation": "worktree"
+  },
+
+  "prompts": {
+    "dir": "agents",
+    "preamble_file": "agents/_preamble.md",
+    "mandatory_clauses": [
+      "You never write the ledger.",
+      "You never weaken, skip or delete a check to make a gate pass.",
+      "You never mark your own work done.",
+      "If you could not run something, say so."
+    ]
+  }
+}

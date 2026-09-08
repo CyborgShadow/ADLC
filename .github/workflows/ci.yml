@@ -1,0 +1,58 @@
+name: gate
+
+# The same checks adlc.json declares, so that "CI is green" and "the gate is
+# green" are one claim rather than two that drift apart.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # The verdict is the OUTPUT, not the exit code. `gofmt -l` exits 0 whether
+      # or not it printed the files it would rewrite, so `run: gofmt -l ./cmd`
+      # on its own is a step that can never fail.
+      - name: gofmt
+        run: |
+          out=$(gofmt -l ./cmd ./internal)
+          if [ -n "$out" ]; then echo "$out"; echo "::error::gofmt would rewrite these files"; exit 1; fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      # -count=1 because a cached PASS is a report about an earlier tree.
+      - name: test
+        run: go test -count=1 ./...
+
+      # The delivery system gates itself with its own rules.
+      - name: prompts still carry every mandatory clause
+        run: go run ./cmd/adlc prompt check
+
+
+  race:
+    # Separate because a host with no C toolchain cannot run the detector at
+    # all, and "not run" must never be recorded as "passed".
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: go test -race -count=1 ./...
