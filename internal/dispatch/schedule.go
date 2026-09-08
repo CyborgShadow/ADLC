@@ -37,6 +37,39 @@ func (s *Scheduler) Enabled() []config.LoopDecl {
 	return out
 }
 
+// MergeLaneName is the built-in lane that drains the merge queue.
+//
+// It is not declared in config because it dispatches nothing: merging is the
+// control plane's own step, and a lane with no capability cannot be routed to a
+// worker. It is still a lane in every way an operator cares about — a cadence,
+// an offset, and a tick on every firing — because a merge queue that quietly
+// stopped draining and one with nothing to drain look identical otherwise.
+const MergeLaneName = "merge"
+
+// MergeLane is that lane's declaration.
+func MergeLane() config.LoopDecl {
+	return config.LoopDecl{
+		Name: MergeLaneName, Enabled: true, EverySeconds: 120, OffsetSeconds: 10, MaxPerTick: 1,
+	}
+}
+
+// FireMerge drains the merge queue once and records the tick.
+func (s *Scheduler) FireMerge(ctx context.Context) (MergeResult, error) {
+	l := MergeLane()
+	res, err := s.D.Merge(ctx)
+	if err != nil {
+		s.tick(l, false, "", "error: "+err.Error())
+		return res, err
+	}
+	detail := res.Idle
+	if n := len(res.Landed) + len(res.Requeued) + len(res.Returned); n > 0 {
+		detail = fmt.Sprintf("%d landed, %d requeued, %d sent back",
+			len(res.Landed), len(res.Requeued), len(res.Returned))
+	}
+	s.tick(l, len(res.Landed) > 0, "", detail)
+	return res, nil
+}
+
 // FireOnce runs one loop's lane exactly once and records the tick.
 //
 // The tick is written whether or not anything was dispatched.
@@ -110,6 +143,12 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			s.runLane(ctx, l)
 		}(l)
 	}
+	// The merge queue runs alongside them, on its own cadence, always.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.runMergeLane(ctx)
+	}()
 	wg.Wait()
 	return ctx.Err()
 }
@@ -151,6 +190,31 @@ func (s *Scheduler) runLane(ctx context.Context, l config.LoopDecl) {
 	}
 }
 
+// runMergeLane is runLane for the built-in merge queue. It has no config entry
+// to re-read, so its cadence is fixed and it cannot be paused from the
+// dashboard — pausing the one lane that lands work would strand every item
+// that reached the front of the queue, with nothing on the board saying why.
+func (s *Scheduler) runMergeLane(ctx context.Context) {
+	l := MergeLane()
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(time.Duration(l.OffsetSeconds) * time.Second):
+	}
+	s.D.log("LOOP %s started — every %ds, the control plane's own step", l.Name, l.EverySeconds)
+	for {
+		if _, err := s.FireMerge(ctx); err != nil && ctx.Err() == nil {
+			s.D.log("LOOP %s error: %v", l.Name, err)
+		}
+		select {
+		case <-ctx.Done():
+			s.D.log("LOOP %s stopped", l.Name)
+			return
+		case <-time.After(time.Duration(l.EverySeconds) * time.Second):
+		}
+	}
+}
+
 // Health derives each declared loop's liveness from the tick record.
 //
 // A loop that has never ticked reports as never having run rather than as
@@ -165,8 +229,8 @@ func (s *Scheduler) Health(now time.Time) ([]ledger.LoopHealth, error) {
 	if grace <= 0 {
 		grace = 3
 	}
-	out := make([]ledger.LoopHealth, 0, len(s.Cfg.Loops))
-	for _, l := range s.Cfg.Loops {
+	out := make([]ledger.LoopHealth, 0, len(s.Cfg.Loops)+1)
+	for _, l := range append(append([]config.LoopDecl{}, s.Cfg.Loops...), MergeLane()) {
 		h := measured[l.Name]
 		h.Loop = l.Name
 		h.Scope = l.Scope()

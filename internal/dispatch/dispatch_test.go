@@ -441,16 +441,35 @@ func TestAnIdleLoopStillWritesATick(t *testing.T) {
 	if _, err := s.FireOnce(context.Background(), loop); err != nil {
 		t.Fatal(err)
 	}
+	h2 := laneHealth(t, s, "verify-lane")
+	if h2.Ticks != 1 {
+		t.Fatalf("an idle firing must still be recorded — that record is the only evidence the lane is alive; got %+v", h2)
+	}
+	if h2.Dispatches != 0 {
+		t.Errorf("nothing was dispatched, got %d", h2.Dispatches)
+	}
+	// The built-in merge lane is reported alongside the declared ones, so a
+	// merge queue that quietly stopped draining is a stale row rather than a
+	// row nobody renders.
+	if laneHealth(t, s, MergeLaneName).EverySecond == 0 {
+		t.Error("the merge queue must appear in lane health; it is the one lane nobody declares")
+	}
+}
+
+// laneHealth pulls one lane out of the health report by name.
+func laneHealth(t *testing.T, s *Scheduler, name string) ledger.LoopHealth {
+	t.Helper()
 	health, err := s.Health(testNow)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(health) != 1 || health[0].Ticks != 1 {
-		t.Fatalf("an idle firing must still be recorded — that record is the only evidence the lane is alive; got %+v", health)
+	for _, h := range health {
+		if h.Loop == name {
+			return h
+		}
 	}
-	if health[0].Dispatches != 0 {
-		t.Errorf("nothing was dispatched, got %d", health[0].Dispatches)
-	}
+	t.Fatalf("no lane called %q in %+v", name, health)
+	return ledger.LoopHealth{}
 }
 
 func TestALoopThatNeverFiredIsNotSilent(t *testing.T) {
