@@ -150,7 +150,7 @@ func (h *harness) logged(sub string) bool {
 }
 
 func specialists() ([]config.WorkerDecl, map[string]string) {
-	return []config.WorkerDecl{
+	workers := []config.WorkerDecl{
 		{Type: "backend", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}, Areas: []string{"api"}},
 		{Type: "frontend", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}, Areas: []string{"ui"}},
 		{Type: "generalist", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}},
@@ -158,9 +158,11 @@ func specialists() ([]config.WorkerDecl, map[string]string) {
 		{Type: "security", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapValidate}, Areas: []string{"auth"}},
 		{Type: "validator", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapValidate}},
 		{Type: "planner", Layer: "direction", Prompt: "generator", Capabilities: []string{config.CapGenerate}},
-	}, map[string]string{
+	}
+	routing := map[string]string{
 		"api": "backend", "ui": "frontend", "auth": "security",
 	}
+	return workers, routing
 }
 
 // TestTheAreaDecidesTheWorkerNotTheAlphabet pins the fix for a real gap: the
