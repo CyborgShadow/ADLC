@@ -356,18 +356,28 @@ func (s *Server) roadmap(*http.Request) (string, any, error) {
 		r := roadmapRow{Segment: sg, Progress: authority.Progress(items)}
 		r.Stage = sg.State
 		switch authority.SegmentState(sg.State) {
-		case authority.SegDelivered:
-			r.Class, r.Next = "ok", "Delivered."
-		case authority.SegDrafted:
-			r.Class, r.Next = "mute", "Waiting for a planner to break the brief into work."
+		case authority.SegTheory:
+			r.Class, r.Next = "mute", "An idea. Nothing is committed to it yet."
+		case authority.SegRoadmap:
+			r.Class, r.Next = "warn", "On the roadmap, waiting for you to sign off the intent. Nothing moves until you do."
+		case authority.SegSignedOff:
+			r.Class, r.Next = "live", "Signed off. A researcher will turn the intent into an approach."
 		case authority.SegResearching:
-			r.Class, r.Next = "live", "A planner is decomposing the brief."
+			r.Class, r.Next = "live", "A researcher is working out the approach."
+		case authority.SegResearched:
+			r.Class, r.Next = "live", "The approach is written. A planner will decompose it into work."
+		case authority.SegPlanning:
+			r.Class, r.Next = "live", "A planner is decomposing the approach."
 		case authority.SegPlanned:
-			r.Class, r.Next = "warn", "The breakdown is written and nobody has checked it against the brief yet. No work starts until they do."
-		case authority.SegApproved:
-			r.Class, r.Next = "live", "The breakdown was reviewed and accepted. Work can start."
+			r.Class, r.Next = "warn", "The plan is written and nobody has checked it against the intent yet. No work starts until they do."
+		case authority.SegValidating:
+			r.Class, r.Next = "live", "A validator is checking the plan against the intent."
+		case authority.SegReady:
+			r.Class, r.Next = "live", "The plan was accepted. Work can start."
 		case authority.SegBuilding:
 			r.Class, r.Next = "live", "Work is in flight."
+		case authority.SegDelivered:
+			r.Class, r.Next = "ok", "Delivered."
 		case authority.SegPaused:
 			r.Class, r.Next = "mute", "Paused by an operator."
 		}
@@ -502,22 +512,34 @@ func (s *Server) coordination(*http.Request) (string, any, error) {
 		return strings.Join(ws, ", ")
 	}
 	chain := []handoff{
-		{"1 · Direction", "you", "write a deliverable: a title, a brief in plain language, and how many items to keep in flight",
-			"the planner picks it up as soon as it is drafted"},
-		{"2 · Decompose", who(config.CapGenerate), "breaks the brief into work items, each with acceptance criteria a command can check",
-			"the breakdown goes for review before any of it is built"},
-		{"3 · Plan review", who(config.CapValidate), "checks the breakdown against the brief — would these items, done, actually deliver it?",
+		{"1 · Theory", "you", "write down an idea: a title, what it is for, and why it matters",
+			"it sits as a theory until you put it on the roadmap"},
+		{"2 · Sign-off", "you", "agree the intent is worth pursuing — the one planning gate no machine passes on its own",
+			"a researcher picks it up"},
+		{"3 · Research", who(config.CapResearch), "turns the intent into a written approach: what already exists, what the options are, which one and why",
+			"a planner decomposes the approach"},
+		{"4 · Plan", who(config.CapPlan), "breaks the approach into work items, each with acceptance criteria a command can check",
+			"the plan goes for validation before any of it is built"},
+		{"5 · Validate the plan", who(config.CapValidate), "checks the plan against the intent — would these items, done, actually deliver it?",
 			"on a pass the work opens; on a reject it goes back for decomposition"},
-		{"4 · Build", who(config.CapImplement), "implements one item, writes tests for what it wrote, and stops",
-			"the item moves to verification and the builder never sees it again"},
-		{"5 · Verify", who(config.CapVerify), "checks the item against its criteria by executing commands, never by reading",
-			"a pass goes to review; a failure goes back to build with the failing output"},
-		{"6 · Judge", who(config.CapValidate), "adversarial review against the project's invariants; the only role that may say done",
-			"done, or an approval gate, or back with blockers"},
-		{"7 · Apply", who(config.CapOperate), "performs the change against the real thing, after an approval that named the exact plan",
-			"the applied artifact goes back to a reviewer for confirmation"},
-		{"8 · Watch", strings.Join(lowCadence(s.Cfg), ", "), "keeps the records and the tree honest; watches the whole system rather than any one item",
-			"raises work items like anyone else"},
+		{"6 · Build", who(config.CapImplement), "implements one item and writes tests for what it wrote, then stops",
+			"the item goes to a tester and the builder never sees it again"},
+		{"7 · Test", who(config.CapTest), "executes the tests against the item",
+			"green goes to a judge; a failure goes back to the builder with the output"},
+		{"8 · Judge", who(config.CapJudge), "judges the item against its acceptance criteria, by running things rather than by reading",
+			"a pass goes to adversarial validation"},
+		{"9 · Validate", who(config.CapValidate), "adversarial review against the project's invariants; the only role that may reject",
+			"reviewed, or back with blockers"},
+		{"10 · Janitor", who(config.CapCurate), "hygiene pass over what landed: stale docs, dead references, duplicated facts",
+			"then the arbiter looks at the whole system"},
+		{"11 · Arbitrate", who(config.CapArbitrate), "judges the change against the system rather than against the item — the only role that looks wider than one unit of work",
+			"cleared to merge, or stopped for an approval if it reaches a real machine"},
+		{"12 · Apply", who(config.CapOperate), "performs the change against the real thing, after an approval that named the exact plan",
+			"the applied artifact goes back to a validator for confirmation"},
+		{"13 · Merge", "the control plane", "rebases onto the trunk, re-runs the gate on the rebased tree, and fast-forwards — refusing anything that would revert a sibling's landed work",
+			"merged"},
+		{"14 · Improve", who(config.CapImprove), "records what was learned and raises self-improvements as their own work items",
+			"done — and the fleet is a little better than it was"},
 	}
 	var lanes []ledger.LoopHealth
 	if s.Sched != nil {

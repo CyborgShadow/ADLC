@@ -79,6 +79,15 @@ var KnownKinds = map[Kind]bool{
 
 // ---------------------------------------------------------------- payloads
 
+// The two roadmap states this package needs to name when it seeds a segment.
+// The planning lifecycle itself lives in the authority package, which imports
+// this one, so the strings are repeated rather than imported. Every other
+// roadmap state arrives here as a recorded segment.advanced event.
+const (
+	segTheory = "theory"
+	segReady  = "ready"
+)
+
 // SegmentCreated registers a build segment.
 type SegmentCreated struct {
 	ID    string `json:"id"`
@@ -498,14 +507,17 @@ func apply(tx *sql.Tx, ev Event) error {
 		if err := dec(&p); err != nil {
 			return err
 		}
-		// A deliverable with a brief is one an agent will decompose, and that
-		// decomposition gets reviewed before any of it is built. A deliverable with
-		// NO brief was filled in by hand, so there is no agent breakdown to review
-		// and nothing to wait for — holding it would stall work a person wrote
-		// themselves, waiting on a review nobody is going to run.
-		state := "approved"
+		// A deliverable with a brief enters the planning pipeline as a theory:
+		// it gets accepted onto the roadmap, signed off by a person, researched,
+		// decomposed and validated before any of it is built.
+		//
+		// A deliverable with NO brief was filled in by hand. There is no agent
+		// breakdown to research, decompose or review, and nothing to wait for —
+		// holding it would stall work a person wrote themselves, waiting on a
+		// planning pass nobody is going to run. So it opens for work directly.
+		state := string(segReady)
 		if strings.TrimSpace(p.Brief) != "" {
-			state = "drafted"
+			state = string(segTheory)
 		}
 		_, err := tx.Exec(`INSERT INTO adlc_segment(id,title,brief,rationale,state,rank,target_open,depends_on,created_seq,updated_seq)
 			VALUES(?,?,?,?,?,?,?,?,?,?)`, p.ID, p.Title, p.Brief, p.Rationale, state, p.Rank,

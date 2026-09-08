@@ -67,7 +67,7 @@ func seedRun(t *testing.T, l *ledger.Ledger) string {
 		PromptID: "impl", PromptSHA: "prompt-sha", BaseSHA: "abc123abc123",
 	})
 	add(t, l, ledger.KindGateObserved, "p-1", ledger.GateObserved{
-		RunID: "p-1", ItemID: "S1-001", Edge: "in_progress->verifying",
+		RunID: "p-1", ItemID: "S1-001", Edge: "in_progress->ready_for_testing",
 		TreeSHA: "abc123abc123", Status: "GREEN", Checks: "[]",
 	})
 	add(t, l, ledger.KindRunFinished, "p-1", ledger.RunFinished{
@@ -76,7 +76,7 @@ func seedRun(t *testing.T, l *ledger.Ledger) string {
 	})
 	add(t, l, ledger.KindTransitionAdmitted, "S1-001", ledger.TransitionOutcome{
 		RunID: "p-1", ItemID: "S1-001", Worker: "performer",
-		From: "in_progress", To: "verifying",
+		From: "in_progress", To: "ready_for_testing",
 	})
 	return sha
 }
@@ -92,7 +92,7 @@ func TestARunExplainsWhatItDidAndWhyItMattered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s.Headline, "in_progress") || !strings.Contains(s.Headline, "verifying") {
+	if !strings.Contains(s.Headline, "in_progress") || !strings.Contains(s.Headline, "testing") {
 		t.Errorf("the headline should say what moved: %q", s.Headline)
 	}
 	joined := strings.Join(s.Purpose, " ")
@@ -179,7 +179,7 @@ func TestReplayReDerivesTheSameDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rp.Recorded, "in_progress -> verifying") {
+	if !strings.Contains(rp.Recorded, "in_progress -> ready_for_testing") {
 		t.Errorf("what was recorded should be reported, got %q", rp.Recorded)
 	}
 	if rp.Rederived == "" {

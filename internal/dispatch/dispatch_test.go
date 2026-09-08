@@ -114,10 +114,34 @@ func write(t *testing.T, path, body string) {
 	}
 }
 
+// segment registers a deliverable and walks it to the point where a planner
+// would pick it up. The states before that are a person's to pass — a segment
+// created with a brief starts as a theory and stays there until somebody signs
+// it off — so a test about decomposition seeds past them rather than
+// re-testing the gate on every case.
 func (h *harness) segment(t *testing.T, id, title, brief string, target int) {
+	t.Helper()
+	state := "researched"
+	if brief == "" {
+		// No brief means no agent decomposition to research or validate; the
+		// items were written by hand and open for work immediately.
+		state = "ready"
+	}
+	h.segmentAt(t, id, title, brief, target, state)
+}
+
+func (h *harness) segmentAt(t *testing.T, id, title, brief string, target int, state string) {
 	t.Helper()
 	if _, err := h.Led.Append("t", ledger.KindSegmentCreated, id, ledger.SegmentCreated{
 		ID: id, Title: title, Brief: brief, TargetOpen: target,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if state == "" || state == "theory" {
+		return
+	}
+	if _, err := h.Led.Append("t", ledger.KindSegmentAdvanced, id, ledger.SegmentAdvanced{
+		SegmentID: id, From: "theory", To: state, Why: "seeded by the test",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -154,10 +178,10 @@ func specialists() ([]config.WorkerDecl, map[string]string) {
 		{Type: "backend", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}, Areas: []string{"api"}},
 		{Type: "frontend", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}, Areas: []string{"ui"}},
 		{Type: "generalist", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}},
-		{Type: "verifier", Layer: "verification", Prompt: "verifier", Capabilities: []string{config.CapVerify}},
+		{Type: "verifier", Layer: "verification", Prompt: "verifier", Capabilities: []string{config.CapTest}},
 		{Type: "security", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapValidate}, Areas: []string{"auth"}},
 		{Type: "validator", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapValidate}},
-		{Type: "planner", Layer: "direction", Prompt: "generator", Capabilities: []string{config.CapGenerate}},
+		{Type: "planner", Layer: "direction", Prompt: "generator", Capabilities: []string{config.CapPlan}},
 	}
 	routing := map[string]string{
 		"api": "backend", "ui": "frontend", "auth": "security",
@@ -206,8 +230,8 @@ func TestVerificationIsPickedBeforeNewImplementation(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
 	h.segment(t, "S1", "seg", "", 0)
-	h.item(t, "S1-001", "S1", "ui", "ready")     // new work
-	h.item(t, "S1-002", "S1", "ui", "verifying") // work waiting to be checked
+	h.item(t, "S1-001", "S1", "ui", "ready")   // new work
+	h.item(t, "S1-002", "S1", "ui", "testing") // work waiting to be checked
 
 	cands, err := h.D.Candidates(Filter{})
 	if err != nil {
@@ -227,9 +251,9 @@ func TestALaneOnlySeesItsOwnWork(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "in_progress")
 	h.item(t, "S1-002", "S1", "api", "in_progress")
-	h.item(t, "S1-003", "S1", "ui", "verifying")
+	h.item(t, "S1-003", "S1", "ui", "testing")
 
-	only, err := h.D.Candidates(Filter{Capability: config.CapVerify})
+	only, err := h.D.Candidates(Filter{Capability: config.CapTest})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +319,7 @@ func TestASegmentUnderItsTargetAsksForWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cands) != 1 || cands[0].Kind != KindGenerate || cands[0].Need != 3 {
+	if len(cands) != 1 || cands[0].Kind != KindSegment || cands[0].Need != 3 {
 		t.Fatalf("want one generate candidate needing 3, got %+v", cands)
 	}
 	if cands[0].Worker != "planner" {
@@ -307,7 +331,7 @@ func TestASegmentUnderItsTargetAsksForWork(t *testing.T) {
 	h.item(t, "S1-001", "S1", "ui", "queued")
 	h.item(t, "S1-002", "S1", "ui", "queued")
 	h.item(t, "S1-003", "S1", "ui", "queued")
-	cands2, err := h.D.Candidates(Filter{Capability: config.CapGenerate})
+	cands2, err := h.D.Candidates(Filter{Capability: config.CapPlan})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +413,7 @@ func TestAGeneratorCannotOverwriteAnExistingItem(t *testing.T) {
 		"id": "S1-001", "title": "Something else entirely", "area": "ui",
 		"blast_radius": "none", "criteria": []string{"a criterion long enough to be usable"},
 	})
-	if _, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapGenerate}); err != nil {
+	if _, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapPlan}); err != nil {
 		t.Fatal(err)
 	}
 	it, err := h.Led.Item("S1-001")
@@ -410,7 +434,7 @@ func TestAnIdleLoopStillWritesATick(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
 	s := &Scheduler{D: h.D, Cfg: h.Cfg, Grace: 3}
-	loop := config.LoopDecl{Name: "verify-lane", Enabled: true, EverySeconds: 60, Capability: config.CapVerify, MaxPerTick: 1}
+	loop := config.LoopDecl{Name: "verify-lane", Enabled: true, EverySeconds: 60, Capability: config.CapTest, MaxPerTick: 1}
 	h.Cfg.Loops = []config.LoopDecl{loop}
 
 	// Nothing to do at all.

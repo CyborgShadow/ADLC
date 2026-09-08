@@ -3,38 +3,46 @@ package authority
 import (
 	"fmt"
 
+	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // SegmentState is where a deliverable sits on the roadmap.
 //
-// This layer exists because "decompose a goal into work" and "do the work" are
-// different jobs with different failure modes, and running them together hides
-// the more expensive one. A fleet that starts building the moment a brief is
-// decomposed will build exactly what the decomposition said — including the
-// parts that do not add up to the thing that was asked for. Nobody finds out
-// until the deliverable is finished and wrong.
+// Planning is its own pipeline because deciding what to build and building it
+// are different jobs with different failure modes. A fleet that starts building
+// the moment an idea is written down builds exactly what was written — including
+// the parts that do not add up to the thing that was wanted, which nobody finds
+// out until the deliverable is finished and wrong.
 //
-// So a breakdown is reviewed before any of it is built, by somebody who did
-// not write it, against the brief rather than against the items.
+// So an idea is signed off before it is researched, researched before it is
+// planned, and the plan is validated against the original intent before any of
+// it becomes work.
 type SegmentState string
 
 const (
-	// SegDrafted is a deliverable somebody has described and nobody has broken
-	// down yet.
-	SegDrafted SegmentState = "drafted"
-	// SegResearching means a generator is decomposing the brief.
+	// SegTheory is an idea. Nothing commits to it.
+	SegTheory SegmentState = "theory"
+	// SegRoadmap means it has been accepted onto the roadmap.
+	SegRoadmap SegmentState = "roadmap"
+	// SegSignedOff means a person agreed the intent is worth pursuing. This is
+	// the only planning gate a machine never passes on its own.
+	SegSignedOff SegmentState = "signed_off"
+	// SegResearching means a researcher is turning the intent into an approach.
 	SegResearching SegmentState = "researching"
-	// SegPlanned means work items exist and nobody has checked that they add up
-	// to the brief.
+	// SegResearched means the approach is written down.
+	SegResearched SegmentState = "researched"
+	// SegPlanning means a planner is decomposing the approach into work items.
+	SegPlanning SegmentState = "planning"
+	// SegPlanned means work items exist and nobody has checked that they add up.
 	SegPlanned SegmentState = "planned"
-	// SegApproved means a reviewer confirmed the breakdown would deliver the
-	// brief. Only now may the work itself be dispatched.
-	SegApproved SegmentState = "approved"
+	// SegValidating means a validator is checking the plan against the intent.
+	SegValidating SegmentState = "validating"
+	// SegReady means the plan was accepted. Only now may the work be dispatched.
+	SegReady SegmentState = "ready"
 	// SegBuilding means at least one item has moved.
 	SegBuilding SegmentState = "building"
-	// SegDelivered means every item reached a terminal state and at least one of
-	// them is done.
+	// SegDelivered means every item reached a terminal state and one is done.
 	SegDelivered SegmentState = "delivered"
 	// SegPaused is an operator's decision, and only an operator's.
 	SegPaused SegmentState = "paused"
@@ -42,19 +50,10 @@ const (
 
 // SegmentStages is the roadmap in reading order.
 func SegmentStages() []SegmentState {
-	return []SegmentState{SegDrafted, SegResearching, SegPlanned, SegApproved, SegBuilding, SegDelivered}
-}
-
-// OpenForWork reports whether the items in a segment may be dispatched.
-//
-// This is the handoff gate, and it is the whole reason the roadmap layer earns
-// its place: a breakdown nobody has reviewed does not become work. An item in
-// a segment that has not been approved is skipped with a stated reason rather
-// than silently ignored, because "not started because the plan is unreviewed"
-// and "not started because nobody picked it" are different problems with
-// different fixes.
-func (s SegmentState) OpenForWork() bool {
-	return s == SegApproved || s == SegBuilding
+	return []SegmentState{
+		SegTheory, SegRoadmap, SegSignedOff, SegResearching, SegResearched,
+		SegPlanning, SegPlanned, SegValidating, SegReady, SegBuilding, SegDelivered,
+	}
 }
 
 // Known reports whether this build understands the state.
@@ -67,6 +66,47 @@ func (s SegmentState) Known() bool {
 	return false
 }
 
+// OpenForWork reports whether the items in a deliverable may be dispatched.
+//
+// This is the handoff gate and the reason the planning pipeline earns its
+// place: a plan nobody has checked against the intent does not become work. An
+// item held here is skipped with a stated reason rather than silently ignored,
+// because "not started because the plan is unreviewed" and "not started because
+// nobody picked it" are different problems with different fixes.
+func (s SegmentState) OpenForWork() bool {
+	return s == SegReady || s == SegBuilding
+}
+
+// NeedsPerson reports whether the deliverable is waiting on a human decision.
+func (s SegmentState) NeedsPerson() bool { return s == SegRoadmap }
+
+// SegmentCapabilityFor says which capability moves a deliverable out of a
+// state. An empty capability means it waits on a person, or on its own items.
+func SegmentCapabilityFor(s SegmentState) (capability string, priority int) {
+	switch s {
+	case SegSignedOff, SegResearching:
+		return config.CapResearch, 20
+	case SegResearched, SegPlanning:
+		return config.CapPlan, 21
+	case SegPlanned, SegValidating:
+		return config.CapValidate, 19
+	}
+	return "", 99
+}
+
+// SegmentPickedUp is the state a deliverable enters when a lane takes it.
+func SegmentPickedUp(s SegmentState) (SegmentState, bool) {
+	switch s {
+	case SegSignedOff:
+		return SegResearching, true
+	case SegResearched:
+		return SegPlanning, true
+	case SegPlanned:
+		return SegValidating, true
+	}
+	return s, false
+}
+
 // SegmentAdvance is a computed roadmap move.
 type SegmentAdvance struct {
 	To       SegmentState
@@ -74,13 +114,49 @@ type SegmentAdvance struct {
 	Inferred bool
 }
 
-// NextSegmentState computes where a deliverable goes next.
+// NextSegmentState computes where a deliverable goes next after a run.
 //
 // Like NextState for items, this is a pure function and the only thing that
-// moves a segment. It is called after every event that could change the
-// answer, so the roadmap is a projection of what has actually happened rather
-// than a board somebody remembers to update.
-func NextSegmentState(from SegmentState, items []ledger.Item, planReview string) SegmentAdvance {
+// moves a deliverable on the strength of a run. Two edges are not here at all:
+// theory to roadmap, and roadmap to signed off. Both are decisions a person
+// makes, and no verdict from any agent produces them.
+func NextSegmentState(from SegmentState, capability, verdict string, itemsCreated int) SegmentAdvance {
+	pass := verdict == "pass"
+	switch from {
+	case SegSignedOff, SegResearching:
+		if capability != config.CapResearch {
+			return SegmentAdvance{}
+		}
+		if pass {
+			return segOK(SegResearched, "the intent has been turned into a written approach")
+		}
+	case SegResearched, SegPlanning:
+		if capability != config.CapPlan {
+			return SegmentAdvance{}
+		}
+		if itemsCreated > 0 {
+			return segOK(SegPlanned, fmt.Sprintf(
+				"the approach was decomposed into %d work item(s), which nobody has checked against the intent yet", itemsCreated))
+		}
+		if pass {
+			return SegmentAdvance{}
+		}
+	case SegPlanned, SegValidating:
+		if capability != config.CapValidate {
+			return SegmentAdvance{}
+		}
+		if pass {
+			return segOK(SegReady, "the plan was checked against the intent and accepted; work may now be dispatched")
+		}
+		return segOK(SegResearched, "the plan does not add up to the intent and goes back for decomposition")
+	}
+	return SegmentAdvance{}
+}
+
+// SegmentFromItems recomputes the states that depend only on the items, so the
+// roadmap is a projection of what has happened rather than a board somebody
+// remembers to update.
+func SegmentFromItems(from SegmentState, items []ledger.Item) SegmentAdvance {
 	var total, terminal, done, moved int
 	for _, it := range items {
 		total++
@@ -95,33 +171,22 @@ func NextSegmentState(from SegmentState, items []ledger.Item, planReview string)
 			moved++
 		}
 	}
-
 	switch from {
-	case SegDrafted, SegResearching:
-		if total > 0 {
-			return SegmentAdvance{To: SegPlanned, Inferred: true, Why: fmt.Sprintf(
-				"the brief was decomposed into %d work item(s), which nobody has checked against it yet", total)}
-		}
-	case SegPlanned:
-		switch planReview {
-		case "pass":
-			return SegmentAdvance{To: SegApproved, Inferred: true,
-				Why: "a reviewer confirmed the breakdown would deliver the brief; the work may now be dispatched"}
-		case "reject":
-			return SegmentAdvance{To: SegResearching, Inferred: true,
-				Why: "the breakdown does not add up to the brief and goes back for decomposition"}
-		}
-	case SegApproved:
+	case SegReady:
 		if moved > 0 {
-			return SegmentAdvance{To: SegBuilding, Inferred: true, Why: "work has started"}
+			return segOK(SegBuilding, "work has started")
 		}
 	case SegBuilding:
 		if total > 0 && terminal == total && done > 0 {
-			return SegmentAdvance{To: SegDelivered, Inferred: true, Why: fmt.Sprintf(
-				"every one of the %d item(s) reached a terminal state, %d of them done", total, done)}
+			return segOK(SegDelivered, fmt.Sprintf(
+				"every one of the %d item(s) reached a terminal state, %d of them done", total, done))
 		}
 	}
 	return SegmentAdvance{}
+}
+
+func segOK(to SegmentState, why string) SegmentAdvance {
+	return SegmentAdvance{To: to, Why: why, Inferred: true}
 }
 
 // SegmentProgress is the rollup a person reads on the roadmap and progress
@@ -130,17 +195,17 @@ type SegmentProgress struct {
 	Total    int
 	Done     int
 	Active   int
-	Blocked  int
 	Waiting  int
+	Blocked  int
+	Approval int
 	Rejected int
 	Queued   int
 	ByStage  map[string]int
 }
 
-// Percent is completion as a whole number, and it is deliberately based on
-// items DONE rather than on items touched. A bar that fills as work is started
-// tells an operator the fleet is busy, which they can already see; the
-// question they are actually asking is how much of this is finished.
+// Percent is completion as a whole number, based on items DONE rather than
+// items touched. A bar that fills as work is started reports that the fleet is
+// busy, which is not the question anyone is asking.
 func (p SegmentProgress) Percent() int {
 	if p.Total == 0 {
 		return 0
@@ -148,7 +213,7 @@ func (p SegmentProgress) Percent() int {
 	return p.Done * 100 / p.Total
 }
 
-// Progress counts a segment's items by stage.
+// Progress counts a deliverable's items by stage.
 func Progress(items []ledger.Item) SegmentProgress {
 	p := SegmentProgress{ByStage: map[string]int{}}
 	for _, it := range items {
@@ -163,9 +228,11 @@ func Progress(items []ledger.Item) SegmentProgress {
 		case st == StateRejected:
 			p.Rejected++
 		case st == StateAwaitingApproval:
-			p.Waiting++
-		case st == StateQueued || st == StateReady:
+			p.Approval++
+		case st == StateQueued:
 			p.Queued++
+		case st.Waiting():
+			p.Waiting++
 		case st.Active():
 			p.Active++
 		}

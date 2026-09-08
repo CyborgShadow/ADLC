@@ -152,7 +152,8 @@ func (a *Authority) proposerFor(req Request, edge *Edge) (Proposer, Decision) {
 	// multi-capability worker from being refused for holding more than one.
 	for _, p := range edge.Proposers {
 		switch p {
-		case ProposerImplement, ProposerVerify, ProposerValidate, ProposerOperate:
+		case ProposerImplement, ProposerTest, ProposerJudge, ProposerValidate,
+			ProposerCurate, ProposerArbitrate, ProposerOperate, ProposerImprove:
 			if a.cfg.Can(req.Worker, string(p)) {
 				return p, Decision{Admitted: true}
 			}
@@ -160,7 +161,9 @@ func (a *Authority) proposerFor(req Request, edge *Edge) (Proposer, Decision) {
 	}
 	// No capability matched: report the strongest one it holds so the refusal
 	// names what it actually is.
-	for _, c := range []string{config.CapValidate, config.CapVerify, config.CapOperate, config.CapImplement} {
+	for _, c := range []string{config.CapValidate, config.CapArbitrate, config.CapJudge,
+		config.CapTest, config.CapCurate, config.CapImprove, config.CapOperate,
+		config.CapImplement, config.CapPlan, config.CapResearch} {
 		if a.cfg.Can(req.Worker, c) {
 			return Proposer(c), Decision{Admitted: true}
 		}
@@ -310,7 +313,8 @@ func (a *Authority) check(r Requirement, req Request, f Facts, edge *Edge) Decis
 		}
 
 	case ReqIndependentVerifier:
-		if a.cfg.Can(req.Worker, config.CapImplement) && !a.cfg.Can(req.Worker, config.CapVerify) {
+		if a.cfg.Can(req.Worker, config.CapImplement) &&
+			!a.cfg.Can(req.Worker, config.CapTest) && !a.cfg.Can(req.Worker, config.CapJudge) {
 			return refuse(ReasonSelfCertified, fmt.Sprintf(
 				"%s implements; verification has to come from a worker that does not", req.Worker))
 		}

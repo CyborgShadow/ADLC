@@ -159,12 +159,12 @@ type WorkerDecl struct {
 	Description string   `json:"description"`
 	Prompt      string   `json:"prompt"`
 	Areas       []string `json:"areas,omitempty"`
-	// Capabilities are the lifecycle edges this worker may propose across:
-	// "implement", "verify", "validate", "operate". They are capabilities rather
-	// than names so that the authority table does not have to know what any one
-	// project called its roles.
+	// Capabilities are the lifecycle stages this worker may move work through.
+	// They are capabilities rather than role names so the authority table does
+	// not have to know what any one project calls its agents.
 	//
-	// The split that matters most is verify from implement.
+	// The split that matters most is test and judge from implement: a lane that
+	// writes work and also judges it will always find it acceptable.
 	Capabilities []string `json:"capabilities"`
 	// LowCadence marks a worker that is expected to run rarely, so the never-run
 	// roll call reports it without raising it as an alarm.
@@ -554,19 +554,35 @@ func (c *Config) Owner(area string) (string, bool) {
 // Naming them as capabilities rather than as role names keeps the authority
 // table independent of what any one project calls its agents.
 const (
+	// CapResearch turns a signed-off intent into a written approach.
+	CapResearch = "research"
+	// CapPlan decomposes an approach into work items with checkable criteria.
+	CapPlan = "plan"
+	// CapImplement builds one item, with its tests.
 	CapImplement = "implement"
-	CapVerify    = "verify"
-	CapValidate  = "validate"
-	CapOperate   = "operate"
-	// CapGenerate decomposes a segment brief into work items. It is what turns
-	// this from a backlog someone typed in into something that can be pointed at
-	// a goal and left running.
-	CapGenerate = "generate"
+	// CapTest executes the tests. Separate from implement, because a lane that
+	// both writes and runs its own tests will always find them acceptable.
+	CapTest = "test"
+	// CapJudge judges an item against its acceptance criteria.
+	CapJudge = "judge"
+	// CapValidate reviews adversarially, and validates a plan against the
+	// intent it came from. The only capability that can reject.
+	CapValidate = "validate"
+	// CapCurate is the hygiene pass over what landed.
+	CapCurate = "curate"
+	// CapArbitrate judges a change against the system rather than against the
+	// item — the only role that looks wider than one unit of work.
+	CapArbitrate = "arbitrate"
+	// CapOperate applies a change to real resources.
+	CapOperate = "operate"
+	// CapImprove records what was learned and raises self-improvements.
+	CapImprove = "improve"
 )
 
 func knownCapability(c string) bool {
 	switch c {
-	case CapImplement, CapVerify, CapValidate, CapOperate, CapGenerate:
+	case CapResearch, CapPlan, CapImplement, CapTest, CapJudge,
+		CapValidate, CapCurate, CapArbitrate, CapOperate, CapImprove:
 		return true
 	}
 	return false
@@ -615,9 +631,15 @@ func FromChecks(project string, sourceRoots []string, checks []Check) (*Config, 
 	c := &Config{
 		Version: SchemaVersion, Project: project, SourceRoots: sourceRoots, Checks: checks,
 		Workers: []WorkerDecl{
+			{Type: "researcher", Layer: "planning", Capabilities: []string{CapResearch}},
+			{Type: "planner", Layer: "planning", Capabilities: []string{CapPlan}},
 			{Type: "performer", Layer: "worker", Capabilities: []string{CapImplement}},
-			{Type: "verifier", Layer: "verification", Capabilities: []string{CapVerify}},
+			{Type: "tester", Layer: "verification", Capabilities: []string{CapTest}},
+			{Type: "judge", Layer: "verification", Capabilities: []string{CapJudge}},
 			{Type: "validator", Layer: "verification", Capabilities: []string{CapValidate}},
+			{Type: "janitor", Layer: "stewardship", Capabilities: []string{CapCurate}},
+			{Type: "arbiter", Layer: "stewardship", Capabilities: []string{CapArbitrate}},
+			{Type: "improver", Layer: "stewardship", Capabilities: []string{CapImprove}},
 			{Type: "systems", Layer: "platform", Capabilities: []string{CapOperate}, LowCadence: true},
 		},
 		Blast: BlastPolicy{AutoApplyMax: RadiusNone, NamedApproverMin: RadiusHost, TwoApprovalsMin: RadiusRegion},

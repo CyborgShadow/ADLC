@@ -96,11 +96,9 @@ type Kind string
 const (
 	// KindItem advances one work item along the lifecycle.
 	KindItem Kind = "item"
-	// KindGenerate decomposes a segment's brief into new work items.
-	KindGenerate Kind = "generate"
-	// KindPlanReview checks a decomposition against the brief it came from,
-	// before any of it is built.
-	KindPlanReview Kind = "plan-review"
+	// KindSegment advances a deliverable through planning: research, plan, or
+	// validate the plan against the intent it came from.
+	KindSegment Kind = "planning"
 )
 
 // Candidate is one dispatchable piece of work.
@@ -119,11 +117,8 @@ type Candidate struct {
 // Key is what a candidate leases: the item id, or the segment for generation,
 // so that two generators cannot both fill one backlog.
 func (c Candidate) Key() string {
-	switch c.Kind {
-	case KindGenerate:
-		return "generate-" + c.Segment.ID
-	case KindPlanReview:
-		return "planreview-" + c.Segment.ID
+	if c.Kind == KindSegment {
+		return "plan-" + c.Segment.ID
 	}
 	return c.Item.ID
 }
@@ -146,28 +141,6 @@ func (f Filter) allowsArea(area string) bool {
 		}
 	}
 	return false
-}
-
-// nextCapability says what an item in a given state is waiting for. It returns
-// an empty capability for states nothing can be dispatched against, which is
-// what keeps a blocked or awaiting-approval item from being handed to an agent
-// that cannot clear it.
-func nextCapability(s authority.State) (capability string, priority int) {
-	switch s {
-	case authority.StateConfirming:
-		return config.CapValidate, 0
-	case authority.StateApplying:
-		return config.CapOperate, 1
-	case authority.StateValidating:
-		return config.CapValidate, 2
-	case authority.StateVerifying:
-		return config.CapVerify, 3
-	case authority.StateInProgress:
-		return config.CapImplement, 4
-	case authority.StateReady:
-		return config.CapImplement, 5
-	}
-	return "", 99
 }
 
 // Candidates lists dispatchable work, most nearly finished first, generation
@@ -203,7 +176,7 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 	var out []Candidate
 	for _, it := range items {
 		st := authority.State(it.State)
-		capability, prio := nextCapability(st)
+		capability, prio := authority.CapabilityFor(st)
 		if capability == "" {
 			continue
 		}
@@ -267,47 +240,38 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 		})
 	}
 
-	if f.Capability == "" || f.Capability == config.CapValidate {
-		for _, s := range segs {
-			if authority.SegmentState(s.State) != authority.SegPlanned {
-				continue
-			}
-			worker, ok := d.Cfg.OwnerFor("", config.CapValidate)
-			if !ok {
-				continue
-			}
-			if f.Worker != "" && f.Worker != worker {
-				continue
-			}
-			out = append(out, Candidate{
-				Kind: KindPlanReview, Segment: s, Capability: config.CapValidate,
-				Worker: worker, Priority: 6,
-				Why: fmt.Sprintf("%s has a breakdown nobody has checked against its brief", s.ID),
-			})
+	for _, s := range segs {
+		st := authority.SegmentState(s.State)
+		capability, prio := authority.SegmentCapabilityFor(st)
+		if capability == "" {
+			continue
 		}
-	}
-
-	if f.Capability == "" || f.Capability == config.CapGenerate {
-		for _, s := range segs {
-			need := authority.SegmentNeedsWork(s.TargetOpen, openBySegment[s.ID])
-			if need == 0 || strings.TrimSpace(s.Brief) == "" {
-				continue
-			}
-			worker, ok := d.Cfg.OwnerFor("", config.CapGenerate)
-			if !ok {
-				d.log("UNREACHABLE segment %s wants %d more item(s) and no declared worker holds %q",
-					s.ID, need, config.CapGenerate)
-				continue
-			}
-			if f.Worker != "" && f.Worker != worker {
-				continue
-			}
-			out = append(out, Candidate{
-				Kind: KindGenerate, Segment: s, Capability: config.CapGenerate,
-				Worker: worker, Need: need, Priority: 90,
-				Why: fmt.Sprintf("%s has %d open item(s) against a target of %d", s.ID, openBySegment[s.ID], s.TargetOpen),
-			})
+		if f.Capability != "" && f.Capability != capability {
+			continue
 		}
+		// Planning only produces more work when the deliverable actually wants
+		// it. A planner that runs on a timer regardless of backlog depth invents
+		// work to justify its own cadence.
+		need := 0
+		if capability == config.CapPlan {
+			need = authority.SegmentNeedsWork(s.TargetOpen, openBySegment[s.ID])
+			if need == 0 {
+				continue
+			}
+		}
+		worker, ok := d.Cfg.OwnerFor("", capability)
+		if !ok {
+			d.log("UNREACHABLE %s is %s and needs %q work, which no declared worker can take", s.ID, st, capability)
+			continue
+		}
+		if f.Worker != "" && f.Worker != worker {
+			continue
+		}
+		out = append(out, Candidate{
+			Kind: KindSegment, Segment: s, Capability: capability,
+			Worker: worker, Need: need, Priority: prio,
+			Why: fmt.Sprintf("%s is %s and needs %s", s.ID, st, capability),
+		})
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -429,7 +393,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		return TickResult{}, false, err
 	}
 	segID := c.Item.SegmentID
-	if c.Kind == KindGenerate {
+	if c.Kind == KindSegment {
 		segID = c.Segment.ID
 	}
 	if _, err := d.Led.Append(d.Actor, ledger.KindRunStarted, runID, ledger.RunStarted{
@@ -504,18 +468,18 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	}
 	d.recordQuestions(runID, c, env)
 
-	switch c.Kind {
-	case KindGenerate:
-		created, gerr := d.admitProposedItems(runID, c, env)
-		res.Created, res.Admitted = created, created > 0
-		if gerr == nil {
-			gerr = d.advanceSegment(c.Segment.ID, runID, "")
+	if c.Kind == KindSegment {
+		created := 0
+		if c.Capability == config.CapPlan {
+			var gerr error
+			if created, gerr = d.admitProposedItems(runID, c, env); gerr != nil {
+				return res, true, gerr
+			}
 		}
-		return res, true, gerr
-	case KindPlanReview:
-		res.Admitted = env.Verdict == "pass"
-		d.log("PLAN REVIEW %s on %s: %s", runID, c.Segment.ID, env.Verdict)
-		return res, true, d.advanceSegment(c.Segment.ID, runID, env.Verdict)
+		res.Created = created
+		res.Admitted = env.Verdict == "pass" || created > 0
+		d.log("PLANNING %s  %s on %s: %s", runID, c.Capability, c.Segment.ID, env.Verdict)
+		return res, true, d.advanceSegment(c.Segment.ID, runID, c.Capability, env.Verdict, created)
 	}
 
 	// The tool decides where the item goes. The agent reported a verdict; it was
@@ -561,7 +525,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		return res, true, err
 	}
 	d.log("ADVANCED %s  %s -> %s  (%s)", c.Item.ID, c.From, to, adv.Why)
-	return res, true, d.advanceSegment(c.Item.SegmentID, runID, "")
+	return res, true, d.advanceSegment(c.Item.SegmentID, runID, "", "", 0)
 }
 
 // admitProposedItems puts each generated item to the admission rules and
@@ -623,15 +587,15 @@ func (d *Dispatcher) promptVars(c Candidate, runID string, ws *Workspace) map[st
 		"blast_radius": "", "resources": "", "file_scope": "", "criteria": "",
 		"brief": "", "needed": "", "existing_items": "", "rationale": "",
 	}
-	if c.Kind == KindGenerate || c.Kind == KindPlanReview {
+	if c.Kind == KindSegment {
 		v["segment_id"] = c.Segment.ID
 		v["title"] = c.Segment.Title
 		v["brief"] = c.Segment.Brief
+		v["state"] = c.Segment.State
 		v["needed"] = fmt.Sprintf("%d", c.Need)
 		v["rationale"] = c.Segment.Rationale
 		v["existing_items"] = d.existingItemSummary(c.Segment.ID)
-		if c.Kind == KindPlanReview {
-			v["needed"] = "0"
+		if c.Capability != config.CapPlan {
 			v["criteria"] = d.existingItemSummary(c.Segment.ID)
 		}
 		return v
@@ -772,7 +736,7 @@ func renderCriteria(cs []string) string {
 // It runs after every event that could change the answer, so the roadmap is a
 // projection of what has happened rather than a board somebody remembers to
 // update.
-func (d *Dispatcher) advanceSegment(segmentID, runID, planReview string) error {
+func (d *Dispatcher) advanceSegment(segmentID, runID, capability, verdict string, created int) error {
 	if segmentID == "" {
 		return nil
 	}
@@ -784,7 +748,11 @@ func (d *Dispatcher) advanceSegment(segmentID, runID, planReview string) error {
 	if err != nil {
 		return err
 	}
-	adv := authority.NextSegmentState(authority.SegmentState(seg.State), items, planReview)
+	from := authority.SegmentState(seg.State)
+	adv := authority.NextSegmentState(from, capability, verdict, created)
+	if !adv.Inferred {
+		adv = authority.SegmentFromItems(from, items)
+	}
 	if !adv.Inferred || string(adv.To) == seg.State {
 		return nil
 	}

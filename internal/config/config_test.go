@@ -17,11 +17,11 @@ func base() map[string]any {
 		"source_roots": []string{"src"},
 		"checks": []map[string]any{{
 			"id": "test", "command": []string{"go", "test"}, "verdict": "exit_zero",
-			"required_for": []string{"in_progress->verifying"},
+			"required_for": []string{"in_progress->ready_for_testing"},
 		}},
 		"workers": []map[string]any{
 			{"type": "builder", "prompt": "impl", "capabilities": []string{CapImplement}},
-			{"type": "checker", "prompt": "verify", "capabilities": []string{CapVerify}},
+			{"type": "checker", "prompt": "verify", "capabilities": []string{CapTest}},
 			{"type": "reviewer", "prompt": "review", "capabilities": []string{CapValidate}},
 		},
 		"routing": map[string]string{"core": "builder"},
@@ -106,7 +106,7 @@ func TestTheValidatorRefusesConfigsThatWouldStallTheFleet(t *testing.T) {
 		"two lanes with one name": {
 			func(m map[string]any) {
 				m["loops"] = []map[string]any{
-					{"name": "a", "capability": CapVerify},
+					{"name": "a", "capability": CapTest},
 					{"name": "a", "capability": CapValidate},
 				}
 			},
@@ -214,12 +214,12 @@ func TestChecksAreSelectedByEdge(t *testing.T) {
 	m := base()
 	m["checks"] = []map[string]any{
 		{"id": "a", "command": []string{"true"}, "verdict": "exit_zero",
-			"required_for": []string{"in_progress->verifying"}},
+			"required_for": []string{"in_progress->ready_for_testing"}},
 		{"id": "b", "command": []string{"true"}, "verdict": "exit_zero",
 			"required_for": []string{"confirming->done"}},
 	}
 	c := mustLoad(t, m)
-	got := c.ChecksForEdge("in_progress", "verifying")
+	got := c.ChecksForEdge("in_progress", "ready_for_testing")
 	if len(got) != 1 || got[0].ID != "a" {
 		t.Fatalf("a check gates only the edges it names; got %d", len(got))
 	}
@@ -245,7 +245,7 @@ func TestVerdictRuleChannelIsExplicit(t *testing.T) {
 
 func TestSetLoopPersistsAndRefusesAThrashingCadence(t *testing.T) {
 	m := base()
-	m["loops"] = []map[string]any{{"name": "verify", "capability": CapVerify, "every_seconds": 300}}
+	m["loops"] = []map[string]any{{"name": "verify", "capability": CapTest, "every_seconds": 300}}
 	b, _ := json.Marshal(m)
 	p := filepath.Join(t.TempDir(), "adlc.json")
 	if err := os.WriteFile(p, b, 0o644); err != nil {

@@ -42,7 +42,7 @@ func Gather(l *ledger.Ledger, itemID, runID string, commitReachable func(string)
 		return f, err
 	}
 	for _, p := range props {
-		if p.Admitted && State(p.To) == StateVerifying {
+		if p.Admitted && State(p.To) == StateReadyForTesting {
 			f.ImplementRunID = p.RunID
 			break // newest first
 		}

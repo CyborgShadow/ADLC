@@ -66,7 +66,7 @@ func TestTheFleetReportNamesWorkersThatHaveProducedNothing(t *testing.T) {
 	if !strings.Contains(out, "This is absence, not health") {
 		t.Error("the report should say what a zero means, not just print one")
 	}
-	for _, w := range []string{"verifier", "validator"} {
+	for _, w := range []string{"tester", "validator"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("%s has produced nothing and must be named", w)
 		}

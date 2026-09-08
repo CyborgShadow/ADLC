@@ -72,7 +72,7 @@ func newServer(t *testing.T) *Server {
 		cfg.Workers[i].Prompt = "impl"
 	}
 	cfg.Prompts = config.PromptPolicy{Dir: agents, PreambleFile: filepath.Join(agents, "_preamble.md")}
-	cfg.Loops = []config.LoopDecl{{Name: "verify", Enabled: true, EverySeconds: 60, Capability: config.CapVerify, MaxPerTick: 1}}
+	cfg.Loops = []config.LoopDecl{{Name: "verify", Enabled: true, EverySeconds: 60, Capability: config.CapTest, MaxPerTick: 1}}
 	cfg.Server.RefreshSeconds = 0
 
 	lib, err := prompt.Load(cfg.Prompts)
@@ -155,7 +155,7 @@ func TestEveryPageRendersOverARealLedger(t *testing.T) {
 		"/progress":           "by stage",
 		"/questions":          "survive a password change",
 		"/approvals":          "Rotates the signing key",
-		"/coordination":       "Decompose",
+		"/coordination":       "Arbitrate",
 		"/roles":              "performer",
 		"/role/impl":          "Builder",
 		"/config":             "Safety policy",

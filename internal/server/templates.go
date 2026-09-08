@@ -36,13 +36,13 @@ var funcs = template.FuncMap{
 	"clock": func(t time.Time) string { return t.Format("15:04:05") },
 	"stateClass": func(s string) string {
 		switch s {
-		case "done", "delivered", "approved":
+		case "done", "delivered":
 			return "ok"
 		case "blocked", "rejected":
 			return "bad"
 		case "awaiting_approval", "planned":
 			return "warn"
-		case "queued", "cancelled", "superseded", "drafted", "paused":
+		case "queued", "cancelled", "superseded", "theory", "paused":
 			return "mute"
 		}
 		return "live"

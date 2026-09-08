@@ -271,4 +271,4 @@ func cmdSegmentAdvance(e *env, args []string) int {
 	return exitOK
 }
 
-var _ = config.CapGenerate
+var _ = config.CapPlan
