@@ -115,7 +115,10 @@ type Criterion struct {
 	Evidence     string `json:"evidence"`
 }
 
-// Finding is a validator's defect.
+// Finding is one defect a run reports. Naming a single role here would be
+// wrong: the validator, the arbiter, the architect and the specialist
+// reviewers all write these, against the one shape agents/_preamble.md states
+// for all of them.
 type Finding struct {
 	Severity  string `json:"severity"` // blocker | major | minor | note
 	Location  string `json:"location"`
