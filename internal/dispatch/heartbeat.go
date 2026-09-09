@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/CyborgShadow/ADLC/internal/ledger"
@@ -245,8 +246,18 @@ func (d *Dispatcher) closeOrphan(f beatFile) error {
 		// UNKNOWN stands whatever was found. An envelope is a CLAIM: admitting
 		// one whose checks nobody ran is the single thing this control plane
 		// exists to refuse, and it is not made safer by the agent having died.
+		//
+		// The token counts are a different kind of statement and are kept. They
+		// are not a verdict about the work, they are what the agent consumed, and
+		// closing every orphan with no usage at all reported real agent minutes
+		// as free — so the bill got quieter exactly as the fleet got sicker.
+		// Absent stays absent: an orphan with no readable envelope carries no
+		// usage rather than a confident zero.
+		usage := d.salvagedUsage(ev.EnvelopeSHA)
 		if _, aerr := d.Led.Append(d.actor(), ledger.KindRunFinished, f.RunID, ledger.RunFinished{
 			RunID: f.RunID, Verdict: "unknown", EnvelopeSHA: ev.EnvelopeSHA,
+			Model: d.defaultModel(), Usage: usage,
+			CostMicros: d.priced(f.RunID, "", usage),
 		}); aerr != nil {
 			return aerr
 		}
@@ -347,4 +358,30 @@ func (d *Dispatcher) actor() string {
 	return "cli"
 }
 
-var _ = fmt.Sprintf
+// dispatcherSeq numbers Dispatcher instances within one process.
+var dispatcherSeq atomic.Int64
+
+// processActor names the process and the Dispatcher instance behind a row.
+//
+// Observed concurrency reached 17 against a declared ceiling of 8 and the
+// record could not settle why, because every run in 660 carried the actor
+// "cli". Two explanations fit and the ledger separated neither: a second
+// control plane sharing the tree, or two Dispatcher instances inside one
+// process — each of which builds its own slots channel and so its own ceiling.
+// A per-process cap is not a cap, and a record that cannot name the instance
+// cannot show which kind of breach it was.
+//
+// Minted once and kept, so every row a Dispatcher writes carries the same name
+// and a run can be attributed for as long as the chain lasts.
+func (d *Dispatcher) processActor() string {
+	d.idOnce.Do(func() {
+		host, err := os.Hostname()
+		if err != nil || host == "" {
+			// An unresolvable hostname is not a reason to lose the pid: within
+			// one machine the pid alone still separates two control planes.
+			host = "host?"
+		}
+		d.id = fmt.Sprintf("%s/pid%d/d%d", host, os.Getpid(), dispatcherSeq.Add(1))
+	})
+	return d.actor() + "@" + d.id
+}

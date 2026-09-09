@@ -148,8 +148,110 @@ func TestReworkStopsAtTheLimitRatherThanLooping(t *testing.T) {
 	if _, err := h.D.Refresh(); err != nil {
 		t.Fatal(err)
 	}
-	if it, _ := h.Led.Item("S1-001"); it.State != string(authority.StateRejected) {
-		t.Fatalf("past the attempt limit an item escalates rather than looping, got %s", it.State)
+	// Past the budget it takes the edge the transition table has declared all
+	// along — rejected -> blocked, "the attempt limit is reached; a person
+	// decides" — instead of staying rejected with nothing proposing anything.
+	// Two items sat in that dead end for a whole night, invisible to every lane
+	// because the selection pass skipped anything at the limit, and escalated to
+	// nobody.
+	it, err := h.Led.Item("S1-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.State != string(authority.StateBlocked) {
+		t.Fatalf("past the attempt limit an item must reach a person, got %s", it.State)
+	}
+	qs, err := h.Led.Questions("S1-001", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking := 0
+	for _, q := range qs {
+		if q.Blocking {
+			blocking++
+		}
+	}
+	if blocking != 1 {
+		t.Fatalf("%d open blocking question(s); an item parked with no stated reason is indistinguishable from one nobody has got to", blocking)
+	}
+
+	// And it is asked ONCE. A pass that re-raised it every thirty seconds would
+	// bury the question it exists to make visible.
+	for i := 0; i < 3; i++ {
+		if _, err := h.D.Refresh(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	again, err := h.Led.Questions("S1-001", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != len(qs) {
+		t.Fatalf("the escalation was raised again on a later pass: %d questions, want %d", len(again), len(qs))
+	}
+}
+
+// TestTheReworkLimitDoesNotBlindEveryLane is the firing case's opposite number.
+//
+// The limit used to be applied to the whole item before any capability was
+// considered, so an item at 3 of 3 vanished from test, judge, validate, curate,
+// arbitrate and improve as well as implement. Work that had already been paid
+// for could not even be reviewed.
+func TestTheReworkLimitDoesNotBlindEveryLane(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	// One item mid-build and one under review, both out of attempts.
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	h.item(t, "S1-002", "S1", "ui", "verifying")
+	for _, id := range []string{"S1-001", "S1-002"} {
+		for i := 0; i < h.Cfg.Dispatch.MaxAttempts; i++ {
+			if _, err := h.Led.Append("t", ledger.KindItemTransitioned, id, ledger.ItemTransitioned{
+				ItemID: id, From: "verifying", To: "verifying",
+				Reason: "spend an attempt", BumpAttempt: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		spent, err := h.Led.Item(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if spent.Attempts < h.Cfg.Dispatch.MaxAttempts {
+			t.Fatalf("%s is at %d attempts, so this proves nothing", id, spent.Attempts)
+		}
+	}
+	// The first goes back to a builder — which is where the two real items were
+	// stranded: in_progress at 3 of 3, seen by nothing.
+	if _, err := h.Led.Append("t", ledger.KindItemTransitioned, "S1-001", ledger.ItemTransitioned{
+		ItemID: "S1-001", From: "verifying", To: "in_progress", Reason: "a verification task failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Firing case: no builder is dispatched, and it is said out loud rather
+	// than skipped in silence.
+	build, err := h.D.Candidates(Filter{Capability: config.CapImplement})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(build) != 0 {
+		t.Fatalf("%d builder candidate(s) past the rework limit; the budget refuses nothing", len(build))
+	}
+	if !h.logged("AT LIMIT S1-001") {
+		t.Error("an item excluded by the rework limit must say so, like UNREACHABLE and HELD beside it")
+	}
+
+	// Clean case: the verification lanes can still see it, because reviewing
+	// work already done spends no further attempt.
+	for _, capability := range []string{config.CapTest, config.CapJudge, config.CapValidate} {
+		got, cerr := h.D.Candidates(Filter{Capability: capability})
+		if cerr != nil {
+			t.Fatal(cerr)
+		}
+		if len(got) == 0 {
+			t.Errorf("the %s lane cannot see an item at the rework limit; work already done became unreviewable", capability)
+		}
 	}
 }
 

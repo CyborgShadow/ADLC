@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/CyborgShadow/ADLC/internal/authority"
@@ -70,9 +71,23 @@ type Result struct {
 	// Usage is what the agent tool itself reported spending, read off its own
 	// output rather than taken from the envelope. Measured reports whether
 	// anything was measured at all: absence must not render as zero, because
-	// "nobody counted" and "it cost nothing" are opposite facts.
+	// "nobody counted" and "it cost nothing" are opposite facts. A run that
+	// died before writing an envelope still consumed tokens, and recording
+	// ledger.Usage{} for those runs put eleven minutes of real agent work on
+	// the bill at zero.
 	Usage    ledger.Usage
 	Measured bool
+	// CostUSD is the figure the harness itself reported, kept beside the
+	// re-priced one rather than instead of it: one is what somebody was
+	// charged, the other is what this build believes the tokens are worth, and
+	// a surface that shows only the second cannot say which it is showing.
+	//
+	// CostKnown rather than a zero cost meaning free, for the same reason
+	// Measured exists — "the harness did not report a cost" and "this run was
+	// free" are opposite facts, and a runner that reports neither leaves both
+	// false.
+	CostUSD   float64
+	CostKnown bool
 }
 
 // Runner invokes one agent. It is an interface so that the control plane has
@@ -108,6 +123,17 @@ type Dispatcher struct {
 	// Ids handed out but not yet on the ledger. See mintRunID.
 	mintMu sync.Mutex
 	minted map[string]bool
+
+	// noEnv counts consecutive dispatches that produced no envelope at all.
+	// See breaker.go: a fleet whose agents have stopped starting keeps firing
+	// on cadence at a hundred per cent failure otherwise.
+	noEnv atomic.Int64
+
+	// id names this Dispatcher instance within this process, minted once. Two
+	// instances hold two slots channels and therefore two ceilings, and a
+	// record that cannot tell them apart cannot show which one let a run in.
+	idOnce sync.Once
+	id     string
 }
 
 func (d *Dispatcher) now() time.Time {
@@ -245,7 +271,26 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 		if !f.allowsArea(it.Area) {
 			continue
 		}
-		if it.Attempts >= d.Cfg.Dispatch.MaxAttempts {
+		// The rework budget bounds BUILDING, not reviewing.
+		//
+		// Applied to the whole item it removed an at-limit item from every
+		// lane at once — test, judge, validate, curate, arbitrate and improve
+		// as well as implement — so work that had already been done could not
+		// even be looked at, and the item disappeared from the board without a
+		// word. Two items sat in in_progress at 3 of 3 that way, invisible to
+		// every lane and escalated to nobody, while the transition table has
+		// declared rejected -> blocked ("the attempt limit is reached; a person
+		// decides") the whole time and nothing proposed it. escalateAtLimit
+		// does now.
+		//
+		// Verifying work already produced spends no further attempt, so it is
+		// not bounded here. And it is said out loud, like UNREACHABLE and HELD
+		// beside it: an item that stops silently is indistinguishable from one
+		// nobody has got to yet, which is the failure this tool exists to make
+		// impossible.
+		if capability == config.CapImplement && it.Attempts >= d.Cfg.Dispatch.MaxAttempts {
+			d.log("AT LIMIT %s is in %s having used %d of %d rework attempts, so no further building is dispatched. Its finished work can still be reviewed, and escalateAtLimit parks it for a person.",
+				it.ID, st, it.Attempts, d.Cfg.Dispatch.MaxAttempts)
 			continue
 		}
 		qs, err := d.Led.Questions(it.ID, true)
@@ -423,6 +468,11 @@ func (d *Dispatcher) Tick(ctx context.Context) (TickResult, error) {
 func (d *Dispatcher) TickScoped(ctx context.Context, f Filter) (TickResult, error) {
 	now := d.now()
 
+	// Only the DAY cap can be answered here, because a lane has no segment: the
+	// per-segment arm is asked in dispatchOne, where the candidate names one.
+	// Passing a literal 0 and "" for it, as this call used to, made
+	// PerSegmentMicros unfirable at every configuration — a declared cap that
+	// cannot refuse is worse than no cap, because it still gets believed.
 	today, err := d.Led.SpendMicros(now.Add(-24*time.Hour), "")
 	if err != nil {
 		return TickResult{}, err
@@ -453,7 +503,34 @@ func (d *Dispatcher) TickScoped(ctx context.Context, f Filter) (TickResult, erro
 	return TickResult{Idle: "every candidate in this lane is leased by a live sibling run"}, nil
 }
 
+// segmentOf names the deliverable a candidate's spend belongs to. A planning
+// run is spend on the deliverable itself; an item's run is spend on the
+// deliverable it was decomposed from.
+func segmentOf(c Candidate) string {
+	if c.Kind == KindSegment {
+		return c.Segment.ID
+	}
+	return c.Item.SegmentID
+}
+
 func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time) (TickResult, bool, error) {
+	// The per-segment cap, asked where a segment exists to ask about.
+	//
+	// Refusing this candidate rather than the whole pass: a deliverable that has
+	// spent its budget must not stop the ones that have not, and the day cap
+	// above already covers the fleet-wide case. Checked before the run id is
+	// minted, so an exhausted segment costs nothing to skip.
+	if seg := segmentOf(c); seg != "" && d.Cfg.Budget.PerSegmentMicros > 0 {
+		spent, err := d.Led.SpendMicros(time.Time{}, seg)
+		if err != nil {
+			return TickResult{}, false, err
+		}
+		if v := spend.CheckDispatch(d.Cfg.Budget, 0, spend.Micros(spent), seg); !v.OK {
+			d.log("OVER SEGMENT BUDGET %s — %s. Nothing further is dispatched for this deliverable; the rest of the fleet is unaffected.", seg, v.Detail)
+			return TickResult{Idle: "budget: " + v.Detail}, false, nil
+		}
+	}
+
 	runID, err := d.mintRunID(c.Worker, now)
 	if err != nil {
 		return TickResult{}, false, err
@@ -528,7 +605,12 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	if c.Kind == KindSegment {
 		segID = c.Segment.ID
 	}
-	if _, err := d.Led.Append(d.Actor, ledger.KindRunStarted, runID, ledger.RunStarted{
+	// The run's actor names the PROCESS and the Dispatcher instance, not just
+	// the command. Every run in a 660-run ledger carried the bare string "cli",
+	// so when observed concurrency reached 17 against a declared ceiling of 8
+	// the record could not separate the two explanations — two control planes,
+	// or two Dispatchers in one — and a per-process cap is not a cap.
+	if _, err := d.Led.Append(d.processActor(), ledger.KindRunStarted, runID, ledger.RunStarted{
 		RunID: runID, WorkerType: c.Worker, ItemID: c.Item.ID, SegmentID: segID,
 		PromptID: asm.PromptID, PromptSHA: asm.SHA, BaseSHA: baseSHA, WorkDir: ws.Dir, Branch: ws.Branch,
 		Model: d.Cfg.Budget.DefaultModel,
@@ -598,9 +680,21 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	// A slot is held only for as long as an agent is actually running. Taking
 	// it earlier would count selection and bookkeeping against a ceiling that
 	// exists to bound money and machine load, neither of which they spend.
+	//
+	// Wall clock, not the ledger clock: this is how long a process waited, not
+	// a fact about the record, and a test that pins the ledger clock would
+	// otherwise report every queue wait as zero.
+	queued := time.Now()
 	if err := d.limit().enter(rctx); err != nil {
+		// The run row already exists, so leaving here without an end would put a
+		// run on every surface as "still working" that nobody is waiting on. It
+		// is UNKNOWN rather than a failure: nothing was ever asked of an agent.
+		d.finish(runID, "unknown", "", "", "", ledger.Usage{}, 0)
+		d.log("QUEUE ABANDONED %s waited %s for a concurrency slot and the context ended first; it is recorded as unknown, never as a failure of the work",
+			runID, time.Since(queued).Round(time.Millisecond))
 		return TickResult{}, false, err
 	}
+	d.noteSlot(runID, time.Since(queued))
 	agentOut, agentErr := d.Runner.Invoke(rctx, Invocation{
 		RunID: runID, WorkerType: c.Worker, ItemID: c.Item.ID, SegmentID: segID,
 		PromptPath: promptPath, PromptText: asm.Text,
@@ -617,16 +711,37 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		}
 	}
 	if agentErr != nil && len(raw) == 0 {
-		d.finish(runID, "fail", "", "", "", ledger.Usage{}, 0)
+		// UNKNOWN, not fail. "fail" is the word a verifier uses for work that is
+		// genuinely broken, and a dispatch that never reached an agent is not a
+		// verdict about the work at all — 295 of one night's 297 failures were
+		// this, and the report read them as 295 broken changes.
+		//
+		// The usage and cost carried here are whatever the runner could measure.
+		// A run that consumed tokens and then died is not a free run, and
+		// hardcoding an empty Usage put real agent minutes on the bill at zero.
+		d.finish(runID, "unknown", "", "", "", agentOut.Usage,
+			d.priced(runID, "", agentOut.Usage))
+		d.noteReportedCost(runID, agentOut)
 		res.Reason = string(authority.ReasonNoEnvelope)
-		res.Detail = fmt.Sprintf("the agent returned an error and wrote no envelope: %v", agentErr)
+		res.Detail = d.recordNoEnvelope(runID, c, agentErr, agentOut)
 		d.log("NO ENVELOPE %s — %s", runID, res.Detail)
+		// Counted only for a run that produced nothing at all. See breaker.go:
+		// the lanes fired for ninety minutes at a hundred per cent failure
+		// because a dispatch that never started cost three seconds and left no
+		// trace the scheduler could read.
+		if n := d.sawNoEnvelope(); n >= maxNoEnvelopeStreak {
+			d.tripBreaker(n)
+		}
 		return res, true, nil
 	}
+	// Whatever the verdict says, the invocation works. Only the absence of an
+	// envelope is evidence that it does not.
+	d.sawEnvelope()
 
 	env, err := envelope.Parse(raw)
 	if err != nil {
-		// A malformed envelope is a refusable proposal, not a dead run.
+		// A malformed envelope is a refusable proposal, not a dead run — so it
+		// keeps the verdict "fail".
 		//
 		// The bytes are retained here because the PutBlob further down is
 		// never reached on this path: a run refused for malformed output kept
@@ -642,7 +757,16 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 			// is the part somebody is owed.
 			d.log("UNRETAINED %s — the malformed envelope could not be stored: %v", runID, berr)
 		}
-		d.finish(runID, "fail", envSHA, "", "", ledger.Usage{}, 0)
+		// What it must not keep is a cost of zero: an envelope this parser
+		// refused still describes a run that spent tokens, so the harness's
+		// measurement is preferred and salvageUsage reads the counts back out
+		// of the refused bytes rather than inventing an empty account.
+		usage := agentOut.Usage
+		if usage == (ledger.Usage{}) {
+			usage = salvageUsage(raw)
+		}
+		d.finish(runID, "fail", envSHA, "", "", usage, d.priced(runID, "", usage))
+		d.noteReportedCost(runID, agentOut)
 		d.recordRefusal(runID, c, authority.ReasonMalformedEnvelope, err.Error())
 		d.learnFromMalformed(runID, c, err.Error())
 		res.Reason, res.Detail = string(authority.ReasonMalformedEnvelope), err.Error()
@@ -674,6 +798,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		return res, true, berr
 	}
 	d.finish(runID, env.Verdict, env.SHA(), env.HeadSHA, env.Artifact, usage, int64(recorded))
+	d.noteReportedCost(runID, agentOut)
 	if v := spend.CheckRun(d.Cfg.Budget, forCap); !v.OK {
 		// The reason is in the line because CheckRun has two of them and they
 		// send a reader to different places: a run over the cap has a bill
@@ -1330,7 +1455,14 @@ func (d *Dispatcher) Refresh() (int, error) {
 	if err != nil {
 		return moved + resumed, err
 	}
-	return moved + resumed + reworked, nil
+	// And the third: an item that has run out of attempts. The limit used to be
+	// enforced by making the item invisible to every lane, which is a stall
+	// wearing a policy's clothes.
+	escalated, err := d.escalateAtLimit(items)
+	if err != nil {
+		return moved + resumed + reworked, err
+	}
+	return moved + resumed + reworked + escalated, nil
 }
 
 // claimForWork records the waiting -> working edge before a run starts.

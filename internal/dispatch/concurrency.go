@@ -2,7 +2,11 @@ package dispatch
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
+
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // Throughput.
@@ -81,6 +85,26 @@ func (d *Dispatcher) limit() *slots {
 
 // InFlight reports how many agents are running, for the dashboard.
 func (d *Dispatcher) InFlight() int { return d.limit().inFlight() }
+
+// noteSlot records the moment an agent actually started, and what it waited.
+//
+// run.started is appended before the slot is taken, so on the record a run
+// queued behind the ceiling and a run with an agent inside it look identical —
+// which is why a night that reached 17 concurrent agents against a declared 8
+// could not be settled from the ledger at all. Two explanations fitted (queued
+// runs counted as open, or two Dispatchers holding two slots channels) and the
+// chain separated neither.
+//
+// This says both halves: how long the run queued, so queue wait can be told
+// from agent runtime, and which Dispatcher instance let it through, so two
+// ceilings can be told from one.
+func (d *Dispatcher) noteSlot(runID string, wait time.Duration) {
+	_, _ = d.Led.Append(d.processActor(), ledger.KindNoteRecorded, runID, ledger.NoteRecorded{
+		About: "slot:" + runID,
+		Text: fmt.Sprintf("the agent entered a concurrency slot after %s in the queue; this Dispatcher now holds %d of its %d slots",
+			wait.Round(time.Millisecond), d.limit().inFlight(), d.MaxConcurrent()),
+	})
+}
 
 // MaxConcurrent reports the configured ceiling, for the dashboard.
 func (d *Dispatcher) MaxConcurrent() int {
