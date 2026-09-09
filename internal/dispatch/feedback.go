@@ -50,7 +50,12 @@ func (d *Dispatcher) whatWentWrong(itemID string, attempts int) string {
 	if itemID == "" {
 		return ""
 	}
-	props, err := d.Led.Proposals(itemID, true, refusalsShown)
+	// Every refusal on the item, because the count in the sentence is a fact
+	// about the record and the list below it is a display limit. Asking for
+	// refusalsShown and then counting the answer told a run on its sixth
+	// refusal that it had been refused three times: the truncation reported
+	// as the history, and the one figure in the section the run cannot check.
+	props, err := d.Led.Proposals(itemID, true, 0)
 	if err != nil || len(props) == 0 {
 		if attempts > 0 {
 			return fmt.Sprintf(
@@ -58,11 +63,22 @@ func (d *Dispatcher) whatWentWrong(itemID string, attempts int) string {
 		}
 		return ""
 	}
+	refused := len(props)
+	shown := props
+	if len(shown) > refusalsShown {
+		shown = shown[:refusalsShown]
+	}
 	var b strings.Builder
 	b.WriteString("## What already went wrong here\n\n")
-	fmt.Fprintf(&b, "This is attempt %d on this item. It has been refused %s before:\n\n",
-		attempts+1, plural(len(props), "time", "times"))
-	for _, p := range props {
+	fmt.Fprintf(&b, "This is attempt %d on this item. It has been refused %s before",
+		attempts+1, plural(refused, "time", "times"))
+	if len(shown) < refused {
+		// Said plainly, so a shorter list than the count is a stated limit
+		// rather than something for the run to explain to itself.
+		fmt.Fprintf(&b, ", and the most recent %d are below", len(shown))
+	}
+	b.WriteString(":\n\n")
+	for _, p := range shown {
 		fmt.Fprintf(&b, "- %s -> %s was refused: **%s**", p.From, p.To, p.Reason)
 		if strings.TrimSpace(p.Detail) != "" {
 			fmt.Fprintf(&b, " — %s", oneLine(p.Detail, 400))

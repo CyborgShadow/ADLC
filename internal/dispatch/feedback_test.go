@@ -778,3 +778,58 @@ func mustItem(t *testing.T, d *Dispatcher, id string) ledger.Item {
 	}
 	return it
 }
+
+// The count in the sentence is the number of refusals recorded, not the number
+// the section prints.
+//
+// The list is capped at refusalsShown so the newest is not buried under an
+// item's whole history; the sentence above it was counting that capped list. A
+// run on its sixth refusal was told it had been refused three times — the
+// display limit reported as the record, in the one figure of that section the
+// run has no way to check for itself. It reads as an item going wrong less
+// often than it is, which is the opposite of what this section is for.
+func TestARefusalCountIsWhatWasRecordedAndNotWhatIsPrinted(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	d := h.D
+	h.segment(t, "S1", "seg", "Build the thing", 3)
+
+	refuse := func(itemID string, n int) {
+		t.Helper()
+		for i := 0; i < n; i++ {
+			if _, err := d.Led.Append("cli", ledger.KindTransitionRefused, itemID, ledger.TransitionOutcome{
+				ItemID: itemID, RunID: fmt.Sprintf("r-%s-%d", itemID, i),
+				From: "in_progress", To: "ready_for_testing",
+				Reason: "gate_red", Detail: fmt.Sprintf("attempt %d left the gate red", i+1),
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// A bullet per refusal listed; the sentence is above them and carries no
+	// bullet, so this counts the list rather than the whole section.
+	listed := func(s string) int { return strings.Count(s, "was refused:") }
+
+	// Firing case: five recorded, three printed. The sentence names five.
+	h.item(t, "S1-001", "S1", "ui", "in_progress")
+	refuse("S1-001", 5)
+	got := d.whatWentWrong("S1-001", 5)
+	if !strings.Contains(got, "refused 5 times") {
+		t.Errorf("five recorded refusals are reported as something else: %q", got)
+	}
+	if n := listed(got); n != refusalsShown {
+		t.Errorf("listed %d refusals, want the display limit of %d: %q", n, refusalsShown, got)
+	}
+
+	// Clean case: two recorded, two printed, and the sentence still agrees with
+	// the list. Without it the count could be hard-wired to anything larger and
+	// the assertion above would not notice.
+	h.item(t, "S1-002", "S1", "ui", "in_progress")
+	refuse("S1-002", 2)
+	untruncated := d.whatWentWrong("S1-002", 2)
+	if !strings.Contains(untruncated, "refused 2 times") {
+		t.Errorf("two recorded refusals are reported as something else: %q", untruncated)
+	}
+	if n := listed(untruncated); n != 2 {
+		t.Errorf("listed %d refusals of the 2 recorded: %q", n, untruncated)
+	}
+}
