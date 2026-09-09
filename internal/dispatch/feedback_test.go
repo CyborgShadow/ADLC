@@ -211,3 +211,61 @@ func TestAnsweringThePlanLoopQuestionUnblocksTheDeliverable(t *testing.T) {
 		t.Fatal("answering the question did not release the deliverable; the stop is a dead end")
 	}
 }
+
+// An answered question releases the work it was blocking. Always, whichever
+// kind of question it was.
+//
+// This kept coming back wearing different clothes: a question raised with no
+// text so nobody could read what they were answering, a stop whose counter only
+// climbed so answering could never clear it, and a page that reloaded away the
+// answer as it was typed. Three different defects, one symptom — a question
+// somebody answered and nothing moved.
+//
+// So the invariant is asserted directly, on both kinds of block there are: an
+// item held by its own blocking question, and a deliverable held by the
+// plan-loop stop. If either can be answered and still not dispatch, this fails.
+func TestAnAnsweredQuestionAlwaysReleasesTheWork(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "ready")
+
+	// The fixture has to be dispatchable BEFORE the question, or the first
+	// assertion below passes for the wrong reason and the test proves nothing.
+	if base, err := d.Candidates(Filter{}); err != nil || len(base) == 0 {
+		t.Fatalf("the item is not dispatchable even with no question; this test would pass vacuously (err %v)", err)
+	}
+
+	if _, err := d.Led.Append("cli", ledger.KindQuestionRaised, "Q-block", ledger.QuestionRaised{
+		ID: "Q-block", ItemID: "S1-001", Blocking: true, Text: "which way?", RaisedBy: "r-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cands, err := d.Candidates(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("an item with an unanswered blocking question was dispatched anyway: %+v", ids(cands))
+	}
+
+	if _, err := d.Led.Append("brandon", ledger.KindQuestionAnswered, "Q-block", ledger.QuestionAnswered{
+		ID: "Q-block", Answer: "go left", AnsweredBy: "brandon",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := d.Candidates(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) == 0 {
+		t.Fatal("the question was answered and the item still cannot be picked up")
+	}
+
+	// And the answer has to reach the lanes without waiting for a timer, or
+	// "resumed" means "resumed in a few minutes".
+	if !wakesLanes(ledger.KindQuestionAnswered) {
+		t.Error("answering a question does not wake the lanes, so work resumes on a timer instead")
+	}
+}
