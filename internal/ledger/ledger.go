@@ -95,8 +95,9 @@ var KnownKinds = map[Kind]bool{
 // this one, so the strings are repeated rather than imported. Every other
 // roadmap state arrives here as a recorded segment.advanced event.
 const (
-	segTheory = "theory"
-	segReady  = "ready"
+	segTheory  = "theory"
+	segRoadmap = "roadmap"
+	segReady   = "ready"
 )
 
 // SegmentCreated registers a build segment.
@@ -673,9 +674,22 @@ func apply(tx *sql.Tx, ev Event) error {
 		if err := dec(&p); err != nil {
 			return err
 		}
-		// A deliverable with a brief enters the planning pipeline as a theory:
-		// it gets accepted onto the roadmap, signed off by a person, researched,
-		// decomposed and validated before any of it is built.
+		// A deliverable with a brief enters the pipeline already ON the roadmap,
+		// waiting for the sign-off that starts spending.
+		//
+		// It used to enter as a theory, one state earlier, so creating one asked
+		// a person for two decisions back to back — "is this worth carrying?"
+		// then "should the fleet start spending on this?" — with nothing running
+		// between them and nothing new to read. The two states are behaviourally
+		// identical: neither dispatches, neither opens for work, and the only
+		// code that ever told them apart was the label on the page. Writing the
+		// brief and creating the deliverable IS saying it is worth carrying; a
+		// second click that says the same thing teaches people to click without
+		// reading, and the click after that is the one that spends money.
+		//
+		// segTheory is kept because older ledgers hold segments in it, and
+		// NeedsPerson reports it so one is never stranded silently. Nothing
+		// enters it any more.
 		//
 		// A deliverable with NO brief was filled in by hand. There is no agent
 		// breakdown to research, decompose or review, and nothing to wait for —
@@ -683,7 +697,7 @@ func apply(tx *sql.Tx, ev Event) error {
 		// planning pass nobody is going to run. So it opens for work directly.
 		state := string(segReady)
 		if strings.TrimSpace(p.Brief) != "" {
-			state = string(segTheory)
+			state = string(segRoadmap)
 		}
 		_, err := tx.Exec(`INSERT INTO adlc_segment(id,title,brief,rationale,state,rank,target_open,depends_on,created_seq,updated_seq)
 			VALUES(?,?,?,?,?,?,?,?,?,?)`, p.ID, p.Title, p.Brief, p.Rationale, state, p.Rank,

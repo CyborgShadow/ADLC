@@ -96,7 +96,9 @@ func (s SegmentState) OpenForWork() bool {
 // Two gates, not one: the intent at SegRoadmap, and the approach at
 // SegResearched. They are different decisions and the second is the expensive
 // one — see the note on SegResearched for what it cost to have only the first.
-func (s SegmentState) NeedsPerson() bool { return s == SegRoadmap || s == SegResearched }
+func (s SegmentState) NeedsPerson() bool {
+	return s == SegTheory || s == SegRoadmap || s == SegResearched
+}
 
 // SegmentCapabilityFor says which capability moves a deliverable out of a
 // state. An empty capability means it waits on a person, or on its own items.

@@ -11,33 +11,31 @@ import (
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
-// TestSigningOffWalksTheTwoStepsAPersonOwns covers the one planning gate no
-// machine passes. The fixture's deliverable has a brief, so it starts as a
-// theory and stays there until somebody presses the button.
-func TestSigningOffWalksTheTwoStepsAPersonOwns(t *testing.T) {
+// Signing off the intent is ONE decision, and it is asked once.
+//
+// It used to be two: a deliverable was created as a theory, and somebody
+// pressed "is this worth carrying?" and then "should the fleet start spending
+// on this?" back to back, with nothing running between them and nothing new to
+// read. The two states are behaviourally identical — neither dispatches,
+// neither opens for work, and the only code that ever told them apart was the
+// label on the page. Writing the brief IS saying it is worth carrying. The
+// second click taught people to click without reading, and the click after it
+// is the one that spends money.
+func TestSigningOffTheIntentIsAskedOnceNotTwice(t *testing.T) {
 	s := newServer(t)
 	seg, err := s.Led.Segment("S1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seg.State != "theory" {
-		t.Fatalf("a deliverable with a brief starts as a theory, got %s", seg.State)
+	if seg.State != "roadmap" {
+		t.Fatalf("a deliverable with a brief is created on the roadmap, waiting for the one gate — got %s", seg.State)
 	}
 
 	code, loc := post(t, s, "/signoff", url.Values{
-		"id": {"S1"}, "to": {"roadmap"}, "who": {"brandon"}, "why": {"support cost is worth it"},
+		"id": {"S1"}, "to": {"signed_off"}, "who": {"brandon"}, "why": {"support cost is worth it"},
 	})
 	if code != http.StatusSeeOther || strings.Contains(loc, "bad=1") {
-		t.Fatalf("accepting onto the roadmap should be allowed: %d %s", code, loc)
-	}
-	if seg, _ := s.Led.Segment("S1"); seg.State != "roadmap" {
-		t.Fatalf("want roadmap, got %s", seg.State)
-	}
-
-	if _, loc := post(t, s, "/signoff", url.Values{
-		"id": {"S1"}, "to": {"signed_off"}, "who": {"brandon"},
-	}); strings.Contains(loc, "bad=1") {
-		t.Fatalf("signing off should be allowed from the roadmap: %s", loc)
+		t.Fatalf("signing off should be allowed straight from the roadmap: %d %s", code, loc)
 	}
 	if seg, _ := s.Led.Segment("S1"); seg.State != "signed_off" {
 		t.Fatalf("want signed_off, got %s", seg.State)
@@ -61,7 +59,7 @@ func TestTheSignOffControlIsNotAShortcutPastTheRestOfPlanning(t *testing.T) {
 			t.Errorf("%q must be refused; only the two steps a person owns are here", to)
 		}
 	}
-	if seg, _ := s.Led.Segment("S1"); seg.State != "theory" {
+	if seg, _ := s.Led.Segment("S1"); seg.State != "roadmap" {
 		t.Fatalf("nothing should have moved, got %s", seg.State)
 	}
 }
@@ -70,14 +68,14 @@ func TestTheSignOffControlIsNotAShortcutPastTheRestOfPlanning(t *testing.T) {
 // people on the same dashboard is the ordinary case, not the exotic one.
 func TestSigningOffSomethingThatMovedIsRefusedWithWhere(t *testing.T) {
 	s := newServer(t)
-	if _, loc := post(t, s, "/signoff", url.Values{"id": {"S1"}, "to": {"roadmap"}}); strings.Contains(loc, "bad=1") {
+	if _, loc := post(t, s, "/signoff", url.Values{"id": {"S1"}, "to": {"signed_off"}}); strings.Contains(loc, "bad=1") {
 		t.Fatal("the first move should be allowed")
 	}
 	_, loc := post(t, s, "/signoff", url.Values{"id": {"S1"}, "to": {"roadmap"}})
 	if !strings.Contains(loc, "bad=1") {
-		t.Fatal("moving it onto the roadmap twice must be refused")
+		t.Fatal("signing off twice must be refused")
 	}
-	if !strings.Contains(loc, "roadmap") {
+	if !strings.Contains(loc, "signed_off") {
 		t.Errorf("the refusal should say where it actually is: %s", loc)
 	}
 }

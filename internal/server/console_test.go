@@ -144,7 +144,7 @@ func TestAuthorityDecidesWhatRunsAndWhatWaits(t *testing.T) {
 	}
 	gate := map[string]any{
 		"kind": "sign_off", "summary": "Sign off S9",
-		"args": map[string]string{"segment": "S9", "to": "roadmap"},
+		"args": map[string]string{"segment": "S9", "to": "signed_off"},
 	}
 
 	for _, tc := range []struct {
@@ -177,9 +177,9 @@ func TestAuthorityDecidesWhatRunsAndWhatWaits(t *testing.T) {
 				if err != nil {
 					t.Fatalf("an executed action must have had its effect: %v", err)
 				}
-				want := "theory"
+				want := "roadmap"
 				if tc.wantGate == ledger.ActionExecuted {
-					want = "roadmap"
+					want = "signed_off"
 				}
 				if seg.State != want {
 					t.Errorf("S9 is %s, want %s", seg.State, want)
@@ -199,7 +199,7 @@ func TestAPersonPressingAGateClearsItInTheirName(t *testing.T) {
 		{"kind": "create_deliverable", "summary": "Add S9",
 			"args": map[string]string{"id": "S9", "title": "Patch", "brief": "hosts patch themselves"}},
 		{"kind": "sign_off", "summary": "Put S9 on the roadmap",
-			"args": map[string]string{"segment": "S9", "to": "roadmap"}},
+			"args": map[string]string{"segment": "S9", "to": "signed_off"}},
 	}}
 	s := consoleServer(t, config.ConsoleAct, agent)
 	turns := askAndWait(t, s, "set up the patching work")
@@ -215,7 +215,7 @@ func TestAPersonPressingAGateClearsItInTheirName(t *testing.T) {
 		t.Fatalf("a person pressing the control should be allowed: %s", loc)
 	}
 	seg, err := s.Led.Segment("S9")
-	if err != nil || seg.State != "roadmap" {
+	if err != nil || seg.State != "signed_off" {
 		t.Fatalf("the gate should have been cleared, got %+v %v", seg, err)
 	}
 	// Recorded against the person, not the console. An approval an agent
@@ -239,7 +239,7 @@ func TestTheRecordTellsTheAgentApartFromThePerson(t *testing.T) {
 		{"kind": "note", "summary": "Record what I found",
 			"args": map[string]string{"subject": "S1", "text": "nothing is in flight"}},
 		{"kind": "sign_off", "summary": "Put S1 on the roadmap",
-			"args": map[string]string{"segment": "S1", "to": "roadmap"}},
+			"args": map[string]string{"segment": "S1", "to": "signed_off"}},
 	}}
 	s := consoleServer(t, config.ConsoleAct, agent)
 	turns := askAndWait(t, s, "have a look and tell me what you see")
@@ -280,7 +280,7 @@ func TestTheRecordTellsTheAgentApartFromThePerson(t *testing.T) {
 func TestDecliningAnActionRecordsThatToo(t *testing.T) {
 	agent := &stubAgent{reply: "here is one", actions: []map[string]any{
 		{"kind": "sign_off", "summary": "Sign off S1",
-			"args": map[string]string{"segment": "S1", "to": "roadmap"}},
+			"args": map[string]string{"segment": "S1", "to": "signed_off"}},
 	}}
 	s := consoleServer(t, config.ConsoleAct, agent)
 	turns := askAndWait(t, s, "should we start S1?")
@@ -296,7 +296,7 @@ func TestDecliningAnActionRecordsThatToo(t *testing.T) {
 	if got.Outcome != ledger.ActionDeclined {
 		t.Fatalf("a declined action must be recorded as declined, got %s", got.Outcome)
 	}
-	if seg, _ := s.Led.Segment("S1"); seg.State == "roadmap" {
+	if seg, _ := s.Led.Segment("S1"); seg.State == "signed_off" {
 		t.Error("declining must not have had the effect anyway")
 	}
 	// And it cannot be pressed afterwards by a stale page.

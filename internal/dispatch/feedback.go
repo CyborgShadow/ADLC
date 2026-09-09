@@ -612,8 +612,9 @@ const selfImprovementSegmentID = "SELF"
 // selfImprovementSegment returns the deliverable an improver's proposals are
 // filed under, creating it on the roadmap the first time.
 //
-// It is created at `roadmap` deliberately, which is the state that waits for a
-// person. Items can be filed into it, are visible on every surface, and are
+// It lands on the roadmap because it carries a brief, and a deliverable with a
+// brief is created there — the state that waits for a person. Items can be
+// filed into it, are visible on every surface, and are
 // skipped by Candidates for a stated reason until somebody signs it off — the
 // same gate every other idea passes, applied to the one source of work nobody
 // asked for. The alternative the fleet ran on was that an improver's proposal

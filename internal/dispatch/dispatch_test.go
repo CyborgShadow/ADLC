@@ -165,11 +165,11 @@ func (h *harness) segmentAt(t *testing.T, id, title, brief string, target int, s
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if state == "" || state == "theory" {
+	if state == "" || state == "roadmap" {
 		return
 	}
 	if _, err := h.Led.Append("t", ledger.KindSegmentAdvanced, id, ledger.SegmentAdvanced{
-		SegmentID: id, From: "theory", To: state, Why: "seeded by the test",
+		SegmentID: id, From: "roadmap", To: state, Why: "seeded by the test",
 	}); err != nil {
 		t.Fatal(err)
 	}

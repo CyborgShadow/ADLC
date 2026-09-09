@@ -18,3 +18,12 @@
 # was taken and recorded (docs/decisions-overnight.md, S1-022-Q1); the one line
 # it needed never landed.
 .adlc-prompt.md
+
+# The product a test run builds. This repository is the control plane; a
+# deliverable it was pointed at to prove the pipeline is not part of it, and a
+# cat website in the history of a control plane is residue nobody can explain
+# later. Note the consequence: with this ignored, a builder's `git add -A` stages
+# nothing for a site item, so the merge queue sees an empty branch. If a run has
+# to LAND its deliverable, this line comes out and the exclusion moves to the
+# push instead.
+site/
