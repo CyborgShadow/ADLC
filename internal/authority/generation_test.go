@@ -26,7 +26,7 @@ func good() envelope.ProposedItem {
 		Radius:    string(config.RadiusNone),
 		FileScope: []string{"site/cats/index.html"},
 		Criteria: []string{
-			"AC-1 [exit_zero] go run ./cmd/sitecheck -dir site/cats",
+			"AC-1 [exit_zero] npx html-validate public/index.html",
 			"the page reads well to somebody who has never seen it",
 		},
 	}
@@ -80,7 +80,7 @@ func TestOneExecutableCriterionIsEnough(t *testing.T) {
 	p := good()
 	p.Criteria = []string{
 		"the page is readable on a phone",
-		"AC-2 [output_nonempty] go run ./cmd/sitecheck -dir site/cats",
+		"AC-2 [output_nonempty] npx html-validate public/index.html",
 		"the tone matches the rest of the site",
 	}
 	if d := AdmitItem(genCfg(t), p, genFacts()); !d.Admitted {
@@ -89,12 +89,13 @@ func TestOneExecutableCriterionIsEnough(t *testing.T) {
 }
 
 // TestACriterionThatCannotBeInvokedIsRefusedAndOneThatMerelyFailsIsNot is the
-// distinction cmd/sitecheck states in its exit codes, applied at admission. A
+// distinction a well-behaved checker states in its exit codes, applied at
+// admission. A
 // criterion that runs and fails says something true about work that does not
 // exist yet. One that cannot start says nothing, ever.
 func TestACriterionThatCannotBeInvokedIsRefusedAndOneThatMerelyFailsIsNot(t *testing.T) {
 	firing := map[string]string{
-		"a shell pipeline":                      "AC-1 [exit_zero] go run ./cmd/sitecheck -dir site/cats | grep ok",
+		"a shell pipeline":                      "AC-1 [exit_zero] npx html-validate public/index.html | grep ok",
 		"a shell conjunction":                   "AC-1 [exit_zero] go build ./... && go test ./...",
 		"a redirection":                         "AC-1 [output_empty] gofmt -l ./internal > /tmp/out",
 		"a shell builtin":                       "AC-1 [exit_zero] cd site/cats",
@@ -119,7 +120,7 @@ func TestACriterionThatCannotBeInvokedIsRefusedAndOneThatMerelyFailsIsNot(t *tes
 	// exit non-zero today because the work is not built, and plain prose, are
 	// both fine. Refusing either would make the guard useless.
 	clean := map[string]string{
-		"an assertion that fails today":     "AC-1 [exit_zero] go run ./cmd/sitecheck -dir site/cats",
+		"an assertion that fails today":     "AC-1 [exit_zero] npx html-validate public/index.html",
 		"a command that does not exist yet": "AC-1 [exit_zero] go run ./cmd/adlc prompt assemble narrator",
 		"a pattern rule with a pattern":     "AC-1 [output_matches: sources] go run ./cmd/adlc config check",
 		"prose that mentions a bracket":     "the alt text is written as [subject, setting]",

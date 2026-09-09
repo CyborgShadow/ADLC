@@ -203,6 +203,12 @@ padding:12px 15px;margin-bottom:8px;display:grid;grid-template-columns:150px 1fr
 .chain .step .who{font-weight:600}
 .chain .step .who small{display:block;color:var(--dim);font-weight:400;margin-top:2px}
 .decide{margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+/* The approach at its own gate. Scrolls rather than truncates: a decision made
+   on a summary of the thing being decided is the decision this gate exists to
+   stop being made on nothing. */
+.approach{margin:10px 0;border:1px solid var(--line);border-radius:4px;padding:8px 10px}
+.approach summary{cursor:pointer;font-weight:600}
+.approach pre{max-height:26em;overflow:auto;white-space:pre-wrap;margin-top:8px}
 .decide .ask{margin-bottom:7px;color:var(--dim);font-size:13px}
 .decide .ask b{display:block;color:var(--ink);font-size:14px;margin-bottom:2px}
 .tabs{display:flex;gap:4px;margin-bottom:12px}

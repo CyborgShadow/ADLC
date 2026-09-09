@@ -1,10 +1,14 @@
 package server
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // TestSigningOffWalksTheTwoStepsAPersonOwns covers the one planning gate no
@@ -75,5 +79,89 @@ func TestSigningOffSomethingThatMovedIsRefusedWithWhere(t *testing.T) {
 	}
 	if !strings.Contains(loc, "roadmap") {
 		t.Errorf("the refusal should say where it actually is: %s", loc)
+	}
+}
+
+// The approach gate has to show the approach.
+//
+// It asks "is this approach worth what it will cost?", and it was shipped
+// rendering the question and nothing else — the researcher's write-up lives in
+// its envelope and the page never read it. An operator was asked to weigh a
+// decision they had not been shown, which is worse than having no gate at all:
+// a gate nobody can answer gets clicked through, and one that gets clicked
+// through has stopped catching anything. It was caught the first time the gate
+// was ever used, by the person being asked.
+func TestTheApproachGateShowsTheApproachItIsAskingAbout(t *testing.T) {
+	s := newServer(t)
+	for _, to := range []string{"roadmap", "signed_off"} {
+		post(t, s, "/signoff", url.Values{
+			"id": {"S1"}, "to": {to}, "who": {"brandon"}, "why": {"worth it"},
+		})
+	}
+	// A researcher's run, with its approach in the envelope exactly as one
+	// arrives from a real dispatch.
+	approach := "# S1 approach\n\nOption B: build a checker first. It touches internal/ and cmd/."
+	seedResearch(t, s, "S1", approach)
+	advanceSegment(t, s, "S1", "signed_off", "researched")
+
+	_, body := get(t, s, "/roadmap")
+	if !strings.Contains(body, "Is this approach worth what it will cost?") {
+		t.Fatal("the approach gate must ask its question")
+	}
+	if !strings.Contains(body, "Option B: build a checker first") {
+		t.Error("the gate asks about an approach it does not show; an operator cannot answer it, so they will click through it")
+	}
+
+	// The clean case: before there is an approach to show, the gate must not
+	// render an empty box implying the researcher said nothing.
+	s2 := newServer(t)
+	_, early := get(t, s2, "/roadmap")
+	if strings.Contains(early, "The approach you are being asked about") {
+		t.Error("a deliverable with no research yet must not show an empty approach block")
+	}
+}
+
+// seedResearch records a researcher's run with its approach in the envelope,
+// the way a real dispatch leaves one: the blob is the evidence and the run row
+// points at it.
+func seedResearch(t *testing.T, s *Server, segID, approach string) {
+	t.Helper()
+	env := fmt.Sprintf(`{"envelope_version":"1","run_id":"r-1","worker_type":"researcher",
+		"verdict":"pass","summary":"an approach","commands_run":[],
+		"outputs":{"notes_md":%s},"usage":{"input_tokens":1,"output_tokens":1}}`,
+		mustJSON(t, approach))
+	sha, err := s.Led.PutBlob(ledger.BlobEnvelope, []byte(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Led.Append("pm", ledger.KindRunStarted, "r-1", ledger.RunStarted{
+		RunID: "r-1", WorkerType: "researcher", SegmentID: segID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Led.Append("pm", ledger.KindRunFinished, "r-1", ledger.RunFinished{
+		RunID: "r-1", Verdict: "pass", EnvelopeSHA: sha,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustJSON(t *testing.T, s string) string {
+	t.Helper()
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// advanceSegment moves a deliverable the way the control plane does, so a test
+// about a gate starts at the gate.
+func advanceSegment(t *testing.T, s *Server, id, from, to string) {
+	t.Helper()
+	if _, err := s.Led.Append("pm", ledger.KindSegmentAdvanced, id, ledger.SegmentAdvanced{
+		SegmentID: id, From: from, To: to, Why: "seeded by the test",
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

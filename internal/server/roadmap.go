@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/CyborgShadow/ADLC/internal/authority"
+	"github.com/CyborgShadow/ADLC/internal/envelope"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
@@ -66,8 +67,16 @@ type roadmapRow struct {
 	DeclineVerb string
 	AskLabel    string
 	AskWhy      string
-	WhyHint     string
-	Parked      bool
+	// Approach is the researcher's own write-up, shown at the approach gate.
+	//
+	// Without it the gate asks "is this approach worth what it will cost?" over
+	// a page carrying nothing but the question. The operator is then asked to
+	// judge a decision they have not been shown — which is worse than no gate,
+	// because a gate nobody can answer gets clicked through, and one that gets
+	// clicked through is one that stops catching anything.
+	Approach string
+	WhyHint  string
+	Parked   bool
 }
 
 func (s *Server) roadmap(*http.Request) (string, any, error) {
@@ -97,6 +106,9 @@ func (s *Server) roadmap(*http.Request) (string, any, error) {
 		items := bySeg[sg.ID]
 		r := roadmapRow{Segment: sg, Progress: authority.Progress(items), Stage: sg.State}
 		r.explain()
+		if authority.SegmentState(sg.State) == authority.SegApproachAgreed || authority.SegmentState(sg.State) == authority.SegResearched {
+			r.Approach = s.approachFor(sg.ID)
+		}
 		r.fill(items, byItem, byID)
 		rows = append(rows, r)
 	}
@@ -388,3 +400,38 @@ type depLine struct {
 
 // Indent is the width the template uses, so the arithmetic is not in the HTML.
 func (d depLine) Indent() int { return d.Depth * 18 }
+
+// approachFor is the researcher's written approach for a deliverable, so the
+// gate that asks whether it is worth its cost can show what it is asking about.
+//
+// Read from the run record rather than held anywhere: the approach IS the
+// researcher's envelope, and a second copy on a page would be a second answer to
+// a question the chain already answers.
+func (s *Server) approachFor(segmentID string) string {
+	runs, err := s.Led.Runs("", 200)
+	if err != nil {
+		return ""
+	}
+	// Newest first: a deliverable sent back for more research has more than one.
+	sort.SliceStable(runs, func(i, j int) bool { return runs[i].StartedMS > runs[j].StartedMS })
+	for _, r := range runs {
+		if r.SegmentID != segmentID || r.WorkerType == "" || r.Verdict != "pass" {
+			continue
+		}
+		if !s.Led.HasBlob(r.EnvelopeSHA) {
+			continue
+		}
+		raw, berr := s.Led.Blob(r.EnvelopeSHA)
+		if berr != nil {
+			continue
+		}
+		env, perr := envelope.Parse(raw)
+		if perr != nil {
+			continue
+		}
+		if notes := strings.TrimSpace(env.Outputs.Notes); notes != "" {
+			return notes
+		}
+	}
+	return ""
+}

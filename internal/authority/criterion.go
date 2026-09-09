@@ -141,7 +141,8 @@ const shellOnly = "|&;<>`"
 // criterionFault names why a criterion that was WRITTEN as a check cannot be
 // run as one, or returns "" when it can be — or when it is honest prose.
 //
-// The distinction it draws is the one cmd/sitecheck states in its exit codes: 1
+// The distinction it draws is the one a well-behaved checker states in its exit
+// codes: 1
 // is a rule that fired, 2 is an invocation that was wrong, and a caller that
 // cannot tell them apart treats its own typo as a failing site and fixes the
 // site. Here the same split decides what may be admitted. A criterion whose

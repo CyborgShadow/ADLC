@@ -92,6 +92,7 @@ nothing under it is dispatched until it passes.</div>
 
   {{if .NeedsYou}}<div class="decide">
     <div class="ask"><b>{{.AskLabel}}</b> {{.AskWhy}}</div>
+    {{if .Approach}}<details class="approach" open><summary>The approach you are being asked about</summary><pre>{{.Approach}}</pre></details>{{end}}
     <form method="post" action="/signoff">
       <input type="hidden" name="id" value="{{.ID}}">
       <input type="hidden" name="to" value="{{.SignTo}}">
