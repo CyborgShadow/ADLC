@@ -101,6 +101,43 @@ func TestAnUnstampedBuildNeverReadsAsAgreeingWithThisOne(t *testing.T) {
 	}
 }
 
+// TestTheRecordedRevisionIsReadFromTheBinaryRatherThanNamedInCode closes the gap
+// every other test here leaves open: they all inject a revision through
+// SetRevision, so a BuildRevision that returned a constant satisfies all of
+// them. Replacing its body with a hard-coded sha leaves this package, story and
+// cmd/adlc green without it.
+//
+// That is the worst failure this whole change can have. A build that says
+// "unknown" is useless; a build that names a revision it never read stamps a
+// false attribution on every row it appends, and nothing downstream — replay,
+// the events surface, verify — can tell that apart from the truth.
+//
+// The limit, stated rather than papered over: a test binary carries no vcs
+// stamp, so `want` here is RevisionUnknown, and a BuildRevision hard-coded to
+// RevisionUnknown would still pass. That is the harmless direction — a build
+// that admits it does not know. The dangerous one, a named revision nobody
+// read, is what this fires on, and the stamped build is checked outside the
+// suite by running a `go build` binary, which prints its own sha.
+func TestTheRecordedRevisionIsReadFromTheBinaryRatherThanNamedInCode(t *testing.T) {
+	// The firing case: the recorded revision is whatever this binary's own build
+	// info says, and is not decided anywhere else.
+	want := revisionOf(debug.ReadBuildInfo())
+	if got := BuildRevision(); got != want {
+		t.Errorf("BuildRevision must be this binary's build info (%q), got %q — a revision named in code is a false attribution", want, got)
+	}
+	if BuildRevision() == "" {
+		t.Error("BuildRevision must never be blank; an absence is recorded as RevisionUnknown")
+	}
+	// The clean case, so the assertion above cannot pass the day the reader
+	// itself starts answering the same thing to everything: handed build info
+	// that carries a stamp, it still returns the stamp.
+	if got := revisionOf(&debug.BuildInfo{Settings: []debug.BuildSetting{
+		{Key: "vcs.revision", Value: "0f1e2d3c4b5a69788796a5b4c3d2e1f000112233"},
+	}}, true); got != "0f1e2d3c4b5a69788796a5b4c3d2e1f000112233" {
+		t.Errorf("the reader under test must still read a stamped revision, got %q", got)
+	}
+}
+
 // TestALedgerFromBeforeRevisionsReadsUnknownNotTampered is the compatibility
 // property, and it is the reason the revision is not part of the hash preimage.
 //
