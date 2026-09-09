@@ -181,10 +181,12 @@ type Report struct {
 	UnmeasuredRun   string
 }
 
-// Complete reports whether the totals are the whole story. A false here is the
-// difference between "the fleet has spent this" and "the fleet has spent at
-// least this".
-func (r Report) Complete() bool { return r.Unmeasured == 0 && r.Unpriced == 0 }
+// There is deliberately no Complete() predicate here. The two counts are the
+// whole answer, and the surfaces that print money need to know WHICH of them
+// is non-zero — nobody counted the tokens, or nobody knows the rate — because
+// the two carry different notes. A summary predicate would have neither a
+// caller nor a test, and would drift out of agreement with the counts it
+// claims to summarise.
 
 // Summarise totals recorded spend and counts the runs nobody could price or
 // nobody measured.

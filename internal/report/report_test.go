@@ -98,14 +98,26 @@ func TestAnUnpricedRunIsReportedAsUnknownNotFolded(t *testing.T) {
 	}
 }
 
-// unmeasuredFixture records one worker with two finished runs in the same
-// segment: one that reported its tokens, and one that reported none at all.
-// Both surfaces have to tell the two apart.
+// unmeasuredFixture records two workers in the same segment. `performer` has
+// one run that reported its tokens and one that reported none, so its cost is
+// partly known; `recorder` measured nothing at all, so its cost cell has no
+// measured figure to fall back on and is the cell that printed $0.00. Both
+// surfaces have to tell all three cases apart.
+//
+// `recorder` is recorded first, so the newest unmeasured run — the one the
+// UNMEASURED line names — is still p-2.
 func unmeasuredFixture(t *testing.T) (*ledger.Ledger, *config.Config) {
 	t.Helper()
 	l, cfg := fixture(t)
 	add(t, l, ledger.KindWorkerRegistered, "performer", ledger.WorkerRegistered{Type: "performer"})
+	add(t, l, ledger.KindWorkerRegistered, "recorder", ledger.WorkerRegistered{Type: "recorder"})
 	add(t, l, ledger.KindSegmentCreated, "S1", ledger.SegmentCreated{ID: "S1", Title: "First"})
+	for _, id := range []string{"r-1", "r-2"} {
+		add(t, l, ledger.KindRunStarted, id, ledger.RunStarted{
+			RunID: id, WorkerType: "recorder", SegmentID: "S1", Model: "claude-sonnet-4-5"})
+		add(t, l, ledger.KindRunFinished, id, ledger.RunFinished{
+			RunID: id, Verdict: "pass", Model: "claude-sonnet-4-5"})
+	}
 	add(t, l, ledger.KindRunStarted, "p-1", ledger.RunStarted{
 		RunID: "p-1", WorkerType: "performer", SegmentID: "S1", Model: "claude-sonnet-4-5"})
 	add(t, l, ledger.KindRunFinished, "p-1", ledger.RunFinished{
@@ -146,6 +158,27 @@ func TestAnUnmeasuredRunRendersAsUnknownNotZero(t *testing.T) {
 		// in the cost column as though it were the whole cost.
 		if !strings.Contains(out, "$3.00") {
 			t.Errorf("the %s report should still show what it could measure:\n%s", name, out)
+		}
+
+		// The cost CELL, not the prose beneath it. A caveat line elsewhere on the
+		// page does not stop the column being read, and the column is where the
+		// $0.00 this item exists to remove was printed — so the assertion has to
+		// name the row or it passes on the strength of the explanation.
+		unmeasured := workerRow(t, out, "recorder")
+		if !strings.Contains(unmeasured, "UNKNOWN") {
+			t.Errorf("the %s report's cost cell for a worker that measured nothing must read UNKNOWN:\n%s", name, unmeasured)
+		}
+		if strings.Contains(unmeasured, "$0.00") {
+			t.Errorf("the %s report prices a worker that measured nothing at $0.00, which is the defect:\n%s", name, unmeasured)
+		}
+		// Partly measured is still unknown: the cell must not quote the part that
+		// was counted as though it were the whole.
+		partly := workerRow(t, out, "performer")
+		if !strings.Contains(partly, "UNKNOWN") {
+			t.Errorf("the %s report's cost cell for a partly measured worker must read UNKNOWN:\n%s", name, partly)
+		}
+		if strings.Contains(partly, "$3.00") {
+			t.Errorf("the %s report puts the measured part in the cost cell as if it were the cost:\n%s", name, partly)
 		}
 	}
 
@@ -189,10 +222,68 @@ func TestAFullyMeasuredFleetIsNotLabelledIncomplete(t *testing.T) {
 		if !strings.Contains(out, "$3.00") {
 			t.Errorf("the %s report should show the measured cost:\n%s", name, out)
 		}
+		// The clean case for the cost cell itself: a measured worker gets its
+		// money back, not the UNKNOWN a guard that fired on everything would give
+		// it. A guard with only a firing case passes the day it flags the lot.
+		row := workerRow(t, out, "performer")
+		if !strings.Contains(row, "$3.00") || strings.Contains(row, "UNKNOWN") {
+			t.Errorf("the %s report's cost cell for a fully measured worker must be the money:\n%s", name, row)
+		}
 	}
 	if !strings.Contains(fleet, "spend (total)   $3.00\n") {
 		t.Errorf("a complete total carries no caveat:\n%s", fleet)
 	}
+}
+
+// TestTheDayFigureIsNotLabelledIncompleteOverAnOlderRun pins the window on the
+// 24-hour caveat. The same unmeasured runs sit outside it here, so the day
+// figure genuinely covers everything it claims to and must not be qualified,
+// while the total — which does include them — must be.
+func TestTheDayFigureIsNotLabelledIncompleteOverAnOlderRun(t *testing.T) {
+	l, cfg := unmeasuredFixture(t)
+
+	// Two days on: every recorded run started before the window opens.
+	fleet, err := Fleet(l, cfg, at.Add(48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := reportLine(t, fleet, "spend (24h)")
+	if strings.Contains(day, "INCOMPLETE") {
+		t.Errorf("the 24h figure is qualified by runs it never included:\n%s", day)
+	}
+	total := reportLine(t, fleet, "spend (total)")
+	if !strings.Contains(total, "INCOMPLETE") {
+		t.Errorf("the total does include them and must say so:\n%s", total)
+	}
+}
+
+// workerRow returns one worker's row from the activity table: the line whose
+// first field is its name. The caveat lines below a row carry an empty name
+// column, so this cannot pick one of those up by mistake — which matters,
+// because a substring search over the whole report is satisfied by the prose
+// and says nothing about the column.
+func workerRow(t *testing.T, out, worker string) string {
+	t.Helper()
+	for _, ln := range strings.Split(out, "\n") {
+		if f := strings.Fields(ln); len(f) > 0 && f[0] == worker {
+			return ln
+		}
+	}
+	t.Fatalf("no activity row for %s in:\n%s", worker, out)
+	return ""
+}
+
+// reportLine returns the one line carrying a label, so an assertion about the
+// day figure cannot be satisfied by the total printed underneath it.
+func reportLine(t *testing.T, out, label string) string {
+	t.Helper()
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.Contains(ln, label) {
+			return ln
+		}
+	}
+	t.Fatalf("no %q line in:\n%s", label, out)
+	return ""
 }
 
 func TestAnUnsetCapReportsAsUnlimited(t *testing.T) {
