@@ -873,10 +873,10 @@ func pricedBudget() config.Budget {
 
 // TestARunNobodyMeasuredIsUnknownNotFree is the firing case.
 //
-// An envelope with no usage block parses to four zeros, and pricing those at
-// the going rate produced a confident $0.00 — which the per-run cap then
-// cleared, every time, for exactly the runs whose cost nobody could bound. The
-// cap was therefore never reached however many of them there were.
+// Pricing an unmeasured envelope at the going rate produced a confident $0.00,
+// which the per-run cap then cleared, every time, for exactly the runs whose
+// cost nobody could bound — so the cap was never reached however many of them
+// there were. ledger.Usage.Measured is where four zeros are told from a count.
 func TestARunNobodyMeasuredIsUnknownNotFree(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)

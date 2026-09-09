@@ -1011,18 +1011,16 @@ func (d *Dispatcher) runGate(ctx context.Context, dir string, from, to authority
 // runCost prices one finished run for the two surfaces that read the figure,
 // which need opposite things from a run nobody measured.
 //
-// An envelope with no `usage` block parses to four zeros, and so would a run
-// that consumed nothing — but no model run consumes nothing, so only a caller
-// holding the block can tell an absent count from a counted one. spend.CostOf
-// is where that distinction is made at the pricing boundary; this is the
-// dispatcher handing it what it alone knows.
+// Only a caller holding the usage block can tell an absent count from a counted
+// one — ledger.Usage.Measured says why four zeros are not a count — and
+// spend.CostOf is where that distinction is made at the pricing boundary. This
+// is the dispatcher handing it what it alone knows.
 //
 // recorded goes in the ledger's cost column, which is read back and summed as
 // money, so an unmeasured run records zero there and is counted as unmeasured
 // from its usage block instead — a sentinel in that column would be totalled.
 // forCap goes to the per-run cap, which must not clear a run whose cost nobody
-// can bound: comparing a silent zero against the cap clears precisely the runs
-// the cap exists to catch, and that is how a cap comes never to be reached.
+// can bound; spend.Unknown carries what clearing one costs.
 //
 // unpriced is the model question alone, and is false for an unmeasured run
 // because nothing was priced there. Reporting it true would print "no price
