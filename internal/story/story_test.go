@@ -44,7 +44,21 @@ const envJSON = `{"envelope_version":"1","run_id":"p-1","worker_type":"performer
 "commands_run":[{"check_id":"test","cmd":"go version","exit_code":0}],"outputs":{},
 "usage":{"input_tokens":1000,"output_tokens":200}}`
 
+// seedRun writes a whole run: the rows leading up to the decision, then the row
+// that records the decision itself.
+//
+// The two halves are separable because they are not necessarily the work of the
+// same build. A fixture that stamps every row alike cannot tell a replay that
+// reads the deciding row from one that reads any other row on the chain, which
+// is how a replay naming the wrong build ships green.
 func seedRun(t *testing.T, l *ledger.Ledger) string {
+	t.Helper()
+	sha := seedRunUpToDecision(t, l)
+	seedDecision(t, l)
+	return sha
+}
+
+func seedRunUpToDecision(t *testing.T, l *ledger.Ledger) string {
 	t.Helper()
 	add(t, l, ledger.KindSegmentCreated, "S1", ledger.SegmentCreated{
 		ID: "S1", Title: "Password reset", Brief: "Users recover access unaided.",
@@ -74,11 +88,16 @@ func seedRun(t *testing.T, l *ledger.Ledger) string {
 		RunID: "p-1", Verdict: "pass", EnvelopeSHA: sha, HeadSHA: "abc123abc123",
 		CostMicros: 1_500_000, Usage: ledger.Usage{InputTokens: 1000, OutputTokens: 200},
 	})
+	return sha
+}
+
+// seedDecision appends the one row a replay re-derives.
+func seedDecision(t *testing.T, l *ledger.Ledger) {
+	t.Helper()
 	add(t, l, ledger.KindTransitionAdmitted, "S1-001", ledger.TransitionOutcome{
 		RunID: "p-1", ItemID: "S1-001", Worker: "performer",
 		From: "in_progress", To: "ready_for_testing",
 	})
-	return sha
 }
 
 // TestARunExplainsWhatItDidAndWhyItMattered pins the chain a person asks for
@@ -262,17 +281,36 @@ func TestReplayOfAGeneratorReRunsTheAdmissionRules(t *testing.T) {
 	}
 }
 
+// claimsAMatch is the affirmative half of buildNote, and the only phrase that
+// asserts two builds ARE one. Matching on the bare words "same build" would
+// also match the refusal that says it CANNOT claim they are the same build, so
+// a test looking for that would read the refusal as the claim.
+const claimsAMatch = "the same build that decided it"
+
 // TestReplayNamesBothBuildsAndDoesNotConflateThem is the attribution property.
 // A replay that disagrees has two possible causes — the rules moved or the
 // record did — and the first one is a difference between two builds. Naming
 // neither leaves the reader with a mystery instead of a lead.
 func TestReplayNamesBothBuildsAndDoesNotConflateThem(t *testing.T) {
 	l, cfg := fixture(t)
-	// A build this test can name, so the assertion holds whether or not the test
-	// binary itself was stamped.
+	// Three builds this test can name, so the assertions hold whether or not the
+	// test binary itself was stamped — and so that "the deciding build" is a
+	// different answer from "the first row" and from "the newest row". With one
+	// revision on every row, reading the wrong row gives the right answer by
+	// accident and the guard proves nothing.
+	const earlier = "aaaabbbbccccddddeeeeffff0000111122223344"
 	const decided = "0f1e2d3c4b5a69788796a5b4c3d2e1f000112233"
+	const later = "99887766554433221100ffeeddccbbaa99887766"
+	l.SetRevision(earlier)
+	seedRunUpToDecision(t, l)
 	l.SetRevision(decided)
-	seedRun(t, l)
+	seedDecision(t, l)
+	// A row appended afterwards by a third build, so that reading the head of
+	// the chain instead of the decision is wrong too.
+	l.SetRevision(later)
+	add(t, l, ledger.KindNoteRecorded, "S1-001", ledger.NoteRecorded{
+		Text: "appended after the decision by a later build",
+	})
 
 	rp, err := Rederive(context.Background(), l, cfg, t.TempDir(), "p-1", at.Add(time.Hour))
 	if err != nil {
@@ -284,9 +322,9 @@ func TestReplayNamesBothBuildsAndDoesNotConflateThem(t *testing.T) {
 	if rp.ReplayedBy != ledger.BuildRevision() {
 		t.Errorf("the replay should name the build re-deriving, got %q", rp.ReplayedBy)
 	}
-	if rp.SameBuild {
-		t.Errorf("these are not the same build (%s vs %s) and the replay must not say they are",
-			rp.DecidedBy, rp.ReplayedBy)
+	if strings.Contains(rp.BuildNote, claimsAMatch) {
+		t.Errorf("these are not the same build (%s vs %s) and the note must not say they are: %q",
+			rp.DecidedBy, rp.ReplayedBy, rp.BuildNote)
 	}
 	if !strings.Contains(rp.BuildNote, ledger.ShortRevision(decided)) {
 		t.Errorf("the note should name the deciding build: %q", rp.BuildNote)
@@ -307,8 +345,8 @@ func TestAReplayWithNothingToStampSaysSoRatherThanClaimingAMatch(t *testing.T) {
 	if rp.DecidedBy != ledger.RevisionUnknown {
 		t.Errorf("an unstamped build should read %q, got %q", ledger.RevisionUnknown, rp.DecidedBy)
 	}
-	if rp.SameBuild {
-		t.Error("an unstamped build must never render as agreeing with this one")
+	if strings.Contains(rp.BuildNote, claimsAMatch) {
+		t.Errorf("an unstamped build must never render as agreeing with this one: %q", rp.BuildNote)
 	}
 	if !strings.Contains(rp.BuildNote, "cannot claim") {
 		t.Errorf("the note must say why it cannot compare them: %q", rp.BuildNote)
@@ -320,12 +358,18 @@ func TestAReplayWithNothingToStampSaysSoRatherThanClaimingAMatch(t *testing.T) {
 // passing by refusing everything.
 func TestTheBuildNoteOnlyClaimsAMatchWhenThereIsOne(t *testing.T) {
 	same := buildNote("abc123abc123", "abc123abc123")
-	if !strings.Contains(same, "same build") {
+	if !strings.Contains(same, claimsAMatch) {
 		t.Errorf("two identical known builds are the same build: %q", same)
 	}
 	differ := buildNote("abc123abc123", "def456def456")
-	if strings.Contains(differ, "same build") {
+	if strings.Contains(differ, claimsAMatch) {
 		t.Errorf("two different builds must not read as one: %q", differ)
+	}
+	// The refusal branch too, because its wording contains the words "same
+	// build" and a looser match would read that refusal as the claim.
+	unknown := buildNote(ledger.RevisionUnknown, "def456def456")
+	if strings.Contains(unknown, claimsAMatch) {
+		t.Errorf("an unidentified build must not read as a match: %q", unknown)
 	}
 	if !strings.Contains(differ, "abc123abc123") || !strings.Contains(differ, "def456def456") {
 		t.Errorf("both builds should be named: %q", differ)

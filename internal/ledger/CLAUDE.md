@@ -65,3 +65,10 @@ off it, a build with no VCS stamp records `unknown` and never matches anything, 
 ledger — the pre-`build_rev` table shape — opens, migrates, reads as `UNKNOWN` and verifies `INTACT`
 with all its v1 hashes still correct. The schema stamp moves forward on migration and is never
 lowered.
+
+That last property is pinned by a **hard-coded digest**, not by `HashEvent`. Every other hash in
+these tests is computed by the function under test, so a change to the preimage moves the
+expectation with it and nothing goes red — including the one change this package forbids. The
+constant in `TestALedgerFromBeforeRevisionsReadsUnknownNotTampered` is the only thing that fails
+when the preimage moves. If you have to change it, you are also changing every chain any earlier
+binary ever wrote from readable to `TAMPERED`.

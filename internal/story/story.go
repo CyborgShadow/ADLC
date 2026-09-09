@@ -273,10 +273,10 @@ type Replay struct {
 	// mystery rather than a lead.
 	DecidedBy  string
 	ReplayedBy string
-	// SameBuild is true only when both revisions are known AND equal. An
-	// unstamped build is never reported as agreeing with this one.
-	SameBuild bool
-	// BuildNote says in a sentence what the two revisions mean for this replay.
+	// BuildNote says in a sentence what the two revisions mean for this replay,
+	// and it is the only answer to that question. There is deliberately no
+	// boolean beside it: a second way to ask whether the builds match is a
+	// second thing that can drift from the sentence people actually read.
 	BuildNote string
 }
 
@@ -309,7 +309,6 @@ func nameBuilds(l *ledger.Ledger, s *Run, rp *Replay) {
 		}
 	}
 	rp.ReplayedBy = ledger.BuildRevision()
-	rp.SameBuild = ledger.SameBuild(rp.DecidedBy, rp.ReplayedBy)
 	rp.BuildNote = buildNote(rp.DecidedBy, rp.ReplayedBy)
 }
 

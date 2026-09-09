@@ -142,6 +142,17 @@ CREATE TABLE adlc_head (
 		t.Fatal(err)
 	}
 	hash := HashEvent(GenesisHash, 1, ts, KindNoteRecorded, "pm", "", payload)
+	// The preimage, pinned by a value rather than by the function that computes
+	// it. Every other hash in these tests is produced by the HashEvent under
+	// test, so any change to the preimage moves the expectation with it and
+	// nothing goes red — including the change this whole file exists to forbid,
+	// folding build_rev in. This constant was computed once from the v1
+	// arithmetic. If it stops matching, the preimage moved, and every chain any
+	// earlier binary ever wrote has just become unreadable to this one.
+	const v1Digest = "8592af6221b9fd153c6ae66aef277e52e43e62f8262602bb6639ffd5de64b161"
+	if hash != v1Digest {
+		t.Fatalf("the event hash preimage moved: want %s, got %s — every existing chain now reads as TAMPERED", v1Digest, hash)
+	}
 	if _, err := old.Exec(
 		`INSERT INTO adlc_event(seq,ts_ms,kind,actor,subject,payload,prev_hash,hash) VALUES(1,?,?,?,'',?,?,?)`,
 		ts, string(KindNoteRecorded), "pm", string(payload), GenesisHash, hash); err != nil {
