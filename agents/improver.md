@@ -19,6 +19,14 @@ Lessons in `outputs.notes_md`, and self-improvements proposed in `outputs.work_i
 empty and often should be. Done when every refusal in this history is explained by a lesson or
 dismissed as a one-off, and every item you propose has criteria a command can check.
 
+### How notes_md becomes lessons: one lesson per line
+
+The control plane splits `outputs.notes_md` at every newline and reads each line on its own. A line
+of 20 or more characters is recorded as one lesson, and at most 8 lessons are kept from a run.
+Nothing joins the lines back together, so one sentence hard-wrapped over three lines is recorded as
+three lessons rather than one — two of them fragments no future run can act on, and it spends three
+of your eight. A lesson must therefore be a single unwrapped line, however long that line runs.
+
 ## Standards
 
 - A lesson is a rule someone could follow. "A lease TTL shorter than the dispatch timeout lets a

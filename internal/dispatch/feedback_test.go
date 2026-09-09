@@ -74,6 +74,59 @@ func TestALessonReachesTheNextRunOfThatRole(t *testing.T) {
 	}
 }
 
+// notes_md is split at every newline, and nothing joins the lines back up.
+//
+// The improver's prompt now says so, and this is what it says. An improver that
+// hard-wraps one sentence over three lines does not record that sentence: it
+// records three lessons, two of them fragments, and spends three of the eight a
+// run is allowed. The prompt is only worth writing if the splitter still works
+// this way, so pin both halves of it.
+func TestNotesAreSplitPerLineAndNotPerSentence(t *testing.T) {
+	c := Candidate{Worker: "improver", Item: ledger.Item{
+		ID: "S1-001", SegmentID: "S1", Area: "ui",
+	}}
+	// Each call gets its own ledger, so a count is the lessons this notes_md
+	// earned rather than the total of everything the test has recorded so far.
+	lessons := func(runID, notes string) []ledger.Lesson {
+		t.Helper()
+		d := newHarness(t, nil, nil).D
+		d.recordLessons(runID, c, &envelope.Envelope{
+			Outputs: envelope.Outputs{Notes: notes},
+		})
+		got, err := d.Led.Lessons("improver", "ui", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	// Firing case: one sentence, hard-wrapped. Each line clears the 20-character
+	// floor on its own, so all three are recorded and none of them is the rule.
+	wrapped := lessons("r-wrapped",
+		"A lease TTL shorter than the dispatch timeout lets a\n"+
+			"second run take an item that the first one is still\n"+
+			"holding, so the two of them collide over its tree.")
+	if len(wrapped) != 3 {
+		t.Fatalf("a sentence wrapped over three lines should record three lessons, got %d: %+v", len(wrapped), wrapped)
+	}
+	for _, l := range wrapped {
+		if strings.Contains(l.Lesson, "\n") {
+			t.Errorf("a recorded lesson carries a newline, so the split did not happen: %q", l.Lesson)
+		}
+	}
+
+	// Clean case: three lessons, one line each, recorded as three. Without it
+	// the assertion above passes just as well the day the splitter starts
+	// cutting somewhere else entirely.
+	unwrapped := lessons("r-unwrapped",
+		"A lease TTL shorter than the dispatch timeout lets a second run take a held item.\n"+
+			"A cached test PASS reports on an earlier tree, so CI has to run with -count=1.\n"+
+			"An envelope claiming exit 0 where the gate saw exit 1 is refused as a discrepancy.")
+	if len(unwrapped) != 3 {
+		t.Fatalf("three single-line lessons should record exactly three, got %d: %+v", len(unwrapped), unwrapped)
+	}
+}
+
 // Plan and validate could pass a rejection back and forth forever. An item has
 // max_attempts; a deliverable had nothing.
 func TestAPlanThatKeepsBeingRejectedStopsAndAsks(t *testing.T) {
