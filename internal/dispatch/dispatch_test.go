@@ -957,3 +957,231 @@ func TestAMeasuredRunUnderTheCapIsStillAdmitted(t *testing.T) {
 		t.Errorf("a run under the cap was refused: %v", h.Logs)
 	}
 }
+
+// --- a verification task clears on the gate's answer -----------------------
+
+// verifyEnvelope is a verification run's report claiming a pass and nothing
+// else of interest, so a test about what clears a task is not also a test about
+// criteria, findings or generated items.
+func verifyEnvelope(worker, itemID string) string {
+	env := map[string]any{
+		"envelope_version": "1",
+		"run_id":           "{{run_id}}",
+		"worker_type":      worker,
+		"work_item_id":     itemID,
+		"verdict":          "pass",
+		"summary":          "ran the suite and it passed",
+		"commands_run":     []any{},
+		"usage":            map[string]any{"input_tokens": 10, "output_tokens": 5},
+	}
+	b, _ := json.Marshal(env)
+	return string(b)
+}
+
+// edgeCheck declares one check over the verification self-edge, and decides
+// what the gate will observe there. `go version` is the command either way: it
+// exits 0 and prints a line, so under exit_zero the gate sees GREEN, and under
+// output_empty — the rule `gofmt -l` is read with, where the output is the
+// verdict — the same command is RED. One binary, present wherever these tests
+// run, and no dependence on a command that fails for reasons of its own.
+func (h *harness) edgeCheck(rule config.VerdictRule) {
+	h.Cfg.Checks = []config.Check{{
+		ID: "noop", Kind: config.KindSource, Command: []string{"go", "version"},
+		Verdict: rule, RequiredFor: []string{"verifying->verifying"},
+	}}
+}
+
+// verificationEvents is every verification.passed recorded against an item, so
+// a test can count them rather than only ask whether one exists:
+// VerificationsFor answers with a map, and a map cannot tell one append from
+// three.
+func verificationEvents(t *testing.T, h *harness, itemID string) []ledger.Event {
+	t.Helper()
+	evs, err := h.Led.EventsOfKind([]ledger.Kind{ledger.KindVerificationPassed}, itemID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evs
+}
+
+// TestAVerificationTaskTheGateRefusedClearsNothing is the firing case.
+//
+// The task was cleared from the envelope's verdict alone, before the gate had
+// run the checks and before the authority had decided anything. A tester
+// claiming a pass over a tree whose checks the gate then observed RED was
+// refused — recorded, with the reason, in the same chain — and the stage
+// counted its task as cleared regardless. A refusal is evidence the claim was
+// wrong; a task cleared by one is not verified at all.
+func TestAVerificationTaskTheGateRefusedClearsNothing(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	h.edgeCheck(config.VerdictOutputEmpty) // the gate will observe RED here
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Dispatched {
+		t.Fatalf("the test task was not dispatched: %s", res.Idle)
+	}
+	if res.Admitted {
+		t.Fatalf("a claim the gate contradicted was admitted: %+v", res)
+	}
+	if res.Reason != "gate_failed" {
+		t.Errorf("refused as %q, want gate_failed — the checks were run here and came back RED", res.Reason)
+	}
+
+	passed, err := h.Led.VerificationsFor("S1-001", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if passed[config.CapTest] {
+		t.Fatal("a refused run cleared its verification task: the stage counts a claim the gate itself contradicted")
+	}
+	if len(passed) != 0 {
+		t.Fatalf("the stage cleared %v on a refused run", passed)
+	}
+	if n := len(verificationEvents(t, h, "S1-001")); n != 0 {
+		t.Fatalf("%d verification.passed recorded for a refused run", n)
+	}
+}
+
+// TestAVerificationTaskTheGateConfirmsClearsExactlyOnce is the clean case:
+// without it the test above passes on the day nothing clears a task at all and
+// no item ever completes the stage.
+func TestAVerificationTaskTheGateConfirmsClearsExactlyOnce(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	h.edgeCheck(config.VerdictExitZero) // the gate will observe GREEN here
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Dispatched {
+		t.Fatalf("the test task was not dispatched: %s", res.Idle)
+	}
+	if !res.Admitted {
+		t.Fatalf("a claim the gate confirmed was refused as %s: %s", res.Reason, res.Detail)
+	}
+
+	passed, err := h.Led.VerificationsFor("S1-001", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !passed[config.CapTest] {
+		t.Fatalf("the confirmed task did not clear; the stage holds %v", passed)
+	}
+	if n := len(verificationEvents(t, h, "S1-001")); n != 1 {
+		t.Fatalf("%d verification.passed recorded for one cleared task, want exactly 1", n)
+	}
+
+	// A cleared task moves nothing on its own: two of the three are still
+	// outstanding, and the item leaves when Refresh sees them all cleared.
+	it, err := h.Led.Item("S1-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.State != string(authority.StateVerifying) {
+		t.Errorf("one cleared task moved the item to %s", it.State)
+	}
+}
+
+// reviewedMoves counts the recorded transitions out of verification for an
+// item, which is the move a stage cleared on unearned claims would make.
+func reviewedMoves(t *testing.T, h *harness, itemID string) int {
+	t.Helper()
+	evs, err := h.Led.EventsOfKind([]ledger.Kind{ledger.KindItemTransitioned}, itemID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range evs {
+		var p ledger.ItemTransitioned
+		if json.Unmarshal(e.Payload, &p) != nil {
+			continue
+		}
+		if p.To == string(authority.StateReviewed) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestAStageDoesNotLeaveVerificationOnARefusedClaim is what the two tests
+// above are for, asserted where the defect was actually paid out.
+//
+// Two tasks genuinely cleared and the third run's claim refused by the gate:
+// the stage is two of three, so the item stays where it is. Cleared from the
+// claim, it left verification as reviewed with a third of its verification
+// never performed — and the refusal saying so sits in the same chain, two
+// lines above the move.
+func TestAStageDoesNotLeaveVerificationOnARefusedClaim(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	for _, cap := range []string{config.CapJudge, config.CapValidate} {
+		if _, err := h.Led.Append("t", ledger.KindVerificationPassed, "S1-001",
+			ledger.VerificationPassed{ItemID: "S1-001", Capability: cap,
+				RunID: "r-" + cap, Round: 0}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	h.edgeCheck(config.VerdictOutputEmpty) // the third run's gate observes RED
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Admitted {
+		t.Fatalf("the third claim was admitted over a RED gate: %+v", res)
+	}
+
+	if _, err := h.D.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	it, err := h.Led.Item("S1-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.State != string(authority.StateVerifying) {
+		t.Fatalf("the item left verification as %s on two passes and a refusal", it.State)
+	}
+	if n := reviewedMoves(t, h, "S1-001"); n != 0 {
+		t.Fatalf("%d transition(s) to reviewed recorded while a task was still outstanding", n)
+	}
+
+	// The clean case for the same arithmetic: once the third task genuinely
+	// clears, the stage completes and the item moves. Without it the assertion
+	// above passes on the day nothing ever leaves verification.
+	h.edgeCheck(config.VerdictExitZero)
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+	res, err = h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Admitted {
+		t.Fatalf("the third task was refused over a GREEN gate as %s: %s", res.Reason, res.Detail)
+	}
+	if _, err := h.D.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	it, err = h.Led.Item("S1-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.State != string(authority.StateReviewed) {
+		t.Fatalf("every task cleared and the item is still %s", it.State)
+	}
+	if n := reviewedMoves(t, h, "S1-001"); n != 1 {
+		t.Fatalf("%d transitions to reviewed for one completed stage", n)
+	}
+}

@@ -721,33 +721,26 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 
 	// The tool decides where the item goes. The agent reported a verdict; it was
 	// never asked to name a state, so it cannot name a wrong one.
-	// A verification task that passed clears its own task and moves nothing.
-	// The stage is left when every task has REPORTED, and that is computed from
-	// the record by Refresh rather than proposed by whichever run finished last
-	// — so three runs racing to report cannot advance an item between them.
-	if c.From == authority.StateVerifying && authority.IsVerification(c.Capability) {
-		switch env.Verdict {
-		case "pass":
-			if _, err := d.Led.Append(d.Actor, ledger.KindVerificationPassed, c.Item.ID,
-				ledger.VerificationPassed{
-					ItemID: c.Item.ID, Capability: c.Capability, RunID: runID,
-					Worker: c.Worker, Round: c.Item.Attempts,
-				}); err != nil {
-				return res, true, err
-			}
-			d.log("VERIFIED %s  %s cleared by %s", c.Item.ID, c.Capability, c.Worker)
-		case "fail", "reject":
-			if _, err := d.Led.Append(d.Actor, ledger.KindVerificationFailed, c.Item.ID,
-				ledger.VerificationFailed{
-					ItemID: c.Item.ID, Capability: c.Capability, RunID: runID,
-					Worker: c.Worker, Round: c.Item.Attempts,
-					Detail: oneLine(env.Summary, 300),
-				}); err != nil {
-				return res, true, err
-			}
-			d.log("NOT VERIFIED %s  %s failed under %s; the item waits for its siblings to report",
-				c.Item.ID, c.Capability, c.Worker)
+	//
+	// A verification task that did NOT clear is recorded here, on the claim,
+	// because a report of failure grants the item nothing. It can only hold the
+	// stage back, and the stage has to settle with everything it observed even
+	// when the transition off the back of that report is itself refused — a
+	// failure the gate never got to confirm still has to reach the builder. A
+	// claimed pass is the opposite: it clears a task, so it is recorded below,
+	// after the gate has run the checks and the authority has admitted the edge.
+	if c.From == authority.StateVerifying && authority.IsVerification(c.Capability) &&
+		(env.Verdict == "fail" || env.Verdict == "reject") {
+		if _, err := d.Led.Append(d.Actor, ledger.KindVerificationFailed, c.Item.ID,
+			ledger.VerificationFailed{
+				ItemID: c.Item.ID, Capability: c.Capability, RunID: runID,
+				Worker: c.Worker, Round: c.Item.Attempts,
+				Detail: oneLine(env.Summary, 300),
+			}); err != nil {
+			return res, true, err
 		}
+		d.log("NOT VERIFIED %s  %s failed under %s; the item waits for its siblings to report",
+			c.Item.ID, c.Capability, c.Worker)
 	}
 	adv := authority.NextState(c.From, c.Capability, env.Verdict,
 		config.Radius(c.Item.Radius), d.Cfg.Blast)
@@ -788,6 +781,31 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	}
 	if err := d.admit(runID, c, to, env, adv.Why); err != nil {
 		return res, true, err
+	}
+
+	// A verification task clears on the admitted self-edge and moves nothing.
+	// The stage is left when every task has cleared, which Refresh computes from
+	// the record rather than taking from whichever run finished last — so three
+	// runs racing to report cannot advance an item between them.
+	//
+	// It is recorded here, after the decision, because it was once recorded from
+	// env.Verdict alone: before the gate ran and before the authority decided
+	// anything. A tester whose envelope claimed a pass over a tree whose checks
+	// the gate then observed RED had its task marked cleared anyway — the run was
+	// refused, in the same chain, and the stage counted it regardless. Three of
+	// those clear the whole stage, and the item leaves verification on nothing
+	// but three claims. A refusal is evidence the claim was wrong; a task cleared
+	// by one is not verified at all.
+	if c.From == authority.StateVerifying && to == authority.StateVerifying &&
+		authority.IsVerification(c.Capability) {
+		if _, err := d.Led.Append(d.Actor, ledger.KindVerificationPassed, c.Item.ID,
+			ledger.VerificationPassed{
+				ItemID: c.Item.ID, Capability: c.Capability, RunID: runID,
+				Worker: c.Worker, Round: c.Item.Attempts,
+			}); err != nil {
+			return res, true, err
+		}
+		d.log("VERIFIED %s  %s cleared by %s", c.Item.ID, c.Capability, c.Worker)
 	}
 	d.log("ADVANCED %s  %s -> %s  (%s)", c.Item.ID, c.From, to, adv.Why)
 	return res, true, d.advanceSegment(c.Item.SegmentID, runID, "", "", 0)
