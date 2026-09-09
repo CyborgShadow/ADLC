@@ -296,15 +296,20 @@ func (a *Authority) check(r Requirement, req Request, f Facts, edge *Edge) Decis
 		if req.Env == nil {
 			return refuse(ReasonNoEnvelope, "no envelope, so no findings")
 		}
-		b := req.Env.Blockers()
+		// Read through GroundsForRejection, not Blockers: the question a
+		// rejection has to answer is whether it cited a substantive defect, and
+		// "major" is one. Asking for "blocker" exactly discarded six real
+		// rejections on a spelling.
+		b := req.Env.GroundsForRejection()
 		if len(b) == 0 {
 			return refuse(ReasonMissingEvidence, fmt.Sprintf(
-				"%s needs at least one blocker-severity finding; rejecting on taste alone is not a rejection", req.To))
+				"%s needs at least one finding weighted blocker or major; %d finding(s) here are minor or note, and rejecting on taste alone is not a rejection",
+				req.To, len(req.Env.Outputs.Findings)))
 		}
 		for i, x := range b {
 			if strings.TrimSpace(x.Location) == "" || strings.TrimSpace(x.Required) == "" {
 				return refuse(ReasonMissingEvidence, fmt.Sprintf(
-					"blocker finding %d cites no location or names no required change; a blocker that does not say what would clear it cannot be worked", i))
+					"%s finding %d cites no location or names no required change; a defect that does not say what would clear it cannot be worked", x.Severity, i))
 			}
 		}
 

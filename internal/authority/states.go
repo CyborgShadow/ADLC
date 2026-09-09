@@ -157,8 +157,12 @@ const (
 	ReqVerdictPass Requirement = "verdict_pass"
 	// ReqNoBlockerFindings: no blocker-severity finding is open.
 	ReqNoBlockerFindings Requirement = "no_blocker_findings"
-	// ReqBlockerFinding: at least one blocker, with a location and the
-	// smallest change that would clear it.
+	// ReqBlockerFinding: at least one finding weighted blocker or major, with
+	// a location and the smallest change that would clear it. Major counts
+	// because the question here is whether a substantive defect was cited, and
+	// most reviewers spell one "major", "medium" or "warning"; minor and note
+	// are the two weights that are taste. envelope.GroundsForRejection has the
+	// full argument.
 	ReqBlockerFinding Requirement = "blocker_finding"
 	// ReqBlockingQuestion: a blocking question or a declared environment
 	// failure.

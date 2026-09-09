@@ -220,7 +220,7 @@ func TestReplayOfAGeneratorReRunsTheAdmissionRules(t *testing.T) {
 	gen := `{"envelope_version":"1","run_id":"g-1","worker_type":"planner","verdict":"pass",
 	"commands_run":[],"outputs":{"work_items":[
 	  {"id":"S1-001","title":"Good one","area":"core","blast_radius":"none",
-	   "criteria":["a command can check this one"]},
+	   "criteria":["AC-1 [exit_zero] go build ./..."]},
 	  {"id":"S1-002","title":"No criteria","area":"core","blast_radius":"none","criteria":[]}
 	]},"usage":{"input_tokens":10,"output_tokens":5}}`
 
@@ -243,7 +243,7 @@ func TestReplayOfAGeneratorReRunsTheAdmissionRules(t *testing.T) {
 	})
 	add(t, l, ledger.KindItemCreated, "S1-001", ledger.ItemCreated{
 		ID: "S1-001", SegmentID: "S1", Title: "Good one", Area: "core", Radius: "none",
-		Criteria: []string{"a command can check this one"},
+		Criteria: []string{"AC-1 [exit_zero] go build ./..."},
 	})
 	add(t, l, ledger.KindItemProposed, "S1-002", ledger.ItemProposed{
 		RunID: "g-1", SegmentID: "S1", ProposedID: "S1-002", Admitted: false,

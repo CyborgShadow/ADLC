@@ -28,6 +28,20 @@ will name the half you missed.
 `reject`, `blocked`. If a change makes the next state depend on anything an agent wrote free-form,
 replay stops working and the whole re-derivability property goes with it.
 
+**A declared edge nothing routes to.** `Table()` and `NextState` are two halves of one statement,
+and the table cannot tell you the half is missing. `verifying -> rejected` was declared, documented,
+and reachable by nobody: every setback took the verification self-edge instead, whose validator form
+requires `ReqVerdictPass`, so the one role permitted to stop a change had its rejections refused as
+malformed proposals. When you add an edge, add the `NextState` case that reaches it AND a test that
+asserts the authority admits it — routing to an edge whose requirements then refuse the run is the
+same defect wearing a different refusal.
+
+**Two lists of the same vocabulary.** A finding's severity is read on the pass side and on the
+reject side, and while the reject side counted `blocker` only, every rejection weighted `major` —
+which is how `shapes.go` reads `medium`, `moderate` and `warning` — was refused as taste. The two
+sides ask different questions and may draw different lines, but each line is defined once, in
+`envelope`, and read from there.
+
 **Ordering the checks by convenience.** `Decide` answers identity questions first — does this edge
 exist, may this proposer propose it, is the item actually in the state the proposal claims. A run
 working from a stale read must be told that, not told its evidence is thin.
@@ -47,3 +61,11 @@ merge, every dispatchable state has an edge out, and every state maps onto a sta
 
 Both files also carry whole-table properties — every edge names a proposer, every edge is
 well-formed. Those are what catch a half-added state.
+
+`rejection_test.go` pins the two halves of a rejection: that a validator's `reject` reaches
+`verifying -> rejected` and is admitted there, that a `fail` from anyone still holds the stage for
+its siblings, and that the severity a rejection cites is read on the reject side as blocker **or**
+major while only a blocker contradicts a pass. `generation_test.go` pins `AdmitItem`: a well-shaped
+item admitted, then one rule broken at a time — prose-only criteria, a criterion that cannot be
+invoked, a file scope outside anything the deliverable touches, a file scope an open item already
+holds — each with the clean case that stops it passing vacuously.

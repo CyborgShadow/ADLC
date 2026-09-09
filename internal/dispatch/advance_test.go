@@ -274,7 +274,8 @@ func TestAnImproversProposalsAreActuallyCreated(t *testing.T) {
 		"commands_run":[],"outputs":{"work_items":[
 		  {"id":"S1-900","title":"Make the refusal message name the failing check",
 		   "area":"ui","blast_radius":"none",
-		   "criteria":["a refused transition names which check was red"]},
+		   "criteria":["AC-1 [exit_zero] go build ./internal/authority/",
+		     "a refused transition names which check was red"]},
 		  {"id":"S1-901","title":"Nice to have","area":"kernel","blast_radius":"none",
 		   "criteria":["the kernel is rewritten"]}
 		]},"usage":{"input_tokens":1,"output_tokens":1}}`

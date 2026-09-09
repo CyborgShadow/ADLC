@@ -76,6 +76,29 @@ func NextState(from State, capability, verdict string, radius config.Radius, pol
 				"this task passed; the item leaves verification when every task in the stage has")
 		}
 		if setback {
+			// A validator's REJECT is the one setback in this stage that moves
+			// the item, and it moves it along the edge declared for exactly
+			// that: verifying -> rejected, proposer validate, ReqBlockerFinding.
+			//
+			// Nothing ever routed to that edge. Every setback took the self-edge
+			// below, and the validator's form of the self-edge requires
+			// ReqVerdictPass — so the only role in the fleet whose job is to
+			// stop a change was structurally incapable of stopping one. Its
+			// rejections came back refused as malformed proposals: six of them,
+			// each a completed adversarial review, spent and discarded. One of
+			// those runs diagnosed this defect in the envelope that was thrown
+			// away for reporting it.
+			//
+			// Only "reject" travels it, and only from the validator. A "fail"
+			// stays on the self-edge for the reason given just below, and a
+			// tester's or a judge's "reject" stays there too — the rejected edge
+			// names the validator as its sole proposer, so routing anybody else
+			// to it would swap this refusal for a wrong-proposer one and change
+			// nothing.
+			if verdict == "reject" && capability == config.CapValidate {
+				return ok(StateRejected,
+					"adversarial review rejected the change, citing at least one blocker")
+			}
 			// A self-edge, exactly like the pass above, and for the same
 			// reason: this run cleared or failed ONE of three independent
 			// questions asked of one commit. Ejecting the item on the first

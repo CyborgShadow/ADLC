@@ -372,7 +372,11 @@ func TestGeneratedItemsAreAdmittedOrRefusedAndBothAreRecorded(t *testing.T) {
 	h.Run.envelope = genEnvelope(
 		map[string]any{ // good
 			"id": "S1-001", "title": "Session cookie is httponly", "area": "auth",
-			"blast_radius": "none", "criteria": []string{"the Set-Cookie header carries HttpOnly and Secure"},
+			"blast_radius": "none", "criteria": []string{
+				// An admissible item carries at least one criterion the control
+				// plane can run itself; prose alongside it is still allowed.
+				"AC-1 [output_matches: HttpOnly] go run ./cmd/adlc config check",
+				"the Set-Cookie header carries HttpOnly and Secure"},
 		},
 		map[string]any{ // no criteria — nobody could ever verify it
 			"id": "S1-002", "title": "Make login nicer", "area": "ui",

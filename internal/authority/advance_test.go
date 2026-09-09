@@ -32,7 +32,18 @@ func TestTheToolDecidesWhereWorkGoes(t *testing.T) {
 		// three things wrong with its work.
 		{"a test fails", StateVerifying, config.CapTest, "fail", config.RadiusNone, StateVerifying},
 		{"a criterion fails", StateVerifying, config.CapJudge, "fail", config.RadiusNone, StateVerifying},
-		{"review rejects", StateVerifying, config.CapValidate, "reject", config.RadiusNone, StateVerifying},
+		// The one setback in the stage that DOES move the item, along the edge
+		// declared for it. Adversarial review is the only role whose job is to
+		// stop a change, and while every setback took the self-edge above it
+		// could not: that edge requires a passing verdict, so a rejection
+		// arrived as a malformed proposal and was refused as one.
+		{"review rejects", StateVerifying, config.CapValidate, "reject", config.RadiusNone, StateRejected},
+		// Clean case for the same rule, twice over: a validator that merely
+		// FAILED has not rejected anything, and a tester's reject is not a
+		// rejection either — the rejected edge names the validator as its sole
+		// proposer. Both hold the stage instead of ejecting it.
+		{"review fails without rejecting", StateVerifying, config.CapValidate, "fail", config.RadiusNone, StateVerifying},
+		{"a tester cannot reject", StateVerifying, config.CapTest, "reject", config.RadiusNone, StateVerifying},
 		{"hygiene pass", StateJanitoring, config.CapCurate, "pass", config.RadiusNone, StateReadyForArbitration},
 		{"the janitor finds something wrong", StateJanitoring, config.CapCurate, "reject", config.RadiusNone, StateInProgress},
 		{"source-only work clears to merge", StateArbitrating, config.CapArbitrate, "pass", config.RadiusNone, StateReadyToMerge},

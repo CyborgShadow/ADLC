@@ -287,11 +287,50 @@ func (e *Envelope) Claim(checkID string) (Command, bool) {
 	return last, found
 }
 
-// Blockers returns the blocker-severity findings.
+// Blockers returns the findings that, by their own weight, stop a change
+// proceeding. Only "blocker" qualifies here, and the word is why: it is the one
+// severity in the vocabulary named for what it DOES rather than for how big it
+// is. A run that files one and reports a pass in the same envelope is
+// contradicting itself, and that is the only thing this half is asked.
+//
+// GroundsForRejection below is the other half of the same vocabulary, and it
+// draws the line in a different place on purpose. See the reasoning there.
 func (e *Envelope) Blockers() []Finding {
 	var out []Finding
 	for _, f := range e.Outputs.Findings {
 		if f.Severity == "blocker" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// GroundsForRejection returns the findings heavy enough to substantiate a
+// rejection: "blocker" and "major".
+//
+// Counting only "blocker" here cost a measured failure. An arbiter rejected a
+// change on one finding it weighted "major", was refused with "rejecting on
+// taste alone is not a rejection", and did it six times — 8m44s and $3.72 of
+// adversarial review each, discarded on a vocabulary mismatch rather than on
+// anything it said. The mismatch is visible in shapes.go: the severity map
+// reads major|medium|moderate|warning as "major", so "medium" and "warning" —
+// how most reviewers spell a real defect — could never reach this at all.
+//
+// The two halves are asymmetric deliberately, because their errors are not
+// symmetric. Refusing a substantiated rejection throws away a whole review AND
+// lets the defect through; refusing a pass over a finding the run itself judged
+// survivable stalls a change everyone agreed was fine. So the reject side asks
+// only whether a substantive defect was cited, and "minor" and "note" are the
+// two severities that are not one — those are taste, and taste is what the
+// refusal message was always meant to catch.
+//
+// This is not the same question as Blockers. A "major" finding alongside a pass
+// verdict is a reviewer noting a real concern and judging the change coherent
+// anyway, which is its job; a "blocker" alongside a pass is a contradiction.
+func (e *Envelope) GroundsForRejection() []Finding {
+	var out []Finding
+	for _, f := range e.Outputs.Findings {
+		if f.Severity == "blocker" || f.Severity == "major" {
 			out = append(out, f)
 		}
 	}
