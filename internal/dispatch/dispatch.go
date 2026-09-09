@@ -622,11 +622,15 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		// A malformed envelope is a refusable proposal, not a dead run.
 		d.finish(runID, "fail", "", "", "", ledger.Usage{}, 0)
 		d.recordRefusal(runID, c, authority.ReasonMalformedEnvelope, err.Error())
+		d.learnFromMalformed(runID, c, err.Error())
 		res.Reason, res.Detail = string(authority.ReasonMalformedEnvelope), err.Error()
 		d.log("MALFORMED %s — %s", runID, err.Error())
 		return res, true, nil
 	}
 
+	for _, n := range env.Normalised() {
+		d.log("RESHAPED %s — %s. The envelope on the chain is still exactly what the agent wrote", runID, n)
+	}
 	usage := ledger.Usage(env.Usage)
 	model := env.Model
 	if model == "" {

@@ -57,7 +57,8 @@ type Envelope struct {
 	// operator instead of queueing behind decisions.
 	EnvironmentFailure string `json:"environment_failure,omitempty"`
 
-	raw []byte
+	raw        []byte
+	normalised []string
 }
 
 // Transition is the state change a worker proposes.
@@ -91,11 +92,11 @@ type Command struct {
 
 // Outputs is the structured result, by worker role.
 type Outputs struct {
-	FilesChanged []string    `json:"files_changed,omitempty"`
-	Criteria     []Criterion `json:"criteria,omitempty"`
-	Findings     []Finding   `json:"findings,omitempty"`
-	Notes        string      `json:"notes_md,omitempty"`
-	Deferred     []string    `json:"deferred,omitempty"`
+	FilesChanged []string     `json:"files_changed,omitempty"`
+	Criteria     criteriaList `json:"criteria,omitempty"`
+	Findings     findingsList `json:"findings,omitempty"`
+	Notes        string       `json:"notes_md,omitempty"`
+	Deferred     []string     `json:"deferred,omitempty"`
 	// WorkItems is what a planning run produces. They are PROPOSALS: the control
 	// plane admits or refuses each one and records both answers. An agent that
 	// could create work items directly would be an agent that could invent its
@@ -185,6 +186,10 @@ func Parse(raw []byte) (*Envelope, error) {
 		return nil, ErrMalformed{Detail: err.Error()}
 	}
 	e.raw = clean
+	// Shape before meaning: an agent that wrote the right facts in a shape the
+	// schema did not declare has still done the work, and refusing it costs a
+	// whole run to punish formatting. normalise re-shapes and never invents.
+	e.normalise()
 	if err := e.validate(); err != nil {
 		return nil, err
 	}

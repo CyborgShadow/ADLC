@@ -481,3 +481,33 @@ func TestAWorkspaceIsBasedOnTheItemsExistingWork(t *testing.T) {
 		t.Fatalf("a later run would start from %q rather than the item's own work", got)
 	}
 }
+
+// A refused envelope teaches the next run of that role.
+//
+// Without this the refusal is recorded and nobody reads it: the next run is a
+// fresh agent that cannot see the ledger's refusals, so it writes the same
+// shape and loses its work the same way. Three runs did exactly that in one
+// night.
+func TestAMalformedEnvelopeTeachesTheNextRun(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	d := h.D
+	c := Candidate{Worker: "validator", Item: ledger.Item{ID: "S1-001", Area: "ui"}}
+
+	if got := d.lessons("validator", "ui"); got != "" {
+		t.Fatalf("nothing has been learned yet, got %q", got)
+	}
+	d.learnFromMalformed("v-1", c, `malformed envelope: outputs.criteria[0].status "met" is not pass|fail|untested`)
+
+	got := d.lessons("validator", "ui")
+	if !strings.Contains(got, "not pass|fail|untested") {
+		t.Errorf("the next validator run should be told what shape was refused, got %q", got)
+	}
+	if !strings.Contains(got, "discarded") {
+		t.Errorf("and what it cost, got %q", got)
+	}
+	// A different role does not inherit it: a tester has no use for a
+	// validator's mistake and every carried line is paid for in every prompt.
+	if other := d.lessons("engineer", "ui"); strings.Contains(other, "not pass|fail|untested") {
+		t.Errorf("a lesson must not leak across roles, got %q", other)
+	}
+}

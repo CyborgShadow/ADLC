@@ -466,3 +466,30 @@ func (d *Dispatcher) learnFromRejection(runID string, c Candidate, env *envelope
 	d.log("LEARNED from %s — the objection is carried into every future %s run, not just the next one on %s",
 		runID, worker, c.Segment.ID)
 }
+
+// learnFromMalformed turns a refused envelope into a lesson the next run of
+// this role is told.
+//
+// A malformed envelope is refused before recordLessons is reached, so before
+// this existed the same shape was written again by the next run — which had no
+// way to see the refusal. Three runs wrote criteria as an object keyed by id
+// over one night, each one throwing away the work it had already done. The
+// parser now accepts the shapes that cost nothing to accept; this is for the
+// ones it must still refuse.
+func (d *Dispatcher) learnFromMalformed(runID string, c Candidate, detail string) {
+	lesson := fmt.Sprintf(
+		"The envelope is a schema, not a suggestion: a %s run was refused for %s and everything it had done was discarded. Write the declared field names and the declared vocabulary.",
+		c.Worker, oneLine(strings.TrimPrefix(detail, "malformed envelope: "), 180))
+	if _, err := d.Led.Append(d.actor(), ledger.KindLessonRecorded,
+		runID+"-LM", ledger.LessonRecorded{
+			RunID: runID, Worker: c.Worker,
+			// Deliberately no area: a lesson carries to any role working the same
+			// area, and this one is about a role's own output format. A tester has
+			// no use for how a validator misspelled a verdict.
+			ItemID: c.Item.ID, SegmentID: c.Item.SegmentID, Lesson: lesson,
+		}); err != nil {
+		d.log("LESSON from %s could not be recorded: %v", runID, err)
+		return
+	}
+	d.log("LEARNED from the refusal of %s — carried into future %s runs", runID, c.Worker)
+}
