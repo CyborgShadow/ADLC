@@ -192,7 +192,7 @@ func pastRun(t *testing.T, d *Dispatcher, runID, itemID, branch string) {
 // it still produces the trunk, which is the defect these tests exist for.
 func workspaceFor(t *testing.T, d *Dispatcher, runID, itemID string) *Workspace {
 	t.Helper()
-	ws, err := d.prepareWorkspace(runID, d.workspaceBase(itemID))
+	ws, err := d.prepareWorkspace(runID, d.workspaceBase(itemID), config.CapImplement)
 	if err != nil {
 		t.Fatalf("prepareWorkspace: %v", err)
 	}
@@ -282,4 +282,44 @@ func TestWorkspaceIsCutFromTheTrunkUnlessThisItemIsAhead(t *testing.T) {
 			t.Errorf("workspace contains S1-999's commit %s: %s", other, out)
 		}
 	})
+}
+
+// Everybody builds the product; the improver judges the system that built it.
+//
+// Once a fleet is pointed at a separate product repository, an agent's tree
+// contains the product and nothing else — which is the point, and is what stops
+// a researcher handed a brief about cats spending its run on a Go control plane
+// because that was what was in front of it.
+//
+// The improver is the one role that must not get that tree. Its job is to read
+// what the fleet just did and ask what about ADLC made it harder than it needed
+// to be: a refusal that did not say what to do, a prompt that pointed the wrong
+// way, a check that failed for an unrelated reason. It cannot answer that from
+// inside a tree that does not contain the thing it is judging, and it would
+// answer it anyway — about the product — which is a lesson recorded against the
+// wrong system.
+func TestOnlyTheImproverWorksInTheControlPlanesOwnTree(t *testing.T) {
+	d := &Dispatcher{
+		Cfg:      &config.Config{Dispatch: config.DispatchPolicy{Isolation: "none"}},
+		Repo:     filepath.FromSlash("/product"),
+		ToolRepo: filepath.FromSlash("/toolchain"),
+	}
+	for _, cap := range []string{
+		config.CapImplement, config.CapJudge, config.CapValidate,
+		config.CapPlan, config.CapResearch, config.CapCurate, config.CapArbitrate,
+	} {
+		if got := d.repoFor(cap); got != d.Repo {
+			t.Errorf("%s worked in %q; every role that builds the product must see the product tree and only that", cap, got)
+		}
+	}
+	if got := d.repoFor(config.CapImprove); got != d.ToolRepo {
+		t.Errorf("the improver worked in %q, want the control plane's own tree — it is judging this system, and cannot read what it is not given", got)
+	}
+
+	// The clean case, and the ordinary one: self-hosting, where there is no
+	// second tree and the improver is not sent anywhere special.
+	self := &Dispatcher{Cfg: d.Cfg, Repo: filepath.FromSlash("/only")}
+	if got := self.repoFor(config.CapImprove); got != self.Repo {
+		t.Errorf("with one tree the improver must use it, got %q", got)
+	}
 }

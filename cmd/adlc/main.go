@@ -38,13 +38,17 @@ const (
 )
 
 type env struct {
-	cfg     *config.Config
-	led     *ledger.Ledger
-	lib     *prompt.Library
-	leases  *lease.Store
-	actor   string
-	repo    string
-	jsonOut bool
+	cfg    *config.Config
+	led    *ledger.Ledger
+	lib    *prompt.Library
+	leases *lease.Store
+	actor  string
+	repo   string
+	// toolRepo is the control plane's own tree. It differs from repo only when
+	// the fleet builds somewhere else, and it exists for the improver, whose
+	// subject is this system rather than the product.
+	toolRepo string
+	jsonOut  bool
 }
 
 var (
@@ -170,7 +174,7 @@ func withEnv(args []string, f func(*env, []string) int) int {
 			return exitUsage
 		}
 	}
-	e := &env{cfg: cfg, led: led, actor: flagActor, repo: buildIn, jsonOut: flagJSON}
+	e := &env{cfg: cfg, led: led, actor: flagActor, repo: buildIn, toolRepo: flagRepo, jsonOut: flagJSON}
 	if e.actor == "" {
 		// An unattributable row on an append-only chain cannot be corrected, only
 		// annotated. Refusing here is cheaper than annotating later.

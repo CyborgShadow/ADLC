@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/CyborgShadow/ADLC/internal/config"
 )
 
 // Workspace is a run's isolated tree.
@@ -37,7 +39,19 @@ func (w *Workspace) Cleanup() {
 // playbooks. "none" runs in the shared checkout and is correct only for a
 // single-lane fleet; it is offered because pretending otherwise would push
 // people into faking a worktree they do not need.
-func (d *Dispatcher) prepareWorkspace(runID, base string) (*Workspace, error) {
+// repoFor is the tree a run works in: the product for every role that builds
+// it, and the control plane itself for the improver, whose subject IS this
+// system. A tree that does not contain the thing being judged cannot be read to
+// judge it.
+func (d *Dispatcher) repoFor(capability string) string {
+	if capability == config.CapImprove && d.ToolRepo != "" {
+		return d.ToolRepo
+	}
+	return d.Repo
+}
+
+func (d *Dispatcher) prepareWorkspace(runID, base, capability string) (*Workspace, error) {
+	repo := d.repoFor(capability)
 	mode := d.Cfg.Dispatch.Isolation
 	if mode == "" {
 		mode = "worktree"
@@ -52,18 +66,18 @@ func (d *Dispatcher) prepareWorkspace(runID, base string) (*Workspace, error) {
 	}
 	dir := strings.ReplaceAll(tmpl, "{{run_id}}", runID)
 	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(d.Repo, dir)
+		dir = filepath.Join(repo, dir)
 	}
 
 	switch mode {
 	case "none":
-		return &Workspace{Dir: d.Repo, EnvelopePath: envelopePath(d.Repo, runID)}, nil
+		return &Workspace{Dir: repo, EnvelopePath: envelopePath(repo, runID)}, nil
 
 	case "copy":
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}
-		if err := copyTree(d.Repo, dir, d.Cfg.SourceRoots); err != nil {
+		if err := copyTree(repo, dir, d.Cfg.SourceRoots); err != nil {
 			return nil, err
 		}
 		return &Workspace{Dir: dir, EnvelopePath: envelopePath(dir, runID),
@@ -83,7 +97,7 @@ func (d *Dispatcher) prepareWorkspace(runID, base string) (*Workspace, error) {
 		if base == "" {
 			base = "HEAD"
 		}
-		if out, err := git(d.Repo, "worktree", "add", "-b", branch, dir, base); err != nil {
+		if out, err := git(repo, "worktree", "add", "-b", branch, dir, base); err != nil {
 			return nil, fmt.Errorf("git worktree add: %v (%s)", err, out)
 		}
 		return &Workspace{
@@ -92,7 +106,7 @@ func (d *Dispatcher) prepareWorkspace(runID, base string) (*Workspace, error) {
 			// unreachable when its workspace is torn down, which leaves a finished item
 			// pointing at code that no longer exists; the branch is what keeps it
 			// reachable and costs nothing.
-			cleanup: func() { git(d.Repo, "worktree", "remove", "--force", dir) },
+			cleanup: func() { git(repo, "worktree", "remove", "--force", dir) },
 		}, nil
 	}
 	return nil, fmt.Errorf("unknown dispatch.isolation %q: want worktree, copy or none", mode)

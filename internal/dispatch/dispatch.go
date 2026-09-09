@@ -110,10 +110,26 @@ type Dispatcher struct {
 	// for whoever is waiting, never an input: see watch.go.
 	Watch  Watcher
 	Runner Runner
-	Repo   string
-	Actor  string
-	Now    func() time.Time
-	Log    func(string)
+	// Repo is the tree the fleet BUILDS in — the product's repository. Every
+	// role works there and sees only the product, which is what stops a
+	// researcher given a brief about cats spending its run on the control
+	// plane's config loader because that was what was in front of it.
+	Repo string
+	// ToolRepo is the control plane's own tree, and the improver is the one
+	// role dispatched into it.
+	//
+	// Everybody else builds the product; the improver's subject is this system.
+	// It reads what the fleet just did and asks what about ADLC made that
+	// harder than it needed to be — a refusal that did not say what to do, a
+	// prompt that pointed the wrong way, a check that failed for an unrelated
+	// reason. It cannot answer that from inside a tree that does not contain
+	// the thing it is judging.
+	//
+	// Empty means the two are the same tree, which is the self-hosting case.
+	ToolRepo string
+	Actor    string
+	Now      func() time.Time
+	Log      func(string)
 
 	// The fleet-wide ceiling on agents running at once, built once from the
 	// config on first use.
@@ -585,7 +601,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	if c.Kind == KindItem {
 		base = d.workspaceBase(c.Item.ID)
 	}
-	ws, err := d.prepareWorkspace(runID, base)
+	ws, err := d.prepareWorkspace(runID, base, c.Capability)
 	if err != nil {
 		return TickResult{}, false, fmt.Errorf("isolate %s: %w", runID, err)
 	}

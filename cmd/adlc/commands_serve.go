@@ -270,7 +270,7 @@ func (e *env) scheduler() (*dispatch.Scheduler, error) {
 		lib = l
 	}
 	d := &dispatch.Dispatcher{
-		Cfg: e.cfg, Led: e.led, Lib: lib, Leases: e.leases, Repo: e.repo,
+		Cfg: e.cfg, Led: e.led, Lib: lib, Leases: e.leases, Repo: e.repo, ToolRepo: e.toolRepo,
 		Actor: e.actor, Now: nowUTC,
 		Runner: &dispatch.ExecRunner{Command: e.cfg.Dispatch.Command},
 		Log:    func(s string) { fmt.Println(nowUTC().Format("15:04:05") + "  " + s) },

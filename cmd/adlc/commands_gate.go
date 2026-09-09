@@ -237,7 +237,7 @@ func cmdDispatch(e *env, args []string) int {
 		lib = l
 	}
 	d := &dispatch.Dispatcher{
-		Cfg: e.cfg, Led: e.led, Lib: lib, Leases: e.leases, Repo: e.repo,
+		Cfg: e.cfg, Led: e.led, Lib: lib, Leases: e.leases, Repo: e.repo, ToolRepo: e.toolRepo,
 		Actor: e.actor, Now: nowUTC,
 		Runner: &dispatch.ExecRunner{Command: e.cfg.Dispatch.Command},
 		Log:    func(s string) { fmt.Println(s) },
