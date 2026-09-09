@@ -425,7 +425,10 @@ func (r *Result) CompareClaims(cfg *config.Config, env *envelope.Envelope) []Cla
 			continue
 		}
 		if ch.Verdict.TurnsOnExitCode() {
-			if claim.ExitCode != obs.ExitCode {
+			// Only a claim that is BETTER than the observation is a
+			// discrepancy. See below: an agent reporting worse than the gate
+			// found is an agent that fixed something, not one that lied.
+			if claim.ExitCode != obs.ExitCode && claim.ExitCode == 0 {
 				issues = append(issues, ClaimIssue{
 					CheckID: obs.CheckID, Kind: "discrepancy",
 					Detail: fmt.Sprintf("the envelope reports %q exit_code %d, but the gate ran it here and it exited %d",
@@ -435,7 +438,18 @@ func (r *Result) CompareClaims(cfg *config.Config, env *envelope.Envelope) []Cla
 			continue
 		}
 		claimed, _, why := judge(ch, claim.ExitCode, claim.OutputTail)
-		if claimed != obs.Verdict {
+		// A claim that is worse than what the gate observed is not dishonesty.
+		//
+		// The matcher exists to catch an agent claiming success the gate did not
+		// see. The reverse says the agent ran the check, found a problem, fixed
+		// it, and recorded what it found — and the gate, running afterwards over
+		// the tree being proposed, agrees the problem is gone. Refusing that
+		// costs a whole run per item and teaches an agent to record only its
+		// last, cleanest attempt, which is the behaviour this matcher is for.
+		//
+		// The gate is the authority either way: it ran the command itself, here,
+		// over this tree. Nothing is admitted on the strength of the claim.
+		if claimed != obs.Verdict && !worseThan(claimed, obs.Verdict) {
 			issues = append(issues, ClaimIssue{
 				CheckID: obs.CheckID, Kind: "discrepancy",
 				Detail: fmt.Sprintf("for %s the verdict is the output, not the exit code: the envelope's own output reads %s (%s), the gate observed %s (%s)",
@@ -444,6 +458,21 @@ func (r *Result) CompareClaims(cfg *config.Config, env *envelope.Envelope) []Cla
 		}
 	}
 	return issues
+}
+
+// worseThan reports whether the first verdict is a less favourable claim than
+// the second. RED is worse than UNKNOWN, and UNKNOWN is worse than GREEN.
+func worseThan(claimed, observed Status) bool {
+	rank := func(s Status) int {
+		switch s {
+		case StatusRed:
+			return 0
+		case StatusUnknown:
+			return 1
+		}
+		return 2
+	}
+	return rank(claimed) < rank(observed)
 }
 
 // ---------------------------------------------------------------- helpers

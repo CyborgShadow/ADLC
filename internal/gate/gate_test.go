@@ -319,13 +319,71 @@ func TestTheGateAndTheClaimMatcherReadOneCounter(t *testing.T) {
 		t.Fatalf("an envelope quoting the output the gate judged GREEN must not be refused, got %+v", truthful)
 	}
 
-	// Firing: widening the match must not blind the matcher. An envelope whose
-	// own output carries no such line reads RED against a GREEN observation, and
-	// that disagreement is still reported.
-	doctored := res.CompareClaims(cfg, envWith(t, []envelope.Command{
-		{CheckID: "images", Cmd: "sitecheck", ExitCode: 0, OutputTail: "scanning site/cats\ndone\n"},
+	// Firing: widening the match must not blind the matcher. The direction that
+	// matters is an envelope claiming a scan the gate did not see — output
+	// carrying a count over an observation that found none. That is a claim of
+	// success nobody earned, and it is still refused.
+	//
+	// This case used to run the other way round, and asserted that an envelope
+	// with NO count disagreeing with a GREEN gate was refused too. That is an
+	// agent under-claiming — it ran the check, saw nothing, and said so, while
+	// the gate running afterwards over the proposed tree found six. Refusing it
+	// cost a run on every item and taught an agent to record only its cleanest
+	// attempt, which is the behaviour this matcher exists to catch. The rule
+	// pinned here is unchanged: both sides read the same counter.
+	empty := &Result{Checks: []Observation{{
+		CheckID: "images", Rule: config.VerdictCountMin, Ran: true,
+		ExitCode: 0, Output: "scanning site/cats\ndone\n", Count: 0,
+		Verdict: StatusRed, Why: "examined 0",
+	}}}
+	doctored := empty.CompareClaims(cfg, envWith(t, []envelope.Command{
+		{CheckID: "images", Cmd: "sitecheck", ExitCode: 0, OutputTail: ran},
 	}))
 	if len(doctored) != 1 || doctored[0].Kind != "discrepancy" {
-		t.Fatalf("an output carrying no count must disagree with a GREEN observation, got %+v", doctored)
+		t.Fatalf("an envelope claiming a count the gate never saw must be refused, got %+v", doctored)
+	}
+}
+
+// A claim that is WORSE than what the gate observed is not a discrepancy.
+//
+// The matcher exists to catch an agent claiming a success the gate did not see.
+// The reverse says the agent ran the check, found a problem, fixed it, and
+// recorded what it found — and the gate, running afterwards over the tree being
+// proposed, agrees the problem is gone. Refusing that cost a whole run on every
+// item and taught an agent to record only its last, cleanest attempt, which is
+// exactly the behaviour this matcher is for.
+func TestAnAgentIsNotRefusedForClaimingWorseThanTheGateFound(t *testing.T) {
+	cfg := &config.Config{Checks: []config.Check{
+		{ID: "fmt", Command: []string{"gofmt", "-l", "."}, Verdict: config.VerdictOutputEmpty},
+	}}
+	green := &Result{Checks: []Observation{{
+		CheckID: "fmt", Rule: config.VerdictOutputEmpty, Ran: true,
+		Output: "", Verdict: StatusGreen, Why: "printed nothing",
+	}}}
+
+	// The agent recorded a run that printed a filename: it found a file it had
+	// not formatted, and fixed it.
+	worse := &envelope.Envelope{Commands: []envelope.Command{
+		{CheckID: "fmt", Cmd: "gofmt -l .", OutputTail: "internal/a.go"},
+	}}
+	if issues := green.CompareClaims(cfg, worse); len(issues) != 0 {
+		t.Fatalf("an agent was refused for reporting a problem it then fixed: %+v", issues)
+	}
+
+	// The firing case, and the whole point of the matcher: the agent claims
+	// clean and the gate saw otherwise.
+	red := &Result{Checks: []Observation{{
+		CheckID: "fmt", Rule: config.VerdictOutputEmpty, Ran: true,
+		Output: "internal/a.go", Verdict: StatusRed, Why: "printed 1 line(s)",
+	}}}
+	better := &envelope.Envelope{Commands: []envelope.Command{
+		{CheckID: "fmt", Cmd: "gofmt -l .", OutputTail: ""},
+	}}
+	issues := red.CompareClaims(cfg, better)
+	if len(issues) == 0 {
+		t.Fatal("an agent claimed a check was clean where the gate saw it fail, and was admitted")
+	}
+	if issues[0].Kind != "discrepancy" {
+		t.Errorf("the wrong kind of issue: %+v", issues[0])
 	}
 }
