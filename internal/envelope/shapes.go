@@ -57,7 +57,6 @@ func (c *criteriaList) UnmarshalJSON(b []byte) error {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(b, &m); err != nil {
 		return fmt.Errorf("outputs.criteria is neither a list nor an object keyed by criterion id")
-		return fmt.Errorf("outputs.criteria: %w", err)
 	}
 	keys := make([]string, 0, len(m))
 	for k := range m {
