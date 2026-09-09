@@ -1185,3 +1185,64 @@ func TestAStageDoesNotLeaveVerificationOnARefusedClaim(t *testing.T) {
 		t.Fatalf("%d transitions to reviewed for one completed stage", n)
 	}
 }
+
+// TestJudgeS1023RefusedVerificationRecordsRedAndClearsNothing settles by
+// observation what AC-1 otherwise leaves to inference: that the run refused in
+// the firing case was refused because the control plane RAN the edge's checks
+// and observed RED, and not because the check could not be run here at all —
+// an UNKNOWN gate refuses too, and a test that cannot tell the two apart would
+// pass on the day the declared command stopped existing.
+//
+// It reads the recorded gate.observed status for the run, then asserts the same
+// thing the criterion turns on: no verification.passed for that item.
+func TestJudgeS1023RefusedVerificationRecordsRedAndClearsNothing(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	h.edgeCheck(config.VerdictOutputEmpty)
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Dispatched || res.RunID == "" {
+		t.Fatalf("nothing was dispatched: %s", res.Idle)
+	}
+
+	evs, err := h.Led.EventsOfKind([]ledger.Kind{ledger.KindGateObserved}, res.RunID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 {
+		t.Fatalf("%d gate.observed events for run %s, want 1", len(evs), res.RunID)
+	}
+	var g ledger.GateObserved
+	if err := json.Unmarshal(evs[0].Payload, &g); err != nil {
+		t.Fatal(err)
+	}
+	if g.Status != "RED" {
+		t.Fatalf("the gate recorded %q on %s, not RED: the refusal this test relies on was not the checks failing (checks: %s)",
+			g.Status, g.Edge, g.Checks)
+	}
+	if g.Edge != "verifying->verifying" {
+		t.Errorf("the checks were run over edge %q, not the verification self-edge", g.Edge)
+	}
+
+	// The criterion itself: nothing the gate contradicted clears a task.
+	passed, err := h.Led.VerificationsFor("S1-001", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(passed) != 0 {
+		t.Fatalf("a run refused over a RED gate cleared %v", passed)
+	}
+	evs, err = h.Led.EventsOfKind([]ledger.Kind{ledger.KindVerificationPassed}, "S1-001", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 0 {
+		t.Fatalf("%d verification.passed appended for a run the gate refused", len(evs))
+	}
+}
