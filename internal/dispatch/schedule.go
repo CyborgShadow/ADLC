@@ -333,7 +333,15 @@ func (s *Scheduler) RunStopWatch(ctx context.Context, stop func()) {
 		Drain()
 		s.D.log("DRAINING — dispatching nothing new. %d run(s) still in flight; waiting for them rather than killing them.",
 			s.D.RunsInFlight())
+		// Once a minute, not once a tick. A wait that says the same thing every
+		// two seconds buries the reason somebody opened the log.
+		var lastSaid time.Time
+		var lastN int
 		s.D.WaitForQuiet(30*time.Minute, func(n int) {
+			if n == lastN && time.Since(lastSaid) < time.Minute {
+				return
+			}
+			lastN, lastSaid = n, time.Now()
 			s.D.log("DRAINING — still waiting on %s", plural(n, "run", "runs"))
 		})
 		s.D.log("DRAINED — nothing is in flight. Stopping.")

@@ -476,3 +476,33 @@ func VerificationOutstanding(passed map[string]bool) []string {
 	}
 	return out
 }
+
+// VerificationSettled reports whether every task in the stage has REPORTED,
+// pass or fail. It is the condition for leaving the stage backward, and it is
+// deliberately not the same question as VerificationComplete: an item leaves
+// forward only when every task passed, and backward only when every task has
+// finished asking.
+func VerificationSettled(passed map[string]bool, failed map[string]string) bool {
+	reported := VerificationReported(passed, failed)
+	for _, c := range VerificationCapabilities() {
+		if !reported[c] {
+			return false
+		}
+	}
+	return true
+}
+
+// VerificationReported merges the two records into the set of tasks that have
+// answered, which is what a dispatcher must not offer again this round.
+func VerificationReported(passed map[string]bool, failed map[string]string) map[string]bool {
+	out := map[string]bool{}
+	for c, ok := range passed {
+		if ok {
+			out[c] = true
+		}
+	}
+	for c := range failed {
+		out[c] = true
+	}
+	return out
+}

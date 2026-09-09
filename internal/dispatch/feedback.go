@@ -493,3 +493,21 @@ func (d *Dispatcher) learnFromMalformed(runID string, c Candidate, detail string
 	}
 	d.log("LEARNED from the refusal of %s — carried into future %s runs", runID, c.Worker)
 }
+
+// failedTasks names the tasks that did not clear and what each observed, so
+// one line in the record and one line in the log say the same thing.
+func failedTasks(failed map[string]string) string {
+	var parts []string
+	for _, c := range authority.VerificationCapabilities() {
+		detail, did := failed[c]
+		if !did {
+			continue
+		}
+		if strings.TrimSpace(detail) == "" {
+			parts = append(parts, c)
+			continue
+		}
+		parts = append(parts, c+": "+oneLine(detail, 200))
+	}
+	return strings.Join(parts, "; ")
+}

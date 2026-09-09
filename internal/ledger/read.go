@@ -803,3 +803,46 @@ func (l *Ledger) VerificationsFor(itemID string, round int) (map[string]bool, er
 	}
 	return out, rows.Err()
 }
+
+// VerificationReportsFor returns what each task in the verification stage said
+// this round: passed names the tasks that cleared, failed maps the ones that
+// did not onto what they observed.
+//
+// Both are needed to decide anything: an item leaves the stage forward when
+// every task passed, and backward only when every task has REPORTED. Reading
+// passes alone is what let one failure eject an item while its siblings were
+// still running.
+func (l *Ledger) VerificationReportsFor(itemID string, round int) (passed map[string]bool, failed map[string]string, err error) {
+	passed, err = l.VerificationsFor(itemID, round)
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := l.db.Query(
+		`SELECT payload FROM adlc_event WHERE kind=? AND subject=? ORDER BY seq`,
+		string(KindVerificationFailed), itemID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	failed = map[string]string{}
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, nil, err
+		}
+		var p VerificationFailed
+		if json.Unmarshal(payload, &p) != nil {
+			continue
+		}
+		if p.Round != round || p.Capability == "" {
+			continue
+		}
+		// A task that failed and was re-run to a pass is a pass: the later
+		// event wins for that capability.
+		if passed[p.Capability] {
+			continue
+		}
+		failed[p.Capability] = p.Detail
+	}
+	return passed, failed, rows.Err()
+}

@@ -76,10 +76,16 @@ func NextState(from State, capability, verdict string, radius config.Radius, pol
 				"this task passed; the item leaves verification when every task in the stage has")
 		}
 		if setback {
-			if capability == config.CapValidate {
-				return ok(StateRejected, "adversarial review found at least one blocker")
-			}
-			return ok(StateInProgress, "a verification task failed, so the work goes back with what it observed")
+			// A self-edge, exactly like the pass above, and for the same
+			// reason: this run cleared or failed ONE of three independent
+			// questions asked of one commit. Ejecting the item on the first
+			// failure refused its two in-flight siblings as stale — two runs
+			// discarded — and handed the builder one complaint, so it learned
+			// the other two a whole round later. The item leaves the stage
+			// backward when every task has REPORTED, which Refresh computes
+			// from the record.
+			return ok(StateVerifying,
+				"this task failed; the item leaves verification when every task in the stage has reported")
 		}
 
 	case StateReviewed, StateJanitoring:

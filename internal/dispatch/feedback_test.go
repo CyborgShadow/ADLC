@@ -511,3 +511,142 @@ func TestAMalformedEnvelopeTeachesTheNextRun(t *testing.T) {
 		t.Errorf("a lesson must not leak across roles, got %q", other)
 	}
 }
+
+// A failing verification task does not eject the item; the stage does, once
+// every task has reported, and it carries all of what they observed.
+//
+// Before this, the first failure sent the item straight back to the builder.
+// Its two siblings were still examining the same commit, so both were refused
+// as stale when they finished — two runs discarded — and the builder was told
+// one of the three things wrong with its work, learning the other two a whole
+// round later. That is two extra verification rounds per failing item, and it
+// was the largest remaining cost in the lifecycle.
+func TestTheStageWaitsForEveryTaskBeforeSendingWorkBack(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+
+	report := func(kind ledger.Kind, capability string, payload any) {
+		t.Helper()
+		if _, err := d.Led.Append("cli", kind, "S1-001", payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// One task fails while the other two are still running.
+	report(ledger.KindVerificationFailed, config.CapTest, ledger.VerificationFailed{
+		ItemID: "S1-001", Capability: config.CapTest, RunID: "t-1", Round: 0,
+		Detail: "TestLocaleKey does not compile",
+	})
+	if _, err := d.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.itemState(t, "S1-001"); got != "verifying" {
+		t.Fatalf("one failure ejected the item while two tasks were still running: %s", got)
+	}
+	// And the failed task is not offered again this round: re-dispatching it
+	// against a tree that has not moved is a loop, not a retry.
+	if again, _ := d.Candidates(Filter{Capability: config.CapTest}); len(again) != 0 {
+		t.Errorf("a task that already reported was offered again: %+v", again)
+	}
+
+	report(ledger.KindVerificationPassed, config.CapValidate, ledger.VerificationPassed{
+		ItemID: "S1-001", Capability: config.CapValidate, RunID: "v-1", Round: 0,
+	})
+	if _, err := d.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.itemState(t, "S1-001"); got != "verifying" {
+		t.Fatalf("the item moved before the judge reported: %s", got)
+	}
+
+	report(ledger.KindVerificationFailed, config.CapJudge, ledger.VerificationFailed{
+		ItemID: "S1-001", Capability: config.CapJudge, RunID: "j-1", Round: 0,
+		Detail: "AC-2 cites no executed command",
+	})
+	if _, err := d.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.itemState(t, "S1-001"); got != "in_progress" {
+		t.Fatalf("the settled stage did not send the work back: %s", got)
+	}
+
+	// The builder is told everything the stage found, in one place.
+	it, err := d.Led.Item("S1-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.Attempts != 1 {
+		t.Errorf("the round did not advance, so this round's verdicts would still count: %d", it.Attempts)
+	}
+	said := strings.Join(h.Logs, "|")
+	for _, want := range []string{"TestLocaleKey does not compile", "AC-2 cites no executed command"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("the stage did not carry back %q — the builder learns it a round later: %s", want, said)
+		}
+	}
+}
+
+// The clean case, and the one that matters most: three passes still leave the
+// stage forward. Without it the guard above would pass on the day the stage
+// stopped letting anything through at all.
+func TestAStageThatAllPassesStillLeavesForward(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	for _, capability := range authority.VerificationCapabilities() {
+		if _, err := d.Led.Append("cli", ledger.KindVerificationPassed, "S1-001",
+			ledger.VerificationPassed{ItemID: "S1-001", Capability: capability,
+				RunID: "r-" + capability, Round: 0}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.itemState(t, "S1-001"); got != "reviewed" {
+		t.Fatalf("a fully passing stage must still clear: %s", got)
+	}
+}
+
+// Adversarial review outranks the rest of the stage. A blocker is a rejection
+// whoever else agreed, and it must not be diluted into an ordinary setback by
+// arriving alongside two passes.
+func TestABlockerRejectsEvenWhenTheOthersPass(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	for _, capability := range []string{config.CapTest, config.CapJudge} {
+		if _, err := d.Led.Append("cli", ledger.KindVerificationPassed, "S1-001",
+			ledger.VerificationPassed{ItemID: "S1-001", Capability: capability,
+				RunID: "r-" + capability, Round: 0}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.Led.Append("cli", ledger.KindVerificationFailed, "S1-001",
+		ledger.VerificationFailed{ItemID: "S1-001", Capability: config.CapValidate,
+			RunID: "v-1", Round: 0, Detail: "the cache key omits the locale"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.itemState(t, "S1-001"); got != "rejected" {
+		t.Fatalf("a blocker must still reject the item: %s", got)
+	}
+}
+
+func (h *harness) itemState(t *testing.T, id string) string {
+	t.Helper()
+	it, err := h.Led.Item(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return it.State
+}

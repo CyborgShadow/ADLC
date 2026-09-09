@@ -292,11 +292,14 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 		// either way.
 		wanted := []string{capability}
 		if st == authority.StateVerifying {
-			passed, verr := d.Led.VerificationsFor(it.ID, it.Attempts)
+			passed, failed, verr := d.Led.VerificationReportsFor(it.ID, it.Attempts)
 			if verr != nil {
 				return nil, verr
 			}
-			wanted = authority.VerificationOutstanding(passed)
+			// A task that has already reported is not offered again this round,
+			// pass or fail. Re-dispatching a failure while its siblings are still
+			// running is a loop, not a retry: the tree it examines has not moved.
+			wanted = authority.VerificationOutstanding(authority.VerificationReported(passed, failed))
 		}
 		for _, capability := range wanted {
 			if f.Capability != "" && f.Capability != capability {
@@ -687,19 +690,32 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	// The tool decides where the item goes. The agent reported a verdict; it was
 	// never asked to name a state, so it cannot name a wrong one.
 	// A verification task that passed clears its own task and moves nothing.
-	// The stage is left when every task has cleared, and that is computed from
+	// The stage is left when every task has REPORTED, and that is computed from
 	// the record by Refresh rather than proposed by whichever run finished last
 	// — so three runs racing to report cannot advance an item between them.
-	if c.From == authority.StateVerifying && env.Verdict == "pass" &&
-		authority.IsVerification(c.Capability) {
-		if _, err := d.Led.Append(d.Actor, ledger.KindVerificationPassed, c.Item.ID,
-			ledger.VerificationPassed{
-				ItemID: c.Item.ID, Capability: c.Capability, RunID: runID,
-				Worker: c.Worker, Round: c.Item.Attempts,
-			}); err != nil {
-			return res, true, err
+	if c.From == authority.StateVerifying && authority.IsVerification(c.Capability) {
+		switch env.Verdict {
+		case "pass":
+			if _, err := d.Led.Append(d.Actor, ledger.KindVerificationPassed, c.Item.ID,
+				ledger.VerificationPassed{
+					ItemID: c.Item.ID, Capability: c.Capability, RunID: runID,
+					Worker: c.Worker, Round: c.Item.Attempts,
+				}); err != nil {
+				return res, true, err
+			}
+			d.log("VERIFIED %s  %s cleared by %s", c.Item.ID, c.Capability, c.Worker)
+		case "fail", "reject":
+			if _, err := d.Led.Append(d.Actor, ledger.KindVerificationFailed, c.Item.ID,
+				ledger.VerificationFailed{
+					ItemID: c.Item.ID, Capability: c.Capability, RunID: runID,
+					Worker: c.Worker, Round: c.Item.Attempts,
+					Detail: oneLine(env.Summary, 300),
+				}); err != nil {
+				return res, true, err
+			}
+			d.log("NOT VERIFIED %s  %s failed under %s; the item waits for its siblings to report",
+				c.Item.ID, c.Capability, c.Worker)
 		}
-		d.log("VERIFIED %s  %s cleared by %s", c.Item.ID, c.Capability, c.Worker)
 	}
 	adv := authority.NextState(c.From, c.Capability, env.Verdict,
 		config.Radius(c.Item.Radius), d.Cfg.Blast)
@@ -1136,27 +1152,45 @@ func (d *Dispatcher) Refresh() (int, error) {
 		// leaving it to whichever run finished last would make the item's state
 		// depend on a race between three runs that all passed.
 		if authority.State(it.State) == authority.StateVerifying {
-			passed, verr := d.Led.VerificationsFor(it.ID, it.Attempts)
+			passed, failed, verr := d.Led.VerificationReportsFor(it.ID, it.Attempts)
 			if verr != nil {
 				return moved, verr
 			}
-			if !authority.VerificationComplete(passed) {
+			if !authority.VerificationSettled(passed, failed) {
 				continue
 			}
+			to, reason, detail := string(authority.StateReviewed), "verification_complete",
+				"every task in the stage passed: "+strings.Join(authority.VerificationCapabilities(), ", ")
+			if len(failed) > 0 {
+				// Backward, once, with everything the stage observed. The
+				// builder gets all three complaints at once instead of one per
+				// round, and adversarial review still outranks the rest: a
+				// blocker is a rejection whoever else agreed.
+				to, reason = string(authority.StateInProgress), "verification_failed"
+				if _, blocked := failed[config.CapValidate]; blocked {
+					to = string(authority.StateRejected)
+				}
+				detail = "the stage reported and " + plural(len(failed), "task", "tasks") +
+					" did not clear — " + failedTasks(failed)
+			}
 			if _, err := d.Led.Append(d.Actor, ledger.KindTransitionAdmitted, it.ID, ledger.TransitionOutcome{
-				ItemID: it.ID, From: it.State, To: string(authority.StateReviewed),
-				Reason: "verification_complete",
-				Detail: "every task in the stage passed: " + strings.Join(authority.VerificationCapabilities(), ", "),
+				ItemID: it.ID, From: it.State, To: to, Reason: reason, Detail: detail,
 			}); err != nil {
 				return moved, err
 			}
 			if _, err := d.Led.Append(d.Actor, ledger.KindItemTransitioned, it.ID, ledger.ItemTransitioned{
-				ItemID: it.ID, From: it.State, To: string(authority.StateReviewed),
-				Reason: "verification_complete",
+				ItemID: it.ID, From: it.State, To: to, Reason: reason,
+				// A new round, so this round's verdicts stop counting and every
+				// task is asked again of the work that comes back.
+				BumpAttempt: to == string(authority.StateInProgress),
 			}); err != nil {
 				return moved, err
 			}
-			d.log("VERIFIED %s — every task in the stage passed; it leaves verification", it.ID)
+			if len(failed) > 0 {
+				d.log("NOT VERIFIED %s — %s", it.ID, detail)
+			} else {
+				d.log("VERIFIED %s — every task in the stage passed; it leaves verification", it.ID)
+			}
 			moved++
 			continue
 		}

@@ -51,6 +51,7 @@ const (
 	KindRunAbandoned       Kind = "run.abandoned"
 	KindLessonRecorded     Kind = "lesson.recorded"
 	KindVerificationPassed Kind = "verification.passed"
+	KindVerificationFailed Kind = "verification.failed"
 	KindTransitionAdmitted Kind = "transition.admitted"
 	KindTransitionRefused  Kind = "transition.refused"
 	KindGateObserved       Kind = "gate.observed"
@@ -83,6 +84,7 @@ var KnownKinds = map[Kind]bool{
 	KindItemProposed: true, KindLoopTicked: true, KindSegmentAdvanced: true,
 	KindConsoleAsked: true, KindConsoleReplied: true, KindConsoleActed: true,
 	KindRunAbandoned: true, KindLessonRecorded: true, KindVerificationPassed: true,
+	KindVerificationFailed: true,
 }
 
 // ---------------------------------------------------------------- payloads
@@ -1009,6 +1011,24 @@ type VerificationPassed struct {
 	RunID      string `json:"run_id"`
 	Worker     string `json:"worker"`
 	Round      int    `json:"round"`
+}
+
+// VerificationFailed is one task in the stage reporting that it did NOT clear.
+//
+// It exists so the stage can wait for every task to report before the item
+// moves. Before it did, the first failure sent the item straight back and its
+// two in-flight siblings were refused as stale when they finished -- two runs
+// discarded, and the builder was told one of the three things wrong with its
+// work, learning the other two a whole round later.
+type VerificationFailed struct {
+	ItemID     string `json:"item_id"`
+	Capability string `json:"capability"`
+	RunID      string `json:"run_id"`
+	Worker     string `json:"worker"`
+	Round      int    `json:"round"`
+	// Detail is what the task observed, carried to the builder as one list
+	// with its siblings rather than one complaint at a time.
+	Detail string `json:"detail,omitempty"`
 }
 
 // ReadOnlyDSN is this ledger's path as a handle that cannot write.

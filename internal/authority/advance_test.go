@@ -25,9 +25,14 @@ func TestTheToolDecidesWhereWorkGoes(t *testing.T) {
 	}{
 		{"a builder picks up ready work", StateReady, config.CapImplement, "pass", config.RadiusNone, StateVerifying},
 		{"work and tests land", StateInProgress, config.CapImplement, "pass", config.RadiusNone, StateVerifying},
-		{"a test fails", StateVerifying, config.CapTest, "fail", config.RadiusNone, StateInProgress},
-		{"a criterion fails", StateVerifying, config.CapJudge, "fail", config.RadiusNone, StateInProgress},
-		{"review rejects", StateVerifying, config.CapValidate, "reject", config.RadiusNone, StateRejected},
+		// A verification task reports on ONE of three independent questions, so
+		// neither answer moves the item: the stage settles when all three have
+		// reported, computed from the record. Ejecting on the first failure
+		// refused the two siblings still running and told the builder one of the
+		// three things wrong with its work.
+		{"a test fails", StateVerifying, config.CapTest, "fail", config.RadiusNone, StateVerifying},
+		{"a criterion fails", StateVerifying, config.CapJudge, "fail", config.RadiusNone, StateVerifying},
+		{"review rejects", StateVerifying, config.CapValidate, "reject", config.RadiusNone, StateVerifying},
 		{"hygiene pass", StateJanitoring, config.CapCurate, "pass", config.RadiusNone, StateReadyForArbitration},
 		{"the janitor finds something wrong", StateJanitoring, config.CapCurate, "reject", config.RadiusNone, StateInProgress},
 		{"source-only work clears to merge", StateArbitrating, config.CapArbitrate, "pass", config.RadiusNone, StateReadyToMerge},
