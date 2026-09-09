@@ -129,6 +129,29 @@ and never a list of sentences:
   ]
 }
 ```
+`severity` is recorded as one of `blocker`, `major`, `minor` or `note`. A word from the declared
+synonym list is read onto the nearest of those, and the re-reading is recorded on the run — where
+two vocabularies disagree it goes to the heavier value, so `critical` is read as `blocker` and
+`warning` as `major`. A word from no vocabulary at all is refused rather than guessed, because
+inventing the weight of a defect is the one thing the control plane will not do. `location`,
+`evidence` and `required_change` are what separate a finding from a complaint: without
+`required_change` the next run has to re-derive a fix you were already holding.
+
+Some departures from the declared shape are re-read rather than refused, and none of them is free.
+`outputs.criteria` may be an object keyed by criterion id, and a criterion's `status` may be any
+spelling on a closed list — `met` is read as `pass` — with the re-reading recorded the same way.
+And a finding may be written as prose *inside* the list — the sentence becomes `evidence`, and the
+severity you did not state is taken from your own verdict, so a blocker you wrote as a sentence on
+a passing run is recorded as a `note`, with no location and no required change. It parsed, and it
+no longer says what you meant.
+
+Everything else fails closed. The refusal usually names the subfield so you can reshape it, but not
+always: `outputs.criteria` written as a list of strings is refused by the JSON decoder in its own
+words, which name a type rather than the field. Where the message does not tell you the shape, the
+one stated here is the definition. `outputs.files_changed` and `outputs.deferred` are lists of
+strings, `outputs.work_items` a list of objects, `outputs.notes_md` a single string, and
+`outputs.findings` a list even when you have one finding — put a string where an object belongs, or
+an object where a list belongs, and the whole envelope is discarded.
 
 `severity` is one of `blocker`, `major`, `minor`, `note`, on the same terms as a criterion's
 `status`: an unambiguous synonym is read onto the declared word and the re-reading is recorded,
