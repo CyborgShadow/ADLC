@@ -332,13 +332,36 @@ type Event struct {
 }
 
 // Open opens or creates a ledger.
+//
+// A path prefixed "file:" is used as a DSN as given, which is how a caller asks
+// for read-only access: `file:/path/ledger.db?mode=ro`. Everything else is
+// treated as a plain path and opened read-write.
+//
+// Read-only exists because agents are handed the path of the real ledger so
+// they can read the record they are working against — and an agent runs
+// arbitrary code from an unreviewed branch, including `go test ./...` under the
+// gate. Something in that surface wrote to the chain's metadata: the stored
+// schema version moved to 2 while no merged code defines a 2. Integrity held
+// and the ledger said UNKNOWN rather than TAMPERED, which is the design working
+// — but a worker with a writable handle to its own audit record is not
+// auditable, and that is the first invariant of this whole system.
 func Open(path string) (*Ledger, error) {
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create ledger directory %s: %w", dir, err)
+	dsn := path
+	if strings.HasPrefix(path, "file:") {
+		// Given as a DSN. Trust it, and record the file it names.
+		if i := strings.IndexByte(path, '?'); i > 0 {
+			path = strings.TrimPrefix(path[:i], "file:")
+		} else {
+			path = strings.TrimPrefix(path, "file:")
 		}
+	} else {
+		if dir := filepath.Dir(path); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, fmt.Errorf("create ledger directory %s: %w", dir, err)
+			}
+		}
+		dsn = path + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(FULL)"
 	}
-	dsn := path + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(FULL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -970,4 +993,20 @@ type VerificationPassed struct {
 	RunID      string `json:"run_id"`
 	Worker     string `json:"worker"`
 	Round      int    `json:"round"`
+}
+
+// ReadOnlyDSN is this ledger's path as a handle that cannot write.
+//
+// It is what an agent is given. An agent reads the record it is working
+// against — that is why it has the path at all — but it also runs arbitrary
+// code from an unreviewed branch, including the whole test suite under the
+// gate, and something in that surface wrote to the chain's metadata. A worker
+// with a writable handle to its own audit record is not auditable, which is the
+// first invariant here; a path it merely holds is not enough, the handle itself
+// has to refuse.
+func (l *Ledger) ReadOnlyDSN() string {
+	if l.path == "" {
+		return ""
+	}
+	return "file:" + filepath.ToSlash(l.path) + "?mode=ro&_pragma=busy_timeout(5000)"
 }

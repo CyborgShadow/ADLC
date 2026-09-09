@@ -587,7 +587,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		RunID: runID, WorkerType: c.Worker, ItemID: c.Item.ID, SegmentID: segID,
 		PromptPath: promptPath, PromptText: asm.Text,
 		WorkDir: ws.Dir, EnvelopePath: ws.EnvelopePath, Timeout: timeout,
-		LedgerPath: d.Led.Path(),
+		LedgerPath: d.Led.ReadOnlyDSN(),
 		OnOutput:   func(line string) { w.Line(runID, line) },
 	})
 	d.limit().leave()

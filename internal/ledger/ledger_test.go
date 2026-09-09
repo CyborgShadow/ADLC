@@ -472,3 +472,45 @@ func TestASecondQuestionUnderATakenIdAppendsNothing(t *testing.T) {
 		t.Fatalf("want both questions after the fresh id, got %d (%v)", len(qs), err)
 	}
 }
+
+// The handle an agent is given cannot write.
+//
+// An agent is handed the real ledger's path so it can read the record it is
+// working against, and it also runs arbitrary code from an unreviewed branch —
+// including the whole test suite, under the gate. Something in that surface
+// wrote to the chain's metadata: the stored schema version moved to 2 while no
+// merged code defines a 2. Integrity held and the ledger reported UNKNOWN
+// rather than TAMPERED, which is the design working. But a worker with a
+// writable handle to its own audit record is not auditable, and holding a path
+// is not enough — the handle itself has to refuse.
+func TestTheHandleAnAgentIsGivenCannotWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger.db")
+	w, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Append("t", KindNoteRecorded, "n-1", NoteRecorded{Text: "seeded"}); err != nil {
+		t.Fatal(err)
+	}
+	dsn := w.ReadOnlyDSN()
+	if dsn == "" {
+		t.Fatal("no read-only handle was offered at all")
+	}
+	w.Close()
+
+	ro, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("the read-only handle would not open: %v", err)
+	}
+	defer ro.Close()
+
+	// It can still read, which is the whole reason an agent has it.
+	if evs, rerr := ro.Events(1, 0); rerr != nil || len(evs) == 0 {
+		t.Fatalf("the read-only handle cannot read the record: %d event(s), %v", len(evs), rerr)
+	}
+	// And it cannot append.
+	if _, err := ro.Append("agent", KindNoteRecorded, "n-2", NoteRecorded{Text: "should not land"}); err == nil {
+		t.Fatal("an agent's handle appended to the chain")
+	}
+}
