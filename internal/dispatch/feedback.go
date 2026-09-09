@@ -336,10 +336,21 @@ func (d *Dispatcher) stopTheLoop(seg ledger.Segment, rejections int) {
 	text := fmt.Sprintf(
 		"The breakdown of %s (%s) has now been rejected %d times, and each round costs a planning run and a validation run. The two agents are not converging. What should happen: is the plan wrong, is the validator's bar wrong for a deliverable this size, or is the brief asking for something that cannot be decomposed the way this pipeline expects?",
 		seg.ID, seg.Title, rejections)
-	lean := "Look at the most recent rejection before deciding. If the objections are getting smaller each round, one more attempt is reasonable; if the same objection keeps coming back in different words, the brief or the validator's expectation is what needs changing, not the plan. Answering this releases the deliverable for another round of attempts."
+
+	// The evidence is the last rejection itself, not a note telling somebody to
+	// go and read it. A recommendation that makes you open another page before
+	// you can weigh it is not a recommendation; it is a chore with an opinion
+	// attached, and the first version of this question was exactly that.
+	said := d.whyThePlanCameBack(seg.ID)
+	if said == "" {
+		said = "The record does not carry what the last review said, which is itself worth knowing."
+	}
+	lean := fmt.Sprintf(
+		"Read the objection below before deciding. If it is smaller than the one before it, the two are converging and one more attempt is reasonable — answering this releases the deliverable for another round. If it is the same objection in different words, the plan is not what needs changing: either the brief is asking for something this pipeline cannot decompose, or the validator's bar is wrong for work whose blast radius is %s. Say which, and say it as an instruction the next planner can act on.",
+		radiusOrUnknown(d.widestRadius(seg.ID)))
 	if _, err := d.Led.Append(d.actor(), ledger.KindQuestionRaised, id, ledger.QuestionRaised{
 		ID: id, Blocking: true, Text: text, Lean: lean, RaisedBy: seg.ID,
-		Evidence: fmt.Sprintf("%d rejected plan reviews on this deliverable.", rejections),
+		Evidence: said,
 	}); err != nil {
 		d.log("could not raise the plan-loop question for %s: %v", seg.ID, err)
 		return
@@ -403,4 +414,13 @@ func (d *Dispatcher) widestRadius(segmentID string) string {
 		}
 	}
 	return widest
+}
+
+// radiusOrUnknown names a deliverable's blast radius for a person, and says so
+// when nothing has declared one rather than implying it is safe.
+func radiusOrUnknown(r string) string {
+	if strings.TrimSpace(r) == "" {
+		return "not yet declared"
+	}
+	return r
 }

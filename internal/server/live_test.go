@@ -380,3 +380,41 @@ func renderTo(t *testing.T, d *pageData) string {
 	}
 	return b.String()
 }
+
+// The pages somebody answers on do not reload themselves.
+//
+// Home and the console were fixed for this; Questions and Approvals were not,
+// and they are worse: accepting a recommendation means typing a reason into a
+// one-line input and pressing a button, and a refresh mid-sentence takes the
+// reason — which is the part that is useful in six months.
+func TestThePagesYouAnswerOnDoNotReload(t *testing.T) {
+	s := newServer(t)
+	s.Cfg.Server.RefreshSeconds = 15
+	for _, page := range []string{"home", "console", "questions", "approvals"} {
+		d, err := s.shell(httptest.NewRequest(http.MethodGet, "/", nil), page, "T", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Refresh != 0 {
+			t.Errorf("%s reloads every %ds, which throws away a half-written answer", page, d.Refresh)
+		}
+	}
+	// The clean case: a page that is only read still refreshes.
+	d, err := s.shell(httptest.NewRequest(http.MethodGet, "/overview", nil), "overview", "T", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Refresh != 15 {
+		t.Errorf("a page nobody types into stopped refreshing (%d)", d.Refresh)
+	}
+}
+
+// Typing anywhere counts, not only in a textarea.
+func TestEveryTextFieldCountsAsTyping(t *testing.T) {
+	if !strings.Contains(liveScript, "input[type=text]") {
+		t.Fatal("only textareas are watched; a reason typed into a one-line input is still lost to a refresh")
+	}
+	if !strings.Contains(liveScript, "!== before[i]") {
+		t.Error("typing() no longer compares against the value the field loaded with, so autofill counts as typing")
+	}
+}

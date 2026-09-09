@@ -363,11 +363,15 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 	case s.turns.any() && (refresh == 0 || refresh > 2):
 		// Something is running and the answer is worth waiting for.
 		refresh = 2
-	case page == "home" || page == "console":
-		// These two pages ARE a text box somebody types into, and a page that
-		// reloads itself every fifteen seconds throws away whatever they had
-		// half-written. Nothing on them changes on its own while no turn is
-		// running, so there is nothing being traded away.
+	case page == "home" || page == "console" || page == "questions" || page == "approvals":
+		// These pages are forms somebody types into, and a page that reloads
+		// itself throws away what they had half-written. Answering a question
+		// means typing a reason, and the reason is the part that is useful in
+		// six months — losing it to a refresh teaches people to type "ok".
+		//
+		// Nothing on them changes usefully on its own either: a question that
+		// arrives while you are answering another one can wait for the reload
+		// that answering causes.
 		refresh = 0
 	}
 	return &pageData{

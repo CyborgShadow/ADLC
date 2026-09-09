@@ -48,19 +48,26 @@ const liveScript = `<script>
   // running turn, and never reload the page out from under somebody who is
   // part-way through writing in it.
   //
-  // "Somebody is typing" is the difference between the field's value NOW and
-  // the value it held when this page loaded. Not an event flag, and not merely
-  // "the box has text in it": reloading a page makes the browser RESTORE what
-  // was in its fields, so a box refilled by the browser looked exactly like a
-  // box somebody was typing in — and the page then refused to reload itself
-  // ever again, telling the reader it was because they were part-way through
-  // typing something they had never typed.
-  var watchdog, before = [];
-  var boxes = document.getElementsByTagName("textarea");
-  for (var b = 0; b < boxes.length; b++) before.push(boxes[b].value);
+  // "Somebody is typing" is the difference between a field's value NOW and the
+  // value it held when this page loaded. Not an event flag, and not merely "the
+  // box has text in it": reloading a page makes the browser RESTORE what was in
+  // its fields, so a box refilled by the browser looked exactly like a box
+  // somebody was typing in — and the page then refused to reload itself ever
+  // again, telling the reader it was because they were part-way through typing
+  // something they had never typed.
+  //
+  // Every text field counts, not only textareas. Accepting a recommendation
+  // means typing a reason into a one-line input and nothing else, so watching
+  // textareas alone left that reason as the one thing a refresh could still
+  // destroy — and the reason is the part that is useful in six months.
+  var watchdog, fields = [], before = [];
+  (function(){
+    var all = document.querySelectorAll("textarea, input[type=text], input:not([type])");
+    for (var i = 0; i < all.length; i++) { fields.push(all[i]); before.push(all[i].value); }
+  })();
   function typing(){
-    for (var i = 0; i < boxes.length; i++) {
-      if (boxes[i].value.trim() && boxes[i].value !== before[i]) return true;
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].value.trim() && fields[i].value !== before[i]) return true;
     }
     return false;
   }
@@ -70,7 +77,7 @@ const liveScript = `<script>
   }
   function reload(){ if (!typing()) location.reload(); }
   document.addEventListener("input", function(ev){
-    if (ev.target && ev.target.tagName === "TEXTAREA" && typing()) stopRefresh();
+    if (typing()) stopRefresh();
   }, true);
 
   var nodes = document.querySelectorAll("[data-live]");
