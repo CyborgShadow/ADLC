@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/CyborgShadow/ADLC/internal/authority"
 	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/prompt"
 )
@@ -47,6 +48,15 @@ func cmdConfigCheck(args []string) int {
 	cfg, err := config.Load(flagConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s is not usable:\n\n  %v\n\n", flagConfig, err)
+		fmt.Fprintln(os.Stderr, "Nothing will start against it. Fix that and run this again.")
+		return exitUsage
+	}
+	// A check bound to an edge that does not exist never runs, so the edge it
+	// was meant to gate refuses every proposal for having no checks — while
+	// this command reports the config valid. Refused here, at the point where
+	// somebody is asking whether the config is usable.
+	if eerr := authority.CheckEdgesExist(cfg); eerr != nil {
+		fmt.Fprintf(os.Stderr, "%s is not usable:\n\n  %v\n\n", flagConfig, eerr)
 		fmt.Fprintln(os.Stderr, "Nothing will start against it. Fix that and run this again.")
 		return exitUsage
 	}

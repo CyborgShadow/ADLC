@@ -14,9 +14,9 @@
       "command": ["gofmt", "-l", "./cmd", "./internal"],
       "verdict": "output_empty",
       "required_for": [
-        "in_progress->ready_for_testing",
-        "testing->ready_for_review",
-        "judging->ready_for_validation",
+        "in_progress->verifying",
+        "verifying->verifying",
+        "verifying->reviewed",
         "merging->merged"
       ]
     },
@@ -26,9 +26,9 @@
       "command": ["go", "vet", "./..."],
       "verdict": "exit_zero",
       "required_for": [
-        "in_progress->ready_for_testing",
-        "testing->ready_for_review",
-        "judging->ready_for_validation",
+        "in_progress->verifying",
+        "verifying->verifying",
+        "verifying->reviewed",
         "merging->merged"
       ]
     },
@@ -38,9 +38,9 @@
       "command": ["go", "build", "./..."],
       "verdict": "exit_zero",
       "required_for": [
-        "in_progress->ready_for_testing",
-        "testing->ready_for_review",
-        "judging->ready_for_validation",
+        "in_progress->verifying",
+        "verifying->verifying",
+        "verifying->reviewed",
         "merging->merged"
       ]
     },
@@ -52,9 +52,9 @@
       "verdict": "go_test_json",
       "timeout_seconds": 900,
       "required_for": [
-        "in_progress->ready_for_testing",
-        "testing->ready_for_review",
-        "judging->ready_for_validation",
+        "in_progress->verifying",
+        "verifying->verifying",
+        "verifying->reviewed",
         "merging->merged"
       ]
     },
@@ -64,8 +64,8 @@
       "command": ["go", "run", "./cmd/adlc", "prompt", "check"],
       "verdict": "exit_zero",
       "required_for": [
-        "in_progress->ready_for_testing",
-        "judging->ready_for_validation"
+        "in_progress->verifying",
+        "verifying->verifying"
       ]
     }
   ],
