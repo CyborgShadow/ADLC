@@ -736,6 +736,9 @@ func TestThePinnedSourcesAreOnePerTopicAndAbsoluteHTTPS(t *testing.T) {
 	}{
 		{"a topic with no source", drop("purring"), `"purring" has no pinned source`},
 		{"a topic pinned twice", append(drop("purring"), pinnedSources[1], pinnedSources[1]), `"purring" has 2 pinned sources`},
+		{"one document pinned under two topics",
+			edit("purring", func(p *pinnedSource) { p.URL = pinnedSources[0].URL }),
+			`is pinned for 2 topics (baby-faces, purring)`},
 		{"a topic the page does not cover", append(drop("purring"),
 			pinnedSource{Topic: "kneading", Author: "A", Year: 2020, URL: "https://example.org/x"}),
 			`"kneading" is pinned but is not one of the topics`},
@@ -853,5 +856,95 @@ func TestAnOmittedTopicIsNamedRatherThanPassingBySilence(t *testing.T) {
 		if fired := runRule(t, id, fsys); len(fired) != 0 {
 			t.Errorf("%s fired on a page whose remaining citations are all correct: %s", id, joinFindings(fired))
 		}
+	}
+}
+
+// TestTheSourcesListIsReadWholeRatherThanCollapsed covers the two shapes that
+// got past html.source-pinned while it read one URL per deduplicated id. Both
+// are the condition S1-007 AC-2 names — a #sources list carrying a URL absent
+// from the allowlist — and both exited 0: a second link inside an entry was
+// never reached, and a second entry reusing an id was dropped before any rule
+// read its URL. The clean cases are the other half of the pair: what is refused
+// is an unpinned URL and an ambiguous id, not a second link or a sixth entry.
+func TestTheSourcesListIsReadWholeRatherThanCollapsed(t *testing.T) {
+	const (
+		s3Open   = `<li id="s3">Nagasawa, Kimura, Masuda and Uchiyama, 2023. `
+		s3Pinned = `<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC10340037/">Effects of interactions with cats on the state of their owners</a>`
+		s3Entry  = s3Open + s3Pinned + `</li>`
+		invented = `<a href="https://example.org/invented-oxytocin-paper">Invented 2024</a>`
+		babyFace = `<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4782005/">Pet Face</a>`
+	)
+	// The list ends at </ul>, so this is how an entry arrives in a real page:
+	// somebody copies the <li> above it and edits the text.
+	appendEntry := func(t *testing.T, li string) fstest.MapFS {
+		return swap(t, goodSite(t), "index.html", "</ul>", li+"\n</ul>")
+	}
+
+	for _, c := range []struct {
+		name string
+		fsys func(*testing.T) fstest.MapFS
+		want []string // one substring per expected finding, in order; none means clean
+	}{
+		{"an entry with a pinned link and then an invented one",
+			func(t *testing.T) fstest.MapFS {
+				return swap(t, goodSite(t), "index.html", s3Entry, s3Open+s3Pinned+" see also "+invented+"</li>")
+			},
+			[]string{`source #s3 cites "https://example.org/invented-oxytocin-paper"`}},
+
+		{"the same entry with the two links in the opposite order",
+			func(t *testing.T) fstest.MapFS {
+				return swap(t, goodSite(t), "index.html", s3Entry, s3Open+invented+" see also "+s3Pinned+"</li>")
+			},
+			// Identical content, opposite order: the same finding, because the
+			// question is what the list cites and not what it cites first.
+			[]string{`source #s3 cites "https://example.org/invented-oxytocin-paper"`}},
+
+		{"a second entry under an existing id, linking to a URL nobody opened",
+			func(t *testing.T) fstest.MapFS {
+				return appendEntry(t, `<li id="s1">Fabricated and Nobody, 2024. <a href="https://example.org/never-opened">A paper nobody fetched</a></li>`)
+			},
+			[]string{"source #s1 is declared twice", `source #s1 cites "https://example.org/never-opened"`}},
+
+		{"a second entry under an existing id, linking to a pinned source",
+			func(t *testing.T) fstest.MapFS {
+				return appendEntry(t, `<li id="s1">Borgi and Cirulli, 2016. `+babyFace+`</li>`)
+			},
+			// The URL half is satisfied, so this isolates the id half: with two
+			// entries answering to #s1, html.source-topic resolves the
+			// baby-faces citation by document order.
+			[]string{"source #s1 is declared twice"}},
+
+		{"a link in the list that sits inside no entry",
+			func(t *testing.T) fstest.MapFS {
+				return swap(t, goodSite(t), "index.html", "<h2>Sources</h2>",
+					"<h2>Sources</h2>\n<p>See also <a href=\"https://example.org/loose-citation\">this</a></p>")
+			},
+			[]string{`sits inside no entry cites "https://example.org/loose-citation"`}},
+
+		{"the conforming fixture", goodSite, nil},
+
+		{"a sixth entry with a fresh id, linking to a pinned source",
+			func(t *testing.T) fstest.MapFS {
+				return appendEntry(t, `<li id="s6">Borgi and Cirulli, 2016. `+babyFace+`</li>`)
+			},
+			nil},
+
+		{"an entry carrying two links, both pinned",
+			func(t *testing.T) fstest.MapFS {
+				return swap(t, goodSite(t), "index.html", s3Entry, s3Open+s3Pinned+" and "+babyFace+"</li>")
+			},
+			nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := runRule(t, "html.source-pinned", c.fsys(t))
+			if len(got) != len(c.want) {
+				t.Fatalf("html.source-pinned gave %d findings (%s), want %d", len(got), joinFindings(got), len(c.want))
+			}
+			for i, want := range c.want {
+				if !strings.Contains(got[i].Detail, want) {
+					t.Errorf("finding %d does not carry %q: %q", i, want, got[i].Detail)
+				}
+			}
+		})
 	}
 }

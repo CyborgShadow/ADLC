@@ -3,6 +3,7 @@ package sitecheck
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -139,6 +140,34 @@ func pinnedProblems(list []pinnedSource) []string {
 		case n > 1:
 			out = append(out, fmt.Sprintf("topic %q has %d pinned sources, so which one a claim was checked against is unanswerable", want, n))
 		}
+	}
+
+	// The mirror of the duplicate-topic check above, and needed for the same
+	// reason from the other side: pinnedFor returns the first row matching a
+	// URL, so with one document pinned under two topics html.source-topic
+	// reports whichever came first in the table and a citation is correct or
+	// misattached according to row order. Only distinct topics are reported —
+	// a topic pinned twice is already refused above, and two findings on one
+	// defect is noise.
+	topicsByURL := map[string][]string{}
+	for _, p := range list {
+		u := canonicalSourceURL(p.URL)
+		if u == "" {
+			continue // urlProblems below owns an entry naming no URL
+		}
+		if !slices.Contains(topicsByURL[u], p.Topic) {
+			topicsByURL[u] = append(topicsByURL[u], p.Topic)
+		}
+	}
+	said := map[string]bool{}
+	for _, p := range list {
+		u := canonicalSourceURL(p.URL)
+		if u == "" || said[u] || len(topicsByURL[u]) < 2 {
+			continue
+		}
+		said[u] = true
+		out = append(out, fmt.Sprintf("URL %q is pinned for %d topics (%s), so which claim it was read for is unanswerable",
+			p.URL, len(topicsByURL[u]), strings.Join(topicsByURL[u], ", ")))
 	}
 
 	for _, p := range list {
