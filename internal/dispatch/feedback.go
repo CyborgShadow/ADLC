@@ -511,3 +511,60 @@ func failedTasks(failed map[string]string) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+// decisionsShown bounds how much settled history a run carries. Enough that it
+// does not re-ask, few enough that the prompt stays about the work.
+const decisionsShown = 6
+
+// decisionsTaken is what has already been settled on this item.
+//
+// A question is answered, the item unblocks, and the run that picks it up is a
+// fresh agent with no memory: it re-derives the decision or asks it again. Two
+// runs raised the same question about the same acceptance criterion in one
+// night, neither able to see the other's, and both stopped for a person. The
+// answer is a fact about the item and belongs in the brief with the rest of
+// them.
+func (d *Dispatcher) decisionsTaken(itemID string) string {
+	if itemID == "" {
+		return ""
+	}
+	qs, err := d.Led.Questions(itemID, false)
+	if err != nil {
+		return ""
+	}
+	var answered []ledger.Question
+	for _, q := range qs {
+		if q.Answered && strings.TrimSpace(q.Answer) != "" {
+			answered = append(answered, q)
+		}
+	}
+	if len(answered) == 0 {
+		return ""
+	}
+	if len(answered) > decisionsShown {
+		answered = answered[len(answered)-decisionsShown:]
+	}
+	var b strings.Builder
+	b.WriteString("## Decisions already taken on this item\n\nThese were asked by an earlier run and answered. They are settled: do not ask them again, and do not quietly decide otherwise. If one is wrong in the light of something you have found, say which and why in your summary.\n\n")
+	for _, q := range answered {
+		fmt.Fprintf(&b, "- **Asked:** %s\n", oneLine(q.Text, 300))
+		who := q.AnsweredBy
+		if who == "" {
+			who = "the operator"
+		}
+		fmt.Fprintf(&b, "  **Answered by %s:** %s\n", who, oneLine(q.Answer, 500))
+	}
+	return b.String()
+}
+
+// joinSections puts the non-empty ones together, so an absent section leaves no
+// dangling heading for a run to reason about.
+func joinSections(parts ...string) string {
+	var kept []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			kept = append(kept, strings.TrimSpace(p))
+		}
+	}
+	return strings.Join(kept, "\n\n")
+}

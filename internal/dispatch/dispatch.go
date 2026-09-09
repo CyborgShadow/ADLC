@@ -886,7 +886,10 @@ func (d *Dispatcher) promptVars(c Candidate, runID string, ws *Workspace) map[st
 	v["criteria"] = renderCriteria(c.Item.Criteria)
 	v["rationale"] = c.Item.Rationale
 	v["attempt"] = fmt.Sprintf("%d", c.Item.Attempts+1)
-	v["what_went_wrong"] = d.whatWentWrong(c.Item.ID, c.Item.Attempts)
+	// One slot in the preamble, two headed sections: what went wrong, and what
+	// has already been settled. A run that cannot see a decision re-asks it.
+	v["what_went_wrong"] = joinSections(d.whatWentWrong(c.Item.ID, c.Item.Attempts),
+		d.decisionsTaken(c.Item.ID))
 	return v
 }
 

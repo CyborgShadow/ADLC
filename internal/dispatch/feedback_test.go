@@ -650,3 +650,62 @@ func (h *harness) itemState(t *testing.T, id string) string {
 	}
 	return it.State
 }
+
+// An answered question reaches the next run on that item.
+//
+// Before this, an answer unblocked the item and reached nobody: the run that
+// picked it up was a fresh agent with no memory of it, so it re-derived the
+// decision or asked it again. Two runs raised the same question about the same
+// acceptance criterion in one night, neither able to see the other's, and both
+// stopped for a person who had already answered it.
+func TestAnAnsweredQuestionReachesTheNextRun(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "ready")
+
+	// Clean case first: an item nobody has asked about carries no heading for a
+	// run to reason about.
+	if got := d.decisionsTaken("S1-001"); got != "" {
+		t.Fatalf("nothing has been decided yet, got %q", got)
+	}
+
+	if _, err := d.Led.Append("engineer", ledger.KindQuestionRaised, "S1-001-Q1",
+		ledger.QuestionRaised{ID: "S1-001-Q1", ItemID: "S1-001", Blocking: true,
+			Text: "AC-3 requires go run to exit 2, which go run cannot do",
+			Lean: "restate it against the built binary", RaisedBy: "engineer"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Led.Append("claude", ledger.KindQuestionAnswered, "S1-001-Q1",
+		ledger.QuestionAnswered{ID: "S1-001-Q1",
+			Answer: "Reword it to name the built binary.", AnsweredBy: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := d.decisionsTaken("S1-001")
+	if !strings.Contains(got, "the built binary") {
+		t.Errorf("the answer did not reach the next run: %q", got)
+	}
+	if !strings.Contains(got, "claude") {
+		t.Errorf("a decision must name who took it: %q", got)
+	}
+	if !strings.Contains(got, "do not ask them again") {
+		t.Errorf("a run given a settled decision must be told it is settled: %q", got)
+	}
+
+	// And it reaches the actual prompt, not just this function.
+	vars := d.promptVars(Candidate{Kind: KindItem, Item: mustItem(t, d, "S1-001")}, "r-1", &Workspace{})
+	if !strings.Contains(vars["what_went_wrong"], "the built binary") {
+		t.Errorf("the decision never reached a prompt: %q", vars["what_went_wrong"])
+	}
+}
+
+func mustItem(t *testing.T, d *Dispatcher, id string) ledger.Item {
+	t.Helper()
+	it, err := d.Led.Item(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return it
+}
