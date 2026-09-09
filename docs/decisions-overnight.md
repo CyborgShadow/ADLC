@@ -193,3 +193,45 @@ gated artefact — `adlc.json`, a role prompt, the preamble — no agent may mak
 and nothing in the control plane notices that an answer is sitting unbuilt. It
 waited until a second item tripped over it. There is no mechanism for this and I
 have not invented one.
+
+## D8 — the morning batch: seven questions, and one thing the agents kept finding
+
+**S1-018-Q2 and Q-t-…-1** (asked by two runs about one item) — an answered
+question struck AC-3, and the *stored* criterion still read the struck wording,
+so every later role was measured against a target a named person had withdrawn.
+I amended it as the control plane, recorded as its own `item.amended` event with
+the answer named as the reason. Both runs reasoned correctly that the amendment
+must be a control-plane action driven by an answer and never something a worker
+proposes: criteria being fixed for a run is what stops an agent rewriting the
+target it is measured against.
+
+**S1-025-Q1** — accept the proposed item: a test in `internal/prompt` asserting
+every assembled role prompt still names `pass`, `fail` and `untested`. Its
+comparison of the two homes was right — `mandatory_clauses` matches an exact
+string, so it would pin the wording of a sentence rather than the fact, and
+rewording the paragraph would fail the gate over no defect.
+
+**S1-027-Q1** — accept: one item moving the CLI onto `CostOf` and deleting the
+"nothing reaches here yet" paragraph. Its call that the stale comment is the more
+corrosive half is right: a comment describing `CostOf` as uncalled invites the
+next janitor to delete it, and that would delete the only place the absent zero
+and the counted one are told apart.
+
+**S1-022-Q1** — accept: `.adlc-prompt.md` into `.gitignore`. A run doing
+`git add -A` was committing its own prompt into the tree it is judged on.
+
+**S1-016-QA1** — the schema-2 anomaly, solved by an arbiter. See the report.
+
+### What they kept finding, which is one thing
+
+Four separate runs, on four separate items, hit the same wall from four
+directions: **an answered question does not become work.** S1-005-Q1's answer
+about `source_roots` sat unbuilt until S1-016 tripped over it. S1-018-Q1's answer
+struck a criterion that stayed on the record until I struck it by hand. In every
+case an operator answered, the item unblocked, and the change the answer implied
+was nobody's job.
+
+Two halves of this are now closed — settled decisions ride into every later run's
+brief (`09b150e`), and `source_roots` is widened (`38e7749`) — but the general
+case is not, and I have not invented a mechanism for it. It is the most valuable
+thing the fleet found about itself overnight, and it found it four times.

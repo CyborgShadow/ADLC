@@ -172,10 +172,20 @@ untrue about who decided.
   workspace is prepared — merging where clean, carrying on where not. I have not
   done it: it rewrites real branches carrying real work, and I want you watching
   that one rather than waking up to it.
-- **The stored schema version says 2 and no merged code defines a 2.** I left it
-  alone. Editing a ledger by hand so a report reads better is the one repair this
-  system must never make. `ledger verify` will keep saying UNKNOWN until a build
-  defines a schema 2 — the honest answer, not a fault.
+- **The schema-2 anomaly is solved, and it was not a mystery.** An arbiter
+  asked, at 09:40, why `adlc_event` carries a `revision` column no build
+  declares. It is S1-016's own: that branch declares `SchemaVersion = 2` and adds
+  the column, and the migration reached the *live* chain because until `5e70b57`
+  at 03:35 agents held a writable handle to the real ledger — a run of
+  `go test ./...` under the gate, from that branch, opened it read-write and
+  applied its own migration. The handle is read-only now and this resolves itself
+  the moment S1-016 merges and the build declares a 2. Integrity held throughout
+  and `ledger verify` said UNKNOWN rather than TAMPERED, with the reason named.
+  I have left both the column and the version alone: a hand-edit of the chain to
+  make a report read better is the one repair this system must never make, and
+  the arbiter is raising a test instead — that a chain table carrying a column
+  the build does not declare still verifies INTACT, so the next stray write is
+  caught by a check rather than by somebody looking for something else.
 - **Post-verification ceremony.** After verification an item still goes through a
   janitor, an arbiter and an improver — three more full agent runs, serially, on
   work whose blast radius is `none`. Collapsing them for source-only work is the
