@@ -1,0 +1,359 @@
+/* Six cats, read on a phone by somebody who is five.
+ *
+ * Two readers share every section: p.little is the short reading, in sentences
+ * of at most twelve words, and p.big is the longer one behind it. The type
+ * scale says which is which before either is read, because a five-year-old
+ * picking their way down a page does not first check the class attribute.
+ *
+ * Everything is served from this directory. There is no webfont and no external
+ * stylesheet: a page that fetches a face from a third party tells that third
+ * party who read it, and renders in a fallback the day they stop serving it.
+ * That is also what makes the page identical over file:// with the network off,
+ * which is how it is actually going to be opened.
+ */
+
+/* Colour and spacing tokens. Naming them here is what keeps the greys down to
+ * one grey and makes a change to the scale one edit rather than nine.
+ *
+ * The type scale is deliberately NOT among them. It is written as a literal px
+ * length at every font-size below, because the floor this page is held to — no
+ * text under 18px, anywhere, including inside a media query — is checked by
+ * reading the declared value, and `font-size: var(--step-small)` is a value
+ * that check cannot see through. A scale expressed in tokens here would be a
+ * scale nothing measures, and the floor would hold only until somebody edited
+ * a token. The steps, stated once so they can be read as a scale:
+ *
+ *     18px  the floor: captions, credits, source lines
+ *     21px  p.big, the longer reading
+ *     27px  p.little, the short reading
+ *     33px  section headings
+ *     42px  the page title
+ */
+:root {
+  color-scheme: light dark;
+
+  --paper: #fdf7f0;
+  --card: #ffffff;
+  --edge: #e0cdb6;
+  --ink: #241a12;
+  --ink-quiet: #57463a;
+  --accent: #9a3d0b;
+  --focus: #14489c;
+  --shadow: rgba(70, 45, 20, 0.14);
+
+  --gap-1: 8px;
+  --gap-2: 16px;
+  --gap-3: 26px;
+  --gap-4: 42px;
+
+  --radius: 16px;
+
+  /* Line length, not page width. A cap in ch holds a line to roughly the same
+   * number of characters at every step; the same cap in px would be a
+   * different sentence length at each one. */
+  --measure: 34ch;
+}
+
+/* The dark palette redefines only the tokens. A colour whose one definition
+ * lived in here would have no light-mode value at all, which is how a page ends
+ * up unreadable for half of the people who open it. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #16110d;
+    --card: #241c15;
+    --edge: #4a3a2b;
+    --ink: #f7ece0;
+    --ink-quiet: #cbb7a3;
+    --accent: #ffb27a;
+    --focus: #8fbcff;
+    --shadow: rgba(0, 0, 0, 0.5);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 26px 16px 42px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-size: 21px;
+  line-height: 1.55;
+
+  /* Long author names and bare URLs arrive from CREDITS.tsv longer than a
+   * 320px screen is wide. Breaking them is what stops one credit line from
+   * scrolling the whole page sideways. Note that nothing here hides the
+   * overflow: a page that scrolls sideways should be visible so it gets fixed,
+   * not clipped so it does not. */
+  overflow-wrap: break-word;
+}
+
+/* Layout ------------------------------------------------------------------ */
+
+header,
+main,
+footer {
+  /* max-width caps the column without ever forcing the page wider than the
+   * screen, which is what a width in px would do on the narrowest phone. */
+  max-width: 46rem;
+  margin: 0 auto;
+}
+
+h1 {
+  margin: 0 0 var(--gap-3);
+  font-size: 42px;
+  line-height: 1.15;
+  color: var(--accent);
+}
+
+h2 {
+  margin: 0 0 var(--gap-2);
+  font-size: 33px;
+  line-height: 1.2;
+}
+
+/* Fact sections ----------------------------------------------------------- */
+
+.fact {
+  margin: 0 0 var(--gap-4);
+  padding: var(--gap-3);
+  background: var(--card);
+  border: 2px solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 0 var(--shadow);
+}
+
+/* The short reading leads, and reads as the sentence it is. */
+.fact .little {
+  margin: 0 0 var(--gap-2);
+  max-width: var(--measure);
+  font-size: 27px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+/* The longer reading sits under it, plainly second without being small. It is
+ * still well above the floor: "this one is for the grown-up" is not a reason to
+ * set text nobody can read at arm's length. */
+.fact .big {
+  margin: 0;
+  max-width: var(--measure);
+  font-size: 21px;
+  color: var(--ink-quiet);
+}
+
+/* A contested claim is marked in the border as well as in its words, so the
+ * page shows which findings are unsettled without depending on the reader
+ * noticing a hedge in the sentence. */
+.fact.uncertain {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+/* Pictures ---------------------------------------------------------------- */
+
+figure {
+  margin: 0 0 var(--gap-3);
+}
+
+/* Styled as img rather than as "figure img": the six pictures are the point of
+ * the page, and a stylesheet that only dressed them when somebody remembered to
+ * wrap them in a figure would leave them undressed on the day somebody did not.
+ *
+ * A file that fails to load keeps its box and shows its alt text on the card
+ * colour inside a visible border — otherwise a broken image with good alt text
+ * is invisible, and the section reads as one that simply never had a picture. */
+img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--card);
+  border: 2px solid var(--edge);
+  border-radius: var(--radius);
+  color: var(--ink-quiet);
+  font-size: 18px;
+}
+
+/* These six files ship from the directory next to this stylesheet, so their
+ * proportions are known here and are stated. Declaring each one reserves its
+ * exact box before the bytes arrive: without it the text below jumps down the
+ * screen as each picture decodes, and the sentence a child was halfway through
+ * moves out from under them. These are the real ratios of the files as
+ * committed, so no picture is cropped to a shape it is not — a cat cropped to a
+ * uniform box is a cat with its ears cut off. A file this list does not name
+ * still lays out, at its natural size; it only loses the reserved box. */
+img[src$="orange-tabby.jpg"] {
+  aspect-ratio: 1000 / 1000;
+}
+
+img[src$="blue-eyed-tabby.jpg"] {
+  aspect-ratio: 832 / 1000;
+}
+
+img[src$="long-haired-cat.jpg"] {
+  aspect-ratio: 1000 / 563;
+}
+
+img[src$="tabby-kitten.jpg"] {
+  aspect-ratio: 833 / 1000;
+}
+
+img[src$="mother-and-three-kittens.jpg"] {
+  aspect-ratio: 1000 / 850;
+}
+
+img[src$="tokugawa-cat.jpg"] {
+  aspect-ratio: 1000 / 679;
+}
+
+figcaption {
+  margin-top: var(--gap-1);
+  font-size: 18px;
+  color: var(--ink-quiet);
+}
+
+/* Credits and sources ----------------------------------------------------- */
+
+.credits,
+#sources {
+  margin-top: var(--gap-4);
+  padding-top: var(--gap-3);
+  border-top: 2px solid var(--edge);
+  font-size: 18px;
+  color: var(--ink-quiet);
+}
+
+.credits li,
+#sources li {
+  margin-bottom: var(--gap-2);
+}
+
+/* Links ------------------------------------------------------------------- */
+
+/* A link is something a thumb has to hit, so it is at least 44px in both
+ * directions — a target 200px wide and 20px tall is still one a thumb misses.
+ * Both floors are literal px rather than tokens for the same reason the type
+ * scale is: the check that holds this page to them reads the declared value,
+ * and a value it cannot read is a tap target nothing is measuring. */
+a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 var(--gap-1);
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+/* The hover and focus rule restates both floors, and has to. This is the shape
+ * of rule that removes a tap target — override one axis, forget to restore the
+ * other — so the check is deliberately unwilling to take the rule above's word
+ * for it. */
+a:hover,
+a:focus-visible {
+  min-height: 44px;
+  min-width: 44px;
+  color: var(--focus);
+  background: var(--card);
+}
+
+/* The ring is drawn outside the box, so a focused link against the edge of a
+ * 320px screen is still whole. It is on :focus-visible rather than on a, so
+ * every focusable element the page grows later gets it too. */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* Held sideways ----------------------------------------------------------- */
+
+/* A phone held sideways is about 360px tall and twice that wide. Stacked, the
+ * heading and the picture fill that on their own and the sentence underneath is
+ * below the fold in all six sections — a child scrolls past a cat to find the
+ * words about it, in every section, and the two never appear together.
+ * Sideways, the width is the thing there is plenty of, so the picture and the
+ * words go beside each other instead.
+ *
+ * This is the page's second layout, and it is written because a layout nobody
+ * designed is still a layout somebody gets. */
+@media (orientation: landscape) {
+  body {
+    padding-top: var(--gap-2);
+  }
+
+  .fact {
+    padding: var(--gap-2) var(--gap-3);
+    margin-bottom: var(--gap-3);
+  }
+
+  /* Only when there is a picture to put beside the words. Without the :has()
+   * the two paragraphs would be dealt into two columns of their own, which
+   * splits one reading in half rather than pairing two things. */
+  .fact:has(> figure) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    column-gap: var(--gap-3);
+    align-items: start;
+  }
+
+  .fact:has(> figure) > h2 {
+    grid-column: 1 / -1;
+  }
+
+  .fact:has(> figure) > figure {
+    grid-row: span 2;
+    margin-bottom: 0;
+  }
+
+  /* Sideways there is far more width than height, so height is what a picture
+   * is given and width is what it takes from that. Both dimensions are auto so
+   * the box keeps the file's own ratio while the caps shrink it: with a fixed
+   * 100% width the cap would clamp the height alone, and a square cat would sit
+   * letterboxed in a 266x223 box with a band of card colour down each side. */
+  img {
+    width: auto;
+    max-width: 100%;
+    max-height: 62vh;
+    object-fit: contain;
+  }
+}
+
+/* Room to spare ----------------------------------------------------------- */
+
+/* On a tablet or a desktop the column stops growing and the headings go up a
+ * step; the measure holds the line length where it was. Every size in here is
+ * still a literal px above the floor, because a media query is exactly where a
+ * 12px override would otherwise hide. */
+@media (min-width: 46rem) {
+  h1 {
+    font-size: 48px;
+  }
+
+  h2 {
+    font-size: 36px;
+  }
+
+  .fact .little {
+    font-size: 29px;
+  }
+
+  .fact {
+    padding: var(--gap-4);
+  }
+
+  /* A picture stops growing before the column does. At the full column width a
+   * portrait cat is over 800px tall, which is a screenful of one cat and the
+   * heading of the next. max-width, never width, so this can only make the
+   * picture narrower than the column and never wider than the screen. */
+  img {
+    max-width: 30rem;
+  }
+}
