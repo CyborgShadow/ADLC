@@ -1,9 +1,9 @@
 /* Six cats, read on a phone by somebody who is five.
  *
- * Two readers share every section: p.little is the short reading, in sentences
- * of at most twelve words, and p.big is the longer one behind it. The type
- * scale says which is which before either is read, because a five-year-old
- * picking their way down a page does not first check the class attribute.
+ * Two readers share every section: p.little is the short reading and p.big is
+ * the longer one behind it. The type scale says which is which before either is
+ * read, because a five-year-old picking their way down a page does not first
+ * check the class attribute.
  *
  * Everything is served from this directory. There is no webfont and no external
  * stylesheet: a page that fetches a face from a third party tells that third
@@ -21,7 +21,9 @@
  * reading the declared value, and `font-size: var(--step-small)` is a value
  * that check cannot see through. A scale expressed in tokens here would be a
  * scale nothing measures, and the floor would hold only until somebody edited
- * a token. The steps, stated once so they can be read as a scale:
+ * a token. The steps at phone width, which is the width they are chosen for —
+ * the @media (min-width: 46rem) block at the foot of the file raises three of
+ * them, and this list does not restate which:
  *
  *     18px  the floor: captions, credits, source lines
  *     21px  p.big, the longer reading
