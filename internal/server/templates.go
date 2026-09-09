@@ -215,6 +215,11 @@ max-width:1220px;margin:24px auto 0}
 {{if .Flash}}<div class="banner{{if .FlashBad}} bad{{end}}">{{.Flash}}</div>{{end}}
 {{if .Attn.Tampered}}<div class="banner bad"><b>The ledger does not describe itself.</b>
 Do not act on anything on this page until that is explained. Run <span class="mono">adlc ledger verify</span>.</div>
+{{else if .Attn.Stalled}}<div class="banner bad"><b>The fleet is stuck, not idle.</b>
+{{plural .Attn.Stalled "item is" "items are"}} open, nothing is running, and the rule that decides
+what to pick up next has nothing to offer — so no lane will touch this however long you leave it.
+The usual cause is work whose deliverable moved back a state and cannot move forward:
+<a href="/roadmap">the roadmap</a> shows where it stopped, and the last run on it says why.</div>
 {{else if .Attn.NotDispatching}}<div class="banner bad"><b>Nothing is being dispatched.</b>
 This process is serving the dashboard and firing no lanes, so all {{.Attn.Lanes}} of them will stay
 at NEVER RUN however much work is waiting — approving something will not start it. That is a

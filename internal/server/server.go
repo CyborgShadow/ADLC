@@ -196,7 +196,12 @@ type attention struct {
 	// not firing rather than only that something is not.
 	Lanes          int
 	NotDispatching bool
-	Stuck          int
+	// OpenWork is how many items are not in a terminal state.
+	OpenWork int
+	// Stalled is open work that nothing in the system can pick up. Zero is the
+	// normal state and any other number is a fault, not a queue.
+	Stalled int
+	Stuck   int
 	// ConsolePending are actions the console drafted and left for a person.
 	// They belong in the same count as everything else waiting on you: an
 	// action nobody presses is work the console believes it has handed over.
@@ -207,7 +212,7 @@ type attention struct {
 func (a attention) Any() bool {
 	return a.Questions > 0 || a.Approvals > 0 || a.Blocked > 0 ||
 		a.DarkLoops > 0 || a.Stuck > 0 || a.ConsolePending > 0 || a.Tampered ||
-		a.NotDispatching
+		a.NotDispatching || a.Stalled > 0
 }
 
 func (s *Server) page(name string, fn func(*http.Request) (string, any, error)) http.HandlerFunc {
@@ -257,6 +262,9 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 		}
 	}
 	for _, it := range items {
+		if !authority.State(it.State).Terminal() {
+			attn.OpenWork++
+		}
 		switch authority.State(it.State) {
 		case authority.StateBlocked:
 			attn.Blocked++
@@ -295,6 +303,24 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 	attn.NotDispatching = !s.Dispatching && attn.Lanes > 0
 	if attn.NotDispatching {
 		attn.DarkLoops = 0
+	}
+
+	// A fleet that is stuck looked exactly like a fleet that is idle.
+	//
+	// A validator rejected a breakdown, the deliverable went back a state with
+	// its rejected items still counting as open work, and the rule that decides
+	// what to pick up then had nothing to offer — forever. Every lane went on
+	// ticking, every liveness figure stayed green, and the banner said "nothing
+	// needs you, the fleet is working" for half an hour over four items that
+	// nothing in the system was ever going to touch again.
+	//
+	// The question is asked through the dispatcher's own selection rule rather
+	// than a second copy of it here, because a stall detector that disagrees
+	// with the thing it is watching is worse than none.
+	if s.Sched != nil && s.Sched.D != nil && attn.OpenWork > 0 && !s.anythingRunning() {
+		if cands, cerr := s.Sched.D.Candidates(dispatch.Filter{}); cerr == nil && len(cands) == 0 {
+			attn.Stalled = attn.OpenWork
+		}
 	}
 	// The nav has two shapes. On Home it is one way out and nothing else: most
 	// of what somebody wants is answered by asking, and a row of eleven tabs is
@@ -926,4 +952,18 @@ func preamblePath(l *prompt.Library) string {
 		return ""
 	}
 	return l.PreamblePath()
+}
+
+// anythingRunning reports whether an agent is working right now.
+//
+// A stall is open work that nothing can pick up. Work waiting on an agent that
+// is already running is not a stall, it is a queue, and calling it one would
+// train somebody to ignore the warning.
+func (s *Server) anythingRunning() bool {
+	active, err := s.Led.ActiveRuns()
+	if err != nil {
+		// Unknown, so say nothing rather than raise an alarm on a failed read.
+		return true
+	}
+	return len(active) > 0
 }

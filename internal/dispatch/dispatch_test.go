@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CyborgShadow/ADLC/internal/authority"
 	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/lease"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
@@ -325,18 +326,39 @@ func TestASegmentUnderItsTargetAsksForWork(t *testing.T) {
 	if cands[0].Worker != "planner" {
 		t.Errorf("generation should route to the generate-capable worker, got %q", cands[0].Worker)
 	}
-
-	// Clean case: a segment at its target asks for nothing, so a generator on a
-	// timer cannot invent work to justify its own cadence.
+	// Clean case: a deliverable whose plan has been ACCEPTED and is at its
+	// target asks for nothing, so a planner on a timer cannot invent work to
+	// justify its own cadence.
+	//
+	// The backlog is not what protects that — the state machine is. A
+	// deliverable past validation is not selected for planning at all, and one
+	// that has NOT got an accepted plan needs a plan whatever its backlog says.
+	// Keying the guard on the backlog alone deadlocked a real deliverable: a
+	// validator rejected its breakdown, it went back to researched with the
+	// rejected items still counting as open work, and no planner was ever
+	// allowed near the plan that had just been rejected.
 	h.item(t, "S1-001", "S1", "ui", "queued")
 	h.item(t, "S1-002", "S1", "ui", "queued")
 	h.item(t, "S1-003", "S1", "ui", "queued")
+	h.moveSegment(t, "S1", string(authority.SegReady))
 	cands2, err := h.D.Candidates(Filter{Capability: config.CapPlan})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cands2) != 0 {
-		t.Fatalf("a segment at its target should not ask for more, got %+v", cands2)
+		t.Fatalf("a deliverable with an accepted plan at its target should not ask for more, got %+v", cands2)
+	}
+
+	// Firing case: the same full backlog, but the plan was rejected and the
+	// deliverable is back at researched. It needs a planner, and refusing one
+	// is the deadlock.
+	h.moveSegment(t, "S1", string(authority.SegResearched))
+	cands3, err := h.D.Candidates(Filter{Capability: config.CapPlan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands3) != 1 {
+		t.Fatalf("a rejected breakdown must be re-plannable however many items it left behind, got %+v", cands3)
 	}
 }
 
@@ -640,4 +662,25 @@ func firstBrace(s string) string {
 		end = len(s)
 	}
 	return s[i:end]
+}
+
+// moveSegment records a roadmap move, so a test can put a deliverable where it
+// needs it without re-creating it.
+func (h *harness) moveSegment(t *testing.T, id, to string) {
+	t.Helper()
+	segs, err := h.Led.Segments()
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := ""
+	for _, s := range segs {
+		if s.ID == id {
+			from = s.State
+		}
+	}
+	if _, err := h.Led.Append("t", ledger.KindSegmentAdvanced, id, ledger.SegmentAdvanced{
+		SegmentID: id, From: from, To: to, Why: "moved by the test",
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

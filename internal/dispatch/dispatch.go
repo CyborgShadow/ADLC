@@ -273,14 +273,27 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 		if f.Capability != "" && f.Capability != capability {
 			continue
 		}
-		// Planning only produces more work when the deliverable actually wants
-		// it. A planner that runs on a timer regardless of backlog depth invents
+		// The backlog check is about TOPPING UP a plan somebody has accepted:
+		// a planner that runs on a timer regardless of backlog depth invents
 		// work to justify its own cadence.
+		//
+		// Before a plan is accepted it is exactly the wrong question. A
+		// validator that rejects a breakdown sends the deliverable back to
+		// researched with the rejected items still there, still counting as
+		// open work — so this gate refused to let a planner near the very plan
+		// that had just been rejected, and the deliverable stopped for good.
 		need := 0
 		if capability == config.CapPlan {
 			need = authority.SegmentNeedsWork(s.TargetOpen, openBySegment[s.ID])
-			if need == 0 {
+			if need == 0 && authority.SegmentPlanAccepted(st) {
 				continue
+			}
+			if need == 0 {
+				// Repairing a rejected breakdown rather than adding to an
+				// accepted one. The ceiling is what the deliverable wants in
+				// total; the planner is told what already exists and amends
+				// rather than piling on.
+				need = s.TargetOpen
 			}
 		}
 		worker, ok := d.Cfg.OwnerFor("", capability)

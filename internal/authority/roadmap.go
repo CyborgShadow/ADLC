@@ -271,3 +271,25 @@ func (s SegmentState) Label() string {
 	}
 	return string(s)
 }
+
+// SegmentPlanAccepted reports whether this deliverable's breakdown has been
+// through validation and accepted.
+//
+// It exists to scope the backlog check on planning. Refusing to plan a
+// deliverable that already has its target number of open items is right when
+// somebody has accepted the plan those items came from — that is topping up,
+// and a planner that tops up on a timer invents work to justify its cadence.
+//
+// It is exactly wrong before then. A validator that rejects a breakdown sends
+// the deliverable back to researched with the rejected items still sitting
+// there, still counting as open work — so the backlog check refused to let a
+// planner near it, and the deliverable stopped for good with four items nobody
+// would ever be allowed to fix. Nothing was broken, nothing was logged, and the
+// lanes went on ticking over it.
+func SegmentPlanAccepted(s SegmentState) bool {
+	switch s {
+	case SegReady, SegBuilding, SegDelivered:
+		return true
+	}
+	return false
+}
