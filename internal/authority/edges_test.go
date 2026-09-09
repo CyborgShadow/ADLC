@@ -54,3 +54,32 @@ func TestThisProjectsChecksGateRealEdges(t *testing.T) {
 		t.Fatal("no check gates any edge, so this guard proves nothing")
 	}
 }
+
+// The config generator emits edges that exist.
+//
+// A hand-written copy of the gated edges lived in the generator, and when the
+// verification chain was renamed it went on emitting the old ones — so
+// `adlc config init` produced a config that `adlc config check` refused, and a
+// new project was dead at its first command. Nobody looked at the generator,
+// because nothing pointed there.
+func TestTheEdgesTheGeneratorEmitsAllExist(t *testing.T) {
+	edges := GatedEdges()
+	if len(edges) == 0 {
+		t.Fatal("the generator would emit a check that gates nothing, which runs nowhere")
+	}
+	cfg := &config.Config{Checks: []config.Check{{ID: "probe", RequiredFor: edges}}}
+	if err := CheckEdgesExist(cfg); err != nil {
+		t.Fatalf("a scaffolded config would be refused by config check: %v", err)
+	}
+	// And the edge work actually crosses first is among them, or an
+	// implementer's work is admitted with nothing run against it.
+	found := false
+	for _, e := range edges {
+		if e == string(StateInProgress)+"->"+string(StateVerifying) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("nothing gates the edge work crosses when it lands")
+	}
+}

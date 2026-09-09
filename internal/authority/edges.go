@@ -43,3 +43,35 @@ func CheckEdgesExist(cfg *config.Config) error {
 		"%s, and that transition is not in the table. A check bound to an edge that does not exist never runs, so the edge it was meant to gate reports zero checks declared and refuses every proposal — while this config reads as valid. Run `adlc transition table` for the edges that exist:\n  %s",
 		bad[0], strings.Join(bad, "\n  "))
 }
+
+// GatedEdges are the transitions a declared check should gate, in a stable
+// order.
+//
+// Read from the table rather than written down twice. When the verification
+// chain was renamed, a hand-written copy in the config generator went on
+// emitting edges that no longer existed — so `adlc config init` produced a
+// config that `adlc config check` refused, and a new project was dead at its
+// first command.
+//
+// An edge earns a place here when crossing it is a claim about the tree: work
+// landing, a verification task clearing, a stage completing, a branch merging.
+// The moves a person drives and the ones the control plane computes are not
+// gated, because there is no agent claim to check against.
+func GatedEdges() []string {
+	want := []struct{ from, to State }{
+		{StateInProgress, StateVerifying},
+		{StateVerifying, StateVerifying},
+		{StateVerifying, StateReviewed},
+		{StateMerging, StateMerged},
+	}
+	var out []string
+	for _, e := range want {
+		if Find(e.from, e.to) == nil {
+			// A pair this build does not have is left out rather than emitted.
+			// Emitting it is the exact defect this function exists to prevent.
+			continue
+		}
+		out = append(out, string(e.from)+"->"+string(e.to))
+	}
+	return out
+}

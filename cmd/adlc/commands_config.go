@@ -344,13 +344,17 @@ func parseCheckSpec(spec string) (config.Check, error) {
 	ch := config.Check{
 		ID: id, Kind: config.KindSource, Command: strings.Fields(command), Verdict: rule,
 		// Gating the edges work actually crosses. A check declared against no
-		// edge runs nowhere, which is the same as not declaring it.
-		RequiredFor: []string{
-			"in_progress->ready_for_testing",
-			"testing->ready_for_review",
-			"judging->ready_for_validation",
-			"merging->merged",
-		},
+		// edge runs nowhere, which is the same as not declaring it — and a
+		// check declared against an edge that does not EXIST is worse, because
+		// the edge it was meant to gate then reports zero checks and refuses
+		// every proposal.
+		//
+		// These are read from the transition table rather than written out, so
+		// renaming a state cannot leave the generator emitting a config that
+		// `adlc config check` refuses. It did: every new project was dead on
+		// arrival at the first command, and the generator was the last place
+		// anybody thought to look.
+		RequiredFor: authority.GatedEdges(),
 	}
 	for _, p := range params {
 		if !allowedParam(takes.required, takes.optional, p.key) {
