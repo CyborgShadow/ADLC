@@ -49,5 +49,7 @@ budget configured" and "budget exhausted" are opposite facts. A model with no pr
 `config_test.go` pins the loader's strictness (an unknown field is refused, a comment is not one, a
 BOM changes nothing), the stall-preventing validations, `OwnerFor` preferring the area then the
 generalist, `KnownArea` being stricter than `OwnerFor`, radius failing closed, checks being selected
-by edge, the verdict channel being explicit, and `SetLoop` refusing a thrashing cadence.
+by edge, the verdict channel being explicit, a `count_pattern` anchored to its line finding that
+line while the unanchored ones count exactly what they counted before, and `SetLoop` refusing a
+thrashing cadence.
 `cmd/adlc/commands_config_test.go` covers the CLI that writes this file.

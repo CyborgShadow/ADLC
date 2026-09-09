@@ -92,7 +92,8 @@ type Check struct {
 	// MinCount is used by VerdictCountMin. Zero discovered units is a failure, so
 	// a scanner check declares how many it must find to have run at all.
 	MinCount int `json:"min_count,omitempty"`
-	// CountPattern must capture one integer group.
+	// CountPattern must capture one integer group. Unlike ExpectPattern above it
+	// is anchored per LINE rather than as written — see lineAnchored.
 	CountPattern string `json:"count_pattern,omitempty"`
 
 	// RequiredFor names the lifecycle edges this check gates, as "from->to".
