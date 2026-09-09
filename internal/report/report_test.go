@@ -98,6 +98,103 @@ func TestAnUnpricedRunIsReportedAsUnknownNotFolded(t *testing.T) {
 	}
 }
 
+// unmeasuredFixture records one worker with two finished runs in the same
+// segment: one that reported its tokens, and one that reported none at all.
+// Both surfaces have to tell the two apart.
+func unmeasuredFixture(t *testing.T) (*ledger.Ledger, *config.Config) {
+	t.Helper()
+	l, cfg := fixture(t)
+	add(t, l, ledger.KindWorkerRegistered, "performer", ledger.WorkerRegistered{Type: "performer"})
+	add(t, l, ledger.KindSegmentCreated, "S1", ledger.SegmentCreated{ID: "S1", Title: "First"})
+	add(t, l, ledger.KindRunStarted, "p-1", ledger.RunStarted{
+		RunID: "p-1", WorkerType: "performer", SegmentID: "S1", Model: "claude-sonnet-4-5"})
+	add(t, l, ledger.KindRunFinished, "p-1", ledger.RunFinished{
+		RunID: "p-1", Verdict: "pass", Model: "claude-sonnet-4-5",
+		Usage: ledger.Usage{InputTokens: 1_000_000}, CostMicros: 3_000_000})
+	add(t, l, ledger.KindRunStarted, "p-2", ledger.RunStarted{
+		RunID: "p-2", WorkerType: "performer", SegmentID: "S1", Model: "claude-sonnet-4-5"})
+	// The defect in one record: a finished run whose envelope carried no usage
+	// block, which the old cost column priced at a confident $0.00.
+	add(t, l, ledger.KindRunFinished, "p-2", ledger.RunFinished{
+		RunID: "p-2", Verdict: "pass", Model: "claude-sonnet-4-5"})
+	return l, cfg
+}
+
+// TestAnUnmeasuredRunRendersAsUnknownNotZero covers both money surfaces. A run
+// that reported no usage contributes zero to every sum, so an unqualified
+// figure is arithmetically right and factually a lie — and $0.00 is exactly
+// what a cost column nobody wired up prints.
+func TestAnUnmeasuredRunRendersAsUnknownNotZero(t *testing.T) {
+	l, cfg := unmeasuredFixture(t)
+
+	fleet, err := Fleet(l, cfg, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg, err := Segment(l, cfg, "S1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, out := range map[string]string{"fleet": fleet, "segment": seg} {
+		if !strings.Contains(out, "UNKNOWN") {
+			t.Errorf("the %s report prices an unmeasured run rather than admitting it cannot:\n%s", name, out)
+		}
+		if !strings.Contains(out, "reported no token usage") {
+			t.Errorf("the %s report should say why the figure is UNKNOWN", name)
+		}
+		// The measured part is still worth showing; what it must not do is stand
+		// in the cost column as though it were the whole cost.
+		if !strings.Contains(out, "$3.00") {
+			t.Errorf("the %s report should still show what it could measure:\n%s", name, out)
+		}
+	}
+
+	// A total containing an unmeasured run is a lower bound, and says so.
+	if !strings.Contains(fleet, "INCOMPLETE") {
+		t.Errorf("a total built partly on unmeasured runs must not be presented as a total:\n%s", fleet)
+	}
+	if !strings.Contains(fleet, "UNMEASURED") || !strings.Contains(fleet, "p-2") {
+		t.Errorf("the fleet report should name the run whose cost is unknown:\n%s", fleet)
+	}
+}
+
+// The clean case. Every run measured means no caveat anywhere: a report that
+// cries INCOMPLETE over a complete record is one nobody reads the second time.
+func TestAFullyMeasuredFleetIsNotLabelledIncomplete(t *testing.T) {
+	l, cfg := fixture(t)
+	add(t, l, ledger.KindWorkerRegistered, "performer", ledger.WorkerRegistered{Type: "performer"})
+	add(t, l, ledger.KindSegmentCreated, "S1", ledger.SegmentCreated{ID: "S1", Title: "First"})
+	add(t, l, ledger.KindRunStarted, "p-1", ledger.RunStarted{
+		RunID: "p-1", WorkerType: "performer", SegmentID: "S1", Model: "claude-sonnet-4-5"})
+	add(t, l, ledger.KindRunFinished, "p-1", ledger.RunFinished{
+		RunID: "p-1", Verdict: "pass", Model: "claude-sonnet-4-5",
+		Usage: ledger.Usage{InputTokens: 1_000_000}, CostMicros: 3_000_000})
+	// A run still in flight has not reported usage yet, which is a different
+	// fact from having reported none, and must not raise the caveat either.
+	add(t, l, ledger.KindRunStarted, "p-2", ledger.RunStarted{
+		RunID: "p-2", WorkerType: "performer", SegmentID: "S1", Model: "claude-sonnet-4-5"})
+
+	fleet, err := Fleet(l, cfg, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg, err := Segment(l, cfg, "S1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, out := range map[string]string{"fleet": fleet, "segment": seg} {
+		if strings.Contains(out, "INCOMPLETE") || strings.Contains(out, "UNMEASURED") {
+			t.Errorf("the %s report flags a record with nothing missing:\n%s", name, out)
+		}
+		if !strings.Contains(out, "$3.00") {
+			t.Errorf("the %s report should show the measured cost:\n%s", name, out)
+		}
+	}
+	if !strings.Contains(fleet, "spend (total)   $3.00\n") {
+		t.Errorf("a complete total carries no caveat:\n%s", fleet)
+	}
+}
+
 func TestAnUnsetCapReportsAsUnlimited(t *testing.T) {
 	l, cfg := fixture(t)
 	out, err := Fleet(l, cfg, at)

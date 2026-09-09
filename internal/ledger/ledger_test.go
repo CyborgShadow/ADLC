@@ -236,6 +236,59 @@ func TestWorkerStatsCountAWorkerWithNoRuns(t *testing.T) {
 	}
 }
 
+// TestAFinishedRunWithNoUsageIsCountedAsUnmeasured is the counterpart to the
+// cost column. A run that reported no tokens adds nothing to CostMicros, so
+// the sum on its own is a lower bound that reads exactly like a total; the
+// count is what lets a surface say so.
+func TestAFinishedRunWithNoUsageIsCountedAsUnmeasured(t *testing.T) {
+	l := open(t)
+	if _, err := l.Append("pm", KindWorkerRegistered, "performer", WorkerRegistered{Type: "performer"}); err != nil {
+		t.Fatal(err)
+	}
+	fin := func(id string, u Usage, cost int64) {
+		t.Helper()
+		if _, err := l.Append("pm", KindRunStarted, id, RunStarted{RunID: id, WorkerType: "performer"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.Append("pm", KindRunFinished, id, RunFinished{
+			RunID: id, Verdict: "pass", Usage: u, CostMicros: cost}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fin("p-1", Usage{InputTokens: 1000, OutputTokens: 500}, 1_500_000)
+	fin("p-2", Usage{}, 0)
+	// Still in flight: it has not reported usage yet, which is a different fact
+	// from having reported none, and counting it here would flag every worker
+	// with a run in progress.
+	if _, err := l.Append("pm", KindRunStarted, "p-3", RunStarted{RunID: "p-3", WorkerType: "performer"}); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := l.WorkerStats("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen bool
+	for _, s := range stats {
+		if s.Type != "performer" {
+			continue
+		}
+		seen = true
+		if s.Unmeasured != 1 {
+			t.Errorf("want exactly the one finished run that reported nothing, got %d", s.Unmeasured)
+		}
+		if s.Unfinished != 1 {
+			t.Errorf("the run in flight is unfinished, not unmeasured; got %d unfinished", s.Unfinished)
+		}
+		if s.CostMicros != 1_500_000 {
+			t.Errorf("the measured part still totals; got %d", s.CostMicros)
+		}
+	}
+	if !seen {
+		t.Fatal("performer did not appear in the stats")
+	}
+}
+
 func TestAStartedRunWithNoEndIsUnknownNotAPass(t *testing.T) {
 	l := open(t)
 	if _, err := l.Append("pm", KindWorkerRegistered, "performer", WorkerRegistered{Type: "performer"}); err != nil {

@@ -27,6 +27,58 @@ func TestCostIsComputedFromRecordedUsage(t *testing.T) {
 	}
 }
 
+// TestAnUnmeasuredRunCostsUnknownNotNothing is the whole item. An envelope
+// that omits its `usage` block parses to four zeros, and pricing those at the
+// going rate produces a confident $0.00 for a run that may have cost anything.
+//
+// The firing case and the clean case differ only in whether anybody counted:
+// the same four zeros price as UNKNOWN when the counters are all the evidence
+// there is, and as a real zero when the caller can vouch for the measurement.
+func TestAnUnmeasuredRunCostsUnknownNotNothing(t *testing.T) {
+	// Absent usage block: a priced model, and still nothing to price.
+	c, known := Cost(budget(), "model-a", ledger.Usage{})
+	if known {
+		t.Fatalf("a run nobody measured must not price as %s", c)
+	}
+	if c != 0 {
+		t.Errorf("the flag carries the meaning; the value stays zero so callers can record it, got %s", c)
+	}
+
+	// Explicit zero: somebody counted, and the count was nothing.
+	c, known = CostOf(budget(), "model-a", ledger.Usage{}, true)
+	if !known {
+		t.Fatal("a measured zero is a known cost, not an absent one")
+	}
+	if c != 0 {
+		t.Errorf("a measured zero costs zero, got %s", c)
+	}
+
+	// And the record is what the two are told apart by.
+	if (ledger.Usage{}).Measured() {
+		t.Error("an all-zero usage block is the shape of one nobody filled in")
+	}
+	if !(ledger.Usage{CacheReadTokens: 1}).Measured() {
+		t.Error("a non-zero counter is evidence somebody counted, whichever counter it is")
+	}
+}
+
+// TestUnknownDoesNotRenderAsMoney pins the reason Unknown is a distinct value:
+// a surface that prints it must not print a price.
+func TestUnknownDoesNotRenderAsMoney(t *testing.T) {
+	if s := Unknown.String(); s != "UNKNOWN" {
+		t.Errorf("want UNKNOWN, got %s", s)
+	}
+	if Unknown.Known() {
+		t.Error("Unknown is the one Micros that is not a cost")
+	}
+	if !Micros(0).Known() {
+		t.Error("a measured zero is a known cost and must not be swept up with it")
+	}
+	if s := Micros(0).String(); s != "$0.00" {
+		t.Errorf("a real zero still renders as money, got %s", s)
+	}
+}
+
 // A model silently costing zero is how a spend cap comes to be never reached.
 func TestAnUnpricedModelCostsUnknownNotZero(t *testing.T) {
 	c, ok := Cost(budget(), "model-nobody-priced", ledger.Usage{InputTokens: 5_000_000})
@@ -78,6 +130,44 @@ func TestSmallCostsDoNotRenderAsZero(t *testing.T) {
 	}
 	if s := Micros(120_000).String(); s != "$0.12" {
 		t.Errorf("want $0.12, got %s", s)
+	}
+}
+
+// TestAnUnknownSpendIsNotAnAffordableOne is the cap half of the same lesson.
+// Both checks take a Micros, so a run nobody measured reaches them as Unknown
+// and must not clear the cap on the strength of being zero — that would admit
+// precisely the runs whose cost nobody can bound.
+func TestAnUnknownSpendIsNotAnAffordableOne(t *testing.T) {
+	b := budget()
+	b.PerDayMicros, b.PerSegmentMicros, b.PerRunMicros = 10_000_000, 10_000_000, 10_000_000
+
+	if v := CheckDispatch(b, Unknown, 0, "S1"); v.OK {
+		t.Error("a daily total that cannot be stated must not read as room to spend")
+	} else if v.Reason != "spend_unknown" {
+		t.Errorf("want spend_unknown, got %q", v.Reason)
+	}
+	if v := CheckDispatch(b, 0, Unknown, "S1"); v.OK {
+		t.Error("a segment total that cannot be stated must not read as room to spend either")
+	}
+	if v := CheckRun(b, Unknown); v.OK {
+		t.Error("a run whose cost is unknown has not been shown to be within the cap")
+	} else if v.Reason != "spend_unknown" {
+		t.Errorf("want spend_unknown, got %q", v.Reason)
+	}
+
+	// The clean case: a run with real token counts, under the cap, is still
+	// admitted. Without it this guard passes vacuously the day it starts
+	// refusing everything, and a fleet that refuses every dispatch is a worse
+	// failure than the one being fixed.
+	cost, known := Cost(b, "model-a", ledger.Usage{InputTokens: 1_000_000}) // $3.00
+	if !known {
+		t.Fatal("a priced model with real counts must price")
+	}
+	if v := CheckRun(b, cost); !v.OK {
+		t.Errorf("a measured run under the per-run cap must be admitted: %s", v.Detail)
+	}
+	if v := CheckDispatch(b, cost, cost, "S1"); !v.OK {
+		t.Errorf("measured spend under both caps must be admitted: %s", v.Detail)
 	}
 }
 

@@ -145,6 +145,11 @@ type WorkerStat struct {
 	Blocked    int
 	Refusals   int
 	CostMicros int64
+	// Unmeasured is how many of this worker's finished runs reported no token
+	// usage at all. It is kept beside CostMicros rather than folded into it
+	// because those runs contribute zero to the sum, so the sum on its own is a
+	// lower bound that reads exactly like a complete figure.
+	Unmeasured int
 	LastMS     int64
 	LowCadence bool
 }
@@ -424,7 +429,8 @@ func (l *Ledger) WorkerStats(segmentID string) ([]WorkerStat, error) {
 		byType[out[i].Type] = &out[i]
 	}
 
-	q := `SELECT worker_type, verdict, finished_ms, cost_micros, started_ms FROM adlc_run`
+	q := `SELECT worker_type, verdict, finished_ms, cost_micros, started_ms,
+		tok_in, tok_out, tok_cache_r, tok_cache_w FROM adlc_run`
 	var args []any
 	if segmentID != "" {
 		q += ` WHERE segment_id=?`
@@ -438,7 +444,9 @@ func (l *Ledger) WorkerStats(segmentID string) ([]WorkerStat, error) {
 	for rows.Next() {
 		var wt, verdict string
 		var fin, cost, started int64
-		if err := rows.Scan(&wt, &verdict, &fin, &cost, &started); err != nil {
+		var u Usage
+		if err := rows.Scan(&wt, &verdict, &fin, &cost, &started,
+			&u.InputTokens, &u.OutputTokens, &u.CacheReadTokens, &u.CacheWriteTokens); err != nil {
 			return nil, err
 		}
 		st := byType[wt]
@@ -455,8 +463,14 @@ func (l *Ledger) WorkerStats(segmentID string) ([]WorkerStat, error) {
 			st.LastMS = started
 		}
 		if fin == 0 {
+			// An unfinished run has not reported usage yet, which is a different
+			// fact from having reported none. Counting it as unmeasured would make
+			// every worker with a run in flight look like it had lost its figures.
 			st.Unfinished++
 			continue
+		}
+		if !u.Measured() {
+			st.Unmeasured++
 		}
 		switch verdict {
 		case "pass":

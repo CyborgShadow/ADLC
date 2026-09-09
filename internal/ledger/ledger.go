@@ -188,6 +188,22 @@ type Usage struct {
 	CacheWriteTokens int64 `json:"cache_write_tokens"`
 }
 
+// Measured reports whether anybody actually counted this run's tokens.
+//
+// An envelope that omits its `usage` block parses to four zeros, which is the
+// same value as a claim to have consumed nothing — and no model run consumes
+// nothing, so the second reading is never the true one. A non-zero counter is
+// therefore the only positive evidence that a count happened, and an all-zero
+// block means the run's cost is UNKNOWN rather than free.
+//
+// Reading it as free is how a spend cap comes to be never reached: every
+// unmeasured run adds exactly nothing to the total, and the total goes on
+// looking affordable no matter how many of them there are.
+func (u Usage) Measured() bool {
+	return u.InputTokens != 0 || u.OutputTokens != 0 ||
+		u.CacheReadTokens != 0 || u.CacheWriteTokens != 0
+}
+
 // RunFinished records the end facts, including what the run cost.
 type RunFinished struct {
 	RunID       string `json:"run_id"`

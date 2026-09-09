@@ -62,8 +62,13 @@ func Fleet(l *ledger.Ledger, cfg *config.Config, now time.Time) (string, error) 
 	fmt.Fprintf(&b, "  runs            %d\n", len(runs))
 	fmt.Fprintf(&b, "  refusals        %d\n", len(refusals))
 	fmt.Fprintf(&b, "  open questions  %d\n", len(openQ))
-	fmt.Fprintf(&b, "  spend (24h)     %s%s\n", sp.Today, capNote(sp.DayCap))
-	fmt.Fprintf(&b, "  spend (total)   %s\n", sp.AllTime)
+	fmt.Fprintf(&b, "  spend (24h)     %s%s%s\n", sp.Today, incompleteNote(sp.UnmeasuredToday), capNote(sp.DayCap))
+	fmt.Fprintf(&b, "  spend (total)   %s%s\n", sp.AllTime, incompleteNote(sp.Unmeasured))
+	if sp.Unmeasured > 0 {
+		fmt.Fprintf(&b, "  UNMEASURED      %d finished run(s) reported no token usage at all, starting with %s.\n"+
+			"                  Their cost is UNKNOWN, not zero. The figures above are a lower bound and not a total.\n",
+			sp.Unmeasured, sp.UnmeasuredRun)
+	}
 	if sp.Unpriced > 0 {
 		fmt.Fprintf(&b, "  UNPRICED        %d finished run(s) used tokens under a model with no price entry, starting with %s.\n"+
 			"                  Their cost is unknown, not zero, and is NOT included above.\n", sp.Unpriced, sp.UnpricedRun)
@@ -201,9 +206,20 @@ func workerActivity(stats []ledger.WorkerStat) string {
 		"worker", "layer", "runs", "pass", "fail", "rej", "blk", "ref", "cost")
 	sort.Slice(stats, func(i, j int) bool { return stats[i].Type < stats[j].Type })
 	for _, s := range stats {
+		// An unmeasured run adds nothing to the sum, so a worker with one has a
+		// cost cell that is arithmetically correct and factually a lie. The cell
+		// says UNKNOWN and the line below it says how much of it was measured,
+		// because "$0.00" is exactly what a cost column nobody wired up prints.
+		cost := spend.Micros(s.CostMicros)
+		if s.Unmeasured > 0 {
+			cost = spend.Unknown
+		}
 		fmt.Fprintf(&b, "  %-18s %-14s %5d %5d %5d %5d %5d %5d %10s\n",
-			s.Type, s.Layer, s.Runs, s.Pass, s.Fail, s.Reject, s.Blocked, s.Refusals,
-			spend.Micros(s.CostMicros))
+			s.Type, s.Layer, s.Runs, s.Pass, s.Fail, s.Reject, s.Blocked, s.Refusals, cost)
+		if s.Unmeasured > 0 {
+			fmt.Fprintf(&b, "  %-18s %d finished run(s) reported no token usage — cost UNKNOWN, not zero; the measured part is %s\n",
+				"", s.Unmeasured, spend.Micros(s.CostMicros))
+		}
 		if s.Unfinished > 0 {
 			fmt.Fprintf(&b, "  %-18s %d run(s) started and never recorded an end — not a pass, not a failure, an unknown\n",
 				"", s.Unfinished)
@@ -335,6 +351,18 @@ func countState(items []ledger.Item, s authority.State) int {
 		}
 	}
 	return n
+}
+
+// incompleteNote marks a sum that is missing the runs nobody measured.
+//
+// The figure itself stays: a lower bound is worth more than an UNKNOWN that
+// throws away everything the record did price. What it must not do is stand
+// there unqualified, because a total and a floor look identical once printed.
+func incompleteNote(unmeasured int) string {
+	if unmeasured == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  INCOMPLETE (a floor: %d run(s) reported no usage)", unmeasured)
 }
 
 func capNote(cap spend.Micros) string {
