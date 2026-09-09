@@ -55,11 +55,46 @@ type CostView struct {
 	Unpriced      int
 	UnpricedModel string
 
+	// Unmeasured is how many finished runs inside the week reported no token
+	// usage at all, and UnmeasuredDay how many of those started inside the 24
+	// hours Day covers. Nobody counted their tokens, so their cost is unknown
+	// for the same reason an unpriced run's is — and they are counted here
+	// rather than dropped, because a run silently skipped leaves a partial sum
+	// on the page wearing the label of a complete one.
+	Unmeasured    int
+	UnmeasuredDay int
+	UnmeasuredRun string
+
 	// OnDefaults means the operator has supplied no price table of their own.
 	OnDefaults bool
 	// Basis is one sentence naming where the rates came from, to be printed
 	// next to the figures rather than filed under a help page.
 	Basis string
+}
+
+// UnmeasuredNote is the sentence that keeps Day, Week and the per-role figures
+// from being read as totals when they are not.
+//
+// It is empty whenever every finished run in the window reported usage, so it
+// is a caveat about something rather than a standing disclaimer beside every
+// figure — one that fires on every page is one nobody reads on the page where
+// it matters.
+func (c CostView) UnmeasuredNote() string {
+	if c.Unmeasured == 0 {
+		return ""
+	}
+	s := plural(c.Unmeasured, "finished run", "finished runs") +
+		" in the last 7 days reported no token usage at all"
+	if c.UnmeasuredDay > 0 {
+		s += ", " + itoa(c.UnmeasuredDay) + " of them in the last 24 hours"
+	}
+	s += ". Nobody counted what they cost, so it is unknown rather than zero: the figures" +
+		" here are lower bounds over the runs that were measured, and the day, week and" +
+		" per-role numbers all exclude them."
+	if c.UnmeasuredRun != "" {
+		s += " First run: " + c.UnmeasuredRun + "."
+	}
+	return s
 }
 
 // Capped reports whether a daily cap is configured at all.
@@ -102,13 +137,26 @@ func (s *Server) CostView() CostView {
 		if !r.Finished() {
 			continue
 		}
-		u := r.Usage
-		if u.InputTokens == 0 && u.OutputTokens == 0 &&
-			u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
-			continue
-		}
 		started := time.UnixMilli(r.StartedMS)
 		if started.Before(weekFrom) {
+			// The window is applied before anything else so that the counts below
+			// describe the same runs the figures do: a run from last month cannot
+			// make this week's total incomplete.
+			continue
+		}
+		u := r.Usage
+		if !u.Measured() {
+			// Counted, not skipped. Four zero counters are an unmeasured run, not
+			// a free one — so dropping it silently is how Day, Week and the
+			// per-role figures come to be presented as complete sums over a set
+			// of runs they do not cover.
+			v.Unmeasured++
+			if !started.Before(dayFrom) {
+				v.UnmeasuredDay++
+			}
+			if v.UnmeasuredRun == "" {
+				v.UnmeasuredRun = r.RunID
+			}
 			continue
 		}
 		v.Runs++
@@ -152,7 +200,13 @@ func (s *Server) CostView() CostView {
 		v.Recorded = spend.Micros(rec)
 		v.Restated = v.Recorded != v.Day
 	}
+	// The caveat travels with Basis because that is the line already printed
+	// under the Day and Week tiles. A count held only in a field is a count on
+	// no surface, and the figure it qualifies is the one an operator acts on.
 	v.Basis = s.PricingBasis()
+	if note := v.UnmeasuredNote(); note != "" {
+		v.Basis += " " + note
+	}
 	return v
 }
 
@@ -168,7 +222,17 @@ func (s *Server) SpendWeek() spend.Micros { return s.CostView().Week }
 func (s *Server) TopSpendingRole() string {
 	v := s.CostView()
 	if v.TopRole == "" {
+		if v.Unmeasured > 0 {
+			// "Nothing has cost anything" over a week of runs nobody measured is
+			// the same false reading as a zero total, said in words.
+			return fmt.Sprintf("nothing measurable this week, over %s that reported no usage",
+				plural(v.Unmeasured, "finished run", "finished runs"))
+		}
 		return "nothing has cost anything this week"
+	}
+	if v.Unmeasured > 0 {
+		return fmt.Sprintf("%s · at least %s (%s excluded, unmeasured)",
+			v.TopRole, v.TopRoleSpend, plural(v.Unmeasured, "finished run", "finished runs"))
 	}
 	return fmt.Sprintf("%s · %s", v.TopRole, v.TopRoleSpend)
 }
