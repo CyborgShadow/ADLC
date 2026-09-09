@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -72,6 +73,10 @@ type Queue struct {
 	// LockTTL steals a lock whose holder is gone. Without it, one crashed
 	// merge stops every future one.
 	LockTTL time.Duration
+	// Protected are the roots a run may not change: the files that govern what
+	// agents are. Empty protects nothing, which is a decision a project makes
+	// in its config rather than one this package makes for it.
+	Protected []string
 	// Now is injectable for tests.
 	Now func() time.Time
 	// Log receives progress lines.
@@ -170,6 +175,30 @@ func (q *Queue) Land(ctx context.Context, branch string) (Outcome, error) {
 			Detail: fmt.Sprintf(
 				"the rebased tree changes %d file(s) this branch never touched, which would silently revert work that landed after it started: %s. Rebase the branch yourself and look at what came back before trying again",
 				len(clobbered), strings.Join(firstN(clobbered, 6), ", "))}, nil
+	}
+
+	// Nothing an agent produced lands on the files that tell agents what to be.
+	//
+	// A role prompt and the preamble govern what every future run of that role
+	// is and is not allowed to do — including the clauses that say a worker
+	// never writes the ledger and never weakens a check to make a gate pass. A
+	// fleet that can edit those has a fleet that can widen its own authority,
+	// one careful-sounding commit at a time, and the prompt-clauses check would
+	// go on passing because the agent that moved the line also moved the test
+	// for it.
+	//
+	// file_scope is declared on every item and was enforced by nothing, so this
+	// was reachable by ordinary work. It is refused here, at the last point
+	// before anything reaches the trunk, rather than trusted earlier.
+	//
+	// A person may still edit these — through the dashboard, or by hand in a
+	// reviewed commit. That is the whole point of the line: the change needs
+	// somebody who is not the thing being changed.
+	if governed := Governed(q.Protected, changed); len(governed) > 0 {
+		return Outcome{Reason: "governed_file_edit", Clobbered: governed, RebasedSHA: rebased,
+			Detail: fmt.Sprintf(
+				"this branch edits %d file(s) that govern what agents are: %s. A run may not change the instructions its own role is given, or any other role's. If the prompt is wrong, raise a question saying what is wrong with it and what it should say — a person decides that",
+				len(governed), strings.Join(firstN(governed, 6), ", "))}, nil
 	}
 
 	if q.Gate != nil {
@@ -389,4 +418,33 @@ func firstN(v []string, n int) []string {
 		return v
 	}
 	return append(append([]string{}, v[:n]...), fmt.Sprintf("… and %d more", len(v)-n))
+}
+
+// Governed returns the changed paths that live under a protected root.
+//
+// Separate and pure for the same reason Unowned is: the rule is the valuable
+// part and it should be testable without a git repository, a worktree or a
+// clock.
+func Governed(roots []string, changed []string) []string {
+	if len(roots) == 0 {
+		return nil
+	}
+	var out []string
+	for _, p := range changed {
+		clean := path.Clean(filepath.ToSlash(p))
+		for _, r := range roots {
+			r = strings.TrimSuffix(path.Clean(filepath.ToSlash(r)), "/")
+			if r == "" || r == "." {
+				continue
+			}
+			// The root itself, or anything beneath it. A prefix match alone
+			// would catch "agentsomething" as if it were inside "agents".
+			if clean == r || strings.HasPrefix(clean, r+"/") {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }

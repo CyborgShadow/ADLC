@@ -49,6 +49,7 @@ const (
 	KindRunFinished        Kind = "run.finished"
 	KindRunActorCorrected  Kind = "run.actor_corrected"
 	KindRunAbandoned       Kind = "run.abandoned"
+	KindLessonRecorded     Kind = "lesson.recorded"
 	KindTransitionAdmitted Kind = "transition.admitted"
 	KindTransitionRefused  Kind = "transition.refused"
 	KindGateObserved       Kind = "gate.observed"
@@ -80,7 +81,7 @@ var KnownKinds = map[Kind]bool{
 	KindPromptPinned: true, KindWorkerRegistered: true, KindNoteRecorded: true,
 	KindItemProposed: true, KindLoopTicked: true, KindSegmentAdvanced: true,
 	KindConsoleAsked: true, KindConsoleReplied: true, KindConsoleActed: true,
-	KindRunAbandoned: true,
+	KindRunAbandoned: true, KindLessonRecorded: true,
 }
 
 // ---------------------------------------------------------------- payloads
@@ -923,4 +924,28 @@ type RunAbandoned struct {
 	Workspace string `json:"workspace,omitempty"`
 	// Why is the evidence in a sentence, for whoever reads this a month later.
 	Why string `json:"why"`
+}
+
+// LessonRecorded is a rule the fleet paid to learn.
+//
+// An improver reads an item's refusals after the work has landed and writes
+// down what a future run should do differently. Before this those notes were
+// retained, readable, and read by nothing — so the same mistake stayed
+// available to be made again at full price. A record that is only ever written
+// to is an archive, not a feedback loop.
+//
+// It is a proposal like any other: the agent writes it into an envelope and the
+// control plane decides what it earns. What it earns is a place in the CONTEXT
+// of future runs, never an edit to their prompt — a prompt file is the
+// definition of a role, and an agent whose output could rewrite the
+// instructions it is given next time is one that grades its own paper.
+type LessonRecorded struct {
+	RunID     string `json:"run_id"`
+	Worker    string `json:"worker"`
+	Area      string `json:"area,omitempty"`
+	ItemID    string `json:"item_id,omitempty"`
+	SegmentID string `json:"segment_id,omitempty"`
+	// Lesson is one rule somebody could follow. Prose that cannot be acted on
+	// costs every future prompt and changes nothing.
+	Lesson string `json:"lesson"`
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -701,4 +702,59 @@ func (l *Ledger) Question(id string) (Question, error) {
 		}
 	}
 	return Question{}, fmt.Errorf("no question %q is on the record", id)
+}
+
+// Lesson is a recorded rule, as read back.
+type Lesson struct {
+	Seq     int64
+	FromRun string
+	Worker  string
+	Area    string
+	Lesson  string
+}
+
+// Lessons returns what the fleet has learned that applies to a run, newest
+// first.
+//
+// Relevance is by role first and area second, because a lesson about how a
+// builder should treat a refused criterion travels with the role, and one about
+// a particular area travels with the area. Anything matching neither is left
+// out: a prompt that accumulates every lesson ever recorded eventually costs
+// more than the mistakes it prevents.
+func (l *Ledger) Lessons(worker, area string, limit int) ([]Lesson, error) {
+	rows, err := l.db.Query(
+		`SELECT seq, payload FROM adlc_event WHERE kind=? ORDER BY seq DESC LIMIT 500`,
+		string(KindLessonRecorded))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Lesson
+	seen := map[string]bool{}
+	for rows.Next() {
+		var seq int64
+		var payload []byte
+		if err := rows.Scan(&seq, &payload); err != nil {
+			return nil, err
+		}
+		var p LessonRecorded
+		if json.Unmarshal(payload, &p) != nil || strings.TrimSpace(p.Lesson) == "" {
+			continue
+		}
+		if worker != "" && p.Worker != worker && (area == "" || p.Area != area) {
+			continue
+		}
+		// The same rule learned twice is one rule.
+		key := strings.ToLower(strings.Join(strings.Fields(p.Lesson), " "))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, Lesson{Seq: seq, FromRun: p.RunID, Worker: p.Worker,
+			Area: p.Area, Lesson: p.Lesson})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, rows.Err()
 }

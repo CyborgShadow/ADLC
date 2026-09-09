@@ -93,6 +93,11 @@ Fill in `usage` from whatever your harness reports; it is what the spend cap is 
 **Commit before you claim anything about your work**, so the evidence describes a tree somebody
 else can check out again.
 
+
+{{what_went_wrong}}
+
+{{lessons}}
+
 ## Questions
 
 A decision you cannot defensibly make — a design fork, a policy call, an ambiguity in the spec —

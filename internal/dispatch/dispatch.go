@@ -134,8 +134,12 @@ type Candidate struct {
 	Capability string
 	Worker     string
 	Need       int
-	Priority   int
-	Why        string
+	// Repairing marks a planning run that is fixing a REJECTED breakdown
+	// rather than adding to an accepted one. The two want opposite things: one
+	// amends what exists, the other files what is missing.
+	Repairing bool
+	Priority  int
+	Why       string
 }
 
 // Key is what a candidate leases: the item id, or the segment for generation,
@@ -283,17 +287,28 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 		// open work — so this gate refused to let a planner near the very plan
 		// that had just been rejected, and the deliverable stopped for good.
 		need := 0
+		repairing := false
 		if capability == config.CapPlan {
 			need = authority.SegmentNeedsWork(s.TargetOpen, openBySegment[s.ID])
 			if need == 0 && authority.SegmentPlanAccepted(st) {
 				continue
 			}
-			if need == 0 {
-				// Repairing a rejected breakdown rather than adding to an
-				// accepted one. The ceiling is what the deliverable wants in
-				// total; the planner is told what already exists and amends
-				// rather than piling on.
-				need = s.TargetOpen
+			// Repairing a rejected breakdown, not adding to an accepted one.
+			// The shortfall is genuinely zero and the planner is told so: asked
+			// for a number instead, it files that many NEW items to satisfy the
+			// rejection rather than fixing the ones that were rejected. That is
+			// exactly what happened — four items became eight, then twelve, and
+			// the validator's second review said so in as many words.
+			repairing = need == 0
+			// A repair that keeps being rejected is a disagreement two agents
+			// will not settle by trying again. Stop, ask a person, and dispatch
+			// nothing further on it — an unanswered blocking question parks the
+			// deliverable visibly, which is the point of raising one.
+			if repairing {
+				if n, looping := d.planIsLooping(s.ID); looping {
+					d.stopTheLoop(s, n)
+					continue
+				}
 			}
 		}
 		worker, ok := d.Cfg.OwnerFor("", capability)
@@ -306,7 +321,7 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 		}
 		out = append(out, Candidate{
 			Kind: KindSegment, Segment: s, Capability: capability,
-			Worker: worker, Need: need, Priority: prio,
+			Worker: worker, Need: need, Repairing: repairing, Priority: prio,
 			Why: fmt.Sprintf("%s is %s and needs %s", s.ID, st, capability),
 		})
 	}
@@ -564,6 +579,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		d.log("OVER BUDGET %s — %s", runID, v.Detail)
 	}
 	d.recordQuestions(runID, c, env)
+	d.recordLessons(runID, c, env)
 
 	if c.Kind == KindSegment {
 		created := 0
@@ -668,6 +684,26 @@ func (d *Dispatcher) admitProposedItems(runID string, c Candidate, env *envelope
 	}
 	created := 0
 	for _, p := range env.Outputs.WorkItems {
+		// Repairing a rejected breakdown: a proposal carrying an id that already
+		// exists is an AMENDMENT to that item, not a duplicate of it.
+		//
+		// There was no other way to say it. An agent has no path that revises an
+		// item, so a planner told to fix four rejected items did the only thing
+		// the envelope allowed and filed four new ones — leaving the rejected
+		// four in place, doubling the plan, and earning the same rejection with
+		// more to read. Four became eight, then twelve, over two hours in which
+		// nothing was built.
+		//
+		// Still a proposal, still decided here. The control plane admits the
+		// amendment or refuses it exactly as it would a new item; what changed is
+		// that "the same item, corrected" is now something an agent can express.
+		if c.Repairing && existing[p.ID] {
+			if err := d.amendProposedItem(runID, c, seg, p); err != nil {
+				return created, err
+			}
+			created++
+			continue
+		}
 		dec := authority.AdmitItem(d.Cfg, p, facts)
 		if _, err := d.Led.Append(d.Actor, ledger.KindItemProposed, p.ID, ledger.ItemProposed{
 			RunID: runID, Worker: c.Worker, SegmentID: seg.ID, ProposedID: p.ID,
@@ -710,7 +746,12 @@ func (d *Dispatcher) promptVars(c Candidate, runID string, ws *Workspace) map[st
 		"work_item_id": "", "segment_id": "", "title": "", "state": "",
 		"blast_radius": "", "resources": "", "file_scope": "", "criteria": "",
 		"brief": "", "needed": "", "existing_items": "", "rationale": "",
+		// What already went wrong, and what the fleet has learned. Empty is the
+		// normal case and reads as nothing rather than as a heading with no
+		// content under it.
+		"what_went_wrong": "", "lessons": "", "attempt": "1",
 	}
+	v["lessons"] = d.lessons(c.Worker, c.Item.Area)
 	if c.Kind == KindSegment {
 		v["segment_id"] = c.Segment.ID
 		v["title"] = c.Segment.Title
@@ -719,6 +760,13 @@ func (d *Dispatcher) promptVars(c Candidate, runID string, ws *Workspace) map[st
 		v["needed"] = fmt.Sprintf("%d", c.Need)
 		v["rationale"] = c.Segment.Rationale
 		v["existing_items"] = d.existingItemSummary(c.Segment.ID)
+		v["what_went_wrong"] = d.whyThePlanCameBack(c.Segment.ID)
+		if c.Repairing {
+			// Said in the one variable the prompt already builds its instruction
+			// around. A planner told "produce up to 4" while repairing produces
+			// four more; told "produce 0", it has to fix what is there.
+			v["needed"] = "0"
+		}
 		if c.Capability != config.CapPlan {
 			v["criteria"] = d.existingItemSummary(c.Segment.ID)
 		}
@@ -733,6 +781,8 @@ func (d *Dispatcher) promptVars(c Candidate, runID string, ws *Workspace) map[st
 	v["file_scope"] = strings.Join(c.Item.FileScope, ", ")
 	v["criteria"] = renderCriteria(c.Item.Criteria)
 	v["rationale"] = c.Item.Rationale
+	v["attempt"] = fmt.Sprintf("%d", c.Item.Attempts+1)
+	v["what_went_wrong"] = d.whatWentWrong(c.Item.ID, c.Item.Attempts)
 	return v
 }
 
