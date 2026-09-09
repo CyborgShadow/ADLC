@@ -167,3 +167,29 @@ changed how the fleet behaves.
   raise the same question, neither can see the other's, and both wait for you.
   It happened twice in one night (S1-002-Q1/Q2, and S1-017's pair). The fix is
   the same shape as the lessons mechanism and I have not built it.
+
+## D7 — S1-016-QJ1: an answered question that could not become work
+
+**Asked because** a janitor found two documents outside its file scope made stale
+by its item, and noticed that `adlc.json` still reads
+`["cmd","internal","agents","site",…]` even though **S1-005-Q1 had already been
+answered "yes, add docs and README.md to source_roots"**. Second item in a row to
+trip over the same gap.
+
+**Decided:** the follow-up item for the operating.md replay sample, yes. Refusing
+to edit `docs/overnight-report.md` from a hygiene run was right, and for the
+better reason it gave — a dated narrative addressed to you is not a document to
+be silently corrected. But its premise on that file was wrong and I said so:
+`SchemaVersion` is still 1 and `ledger verify` still reports the mismatch, so
+that bullet stands.
+
+I made the `source_roots` change myself in `38e7749`, taking the trade-off the
+janitor named with eyes open: this turns every tree-walking guard loose on prose
+and will surface a backlog before it surfaces a regression.
+
+**The thing worth your attention** is what it found underneath: **an answered
+question does not become work.** When the change an answer implies lands in a
+gated artefact — `adlc.json`, a role prompt, the preamble — no agent may make it,
+and nothing in the control plane notices that an answer is sitting unbuilt. It
+waited until a second item tripped over it. There is no mechanism for this and I
+have not invented one.
