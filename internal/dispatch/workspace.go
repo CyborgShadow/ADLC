@@ -118,11 +118,7 @@ func (d *Dispatcher) workspaceBase(itemID string) string {
 		// this did before a branch was consulted at all.
 		return ""
 	}
-	trunk := d.Cfg.Dispatch.Trunk
-	if trunk == "" {
-		trunk = "main"
-	}
-	if !d.branchHasWork(trunk, b) {
+	if !d.branchHasWork(d.trunk(), b) {
 		return ""
 	}
 	return b

@@ -180,10 +180,7 @@ func (d *Dispatcher) branchFor(itemID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	trunk := d.Cfg.Dispatch.Trunk
-	if trunk == "" {
-		trunk = "main"
-	}
+	trunk := d.trunk()
 	var first string
 	for _, r := range runs {
 		if r.Branch == "" {
@@ -200,6 +197,16 @@ func (d *Dispatcher) branchFor(itemID string) (string, error) {
 	// the queue report what it found rather than reporting no branch at all,
 	// which reads as a run that never recorded one.
 	return first, nil
+}
+
+// trunk is the branch everything here is measured against. The default lives in
+// one place: two callers each spelling out the fallback are two places for it to
+// drift from the branch the merge queue actually lands on.
+func (d *Dispatcher) trunk() string {
+	if t := d.Cfg.Dispatch.Trunk; t != "" {
+		return t
+	}
+	return "main"
 }
 
 // branchHasWork reports whether a branch carries commits the trunk does not.
