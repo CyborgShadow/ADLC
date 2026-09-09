@@ -3,6 +3,7 @@ package dispatch
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/CyborgShadow/ADLC/internal/authority"
@@ -395,5 +396,52 @@ func TestEachLaneSeesItsOwnTaskInAStageWithSeveral(t *testing.T) {
 	// The others are still outstanding.
 	if left, _ := d.Candidates(Filter{Capability: config.CapJudge}); len(left) != 1 {
 		t.Fatalf("clearing one task hid the others; judge saw %d", len(left))
+	}
+}
+
+// Refresh is called from every lane at once, and its moves must land once.
+//
+// Two concurrent passes both saw a verification stage complete, both appended
+// the transition out of it, and the chain recorded a move FROM a state the item
+// had already left. The item's state came out right, which is the dangerous
+// part: the defect was visible only as a duplicated line in a log, and an
+// append-only record cannot take a false entry back.
+func TestConcurrentRefreshMovesAnItemOnce(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	for _, cap := range authority.VerificationCapabilities() {
+		if _, err := d.Led.Append("cli", ledger.KindVerificationPassed, "S1-001",
+			ledger.VerificationPassed{ItemID: "S1-001", Capability: cap,
+				RunID: "r-" + cap, Round: 0}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = d.Refresh()
+		}()
+	}
+	wg.Wait()
+
+	evs, err := d.Led.Events(1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moves := 0
+	for _, e := range evs {
+		if e.Kind == ledger.KindItemTransitioned && e.Subject == "S1-001" &&
+			strings.Contains(string(e.Payload), string(authority.StateReviewed)) {
+			moves++
+		}
+	}
+	if moves != 1 {
+		t.Fatalf("the item left verification %d times; a transition that did not happen is on the chain forever", moves)
 	}
 }

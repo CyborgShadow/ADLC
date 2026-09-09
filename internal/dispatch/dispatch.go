@@ -82,6 +82,9 @@ type Dispatcher struct {
 	Led    *ledger.Ledger
 	Lib    *prompt.Library
 	Leases *lease.Store
+	// refreshMu serialises Refresh: its moves are read-check-write against the
+	// ledger, and two concurrent passes recorded the same transition twice.
+	refreshMu sync.Mutex
 	// Watch, when set, is told about a run's output as it happens. It is a view
 	// for whoever is waiting, never an input: see watch.go.
 	Watch  Watcher
@@ -1063,6 +1066,17 @@ func (d *Dispatcher) advanceSegment(segmentID, runID, capability, verdict string
 // which is exactly the kind of silent stall that is impossible to distinguish
 // from an empty backlog.
 func (d *Dispatcher) Refresh() (int, error) {
+	// One at a time. Refresh is called from every lane goroutine, and the moves
+	// it makes are read-check-write against the ledger: two passes both saw a
+	// verification stage complete, both appended the transition out of it, and
+	// the chain recorded a move FROM a state the item had already left.
+	//
+	// The item's state came out right, which is the dangerous part — the defect
+	// was visible only as a duplicated line in a log. An append-only record
+	// cannot take that back, and a transition that did not happen is exactly
+	// the kind of entry that makes the rest of the chain untrustworthy.
+	d.refreshMu.Lock()
+	defer d.refreshMu.Unlock()
 	items, err := d.Led.Items("")
 	if err != nil {
 		return 0, err
