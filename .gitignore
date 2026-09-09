@@ -19,11 +19,17 @@
 # it needed never landed.
 .adlc-prompt.md
 
-# The product a test run builds. This repository is the control plane; a
-# deliverable it was pointed at to prove the pipeline is not part of it, and a
-# cat website in the history of a control plane is residue nobody can explain
-# later. Note the consequence: with this ignored, a builder's `git add -A` stages
-# nothing for a site item, so the merge queue sees an empty branch. If a run has
-# to LAND its deliverable, this line comes out and the exclusion moves to the
-# push instead.
+# The product a run builds.
+#
+# This repository is the control plane: ADLC is the product here, and anything
+# it is pointed at to prove the pipeline is scaffolding rather than source. The
+# relationship inverts wherever ADLC is USED — there the product is tracked and
+# ADLC itself is what gets ignored — so neither tree ever carries the other's
+# history, and nobody later has to explain why a control plane contains a
+# children's website.
+#
+# The consequence, stated rather than discovered: with this ignored,
+# a builder's "git add -A" stages nothing for an item scoped here, so the merge
+# queue sees an empty branch and the item does not land. That is correct for
+# this repository and wrong for one where the site IS the deliverable.
 site/
