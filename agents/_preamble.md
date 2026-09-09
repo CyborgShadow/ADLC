@@ -100,12 +100,12 @@ objects and `status` is one of exactly three words — `pass`, `fail`, `untested
 ```json
 "outputs": {
   "criteria": [
-    { "id": "AC-1", "status": "pass", "command_index": 0,
-      "evidence": "what the command at that index showed" },
-    { "id": "AC-2", "status": "fail", "command_index": 1,
-      "evidence": "the failing output, quoted" },
-    { "id": "AC-3", "status": "untested", "command_index": 1,
-      "evidence": "the suite ran, but nothing in it exercises this criterion" }
+    { "id": "AC-1", "text": "the criterion, as the item states it", "status": "pass",
+      "command_index": 0, "evidence": "what the command at that index showed" },
+    { "id": "AC-2", "text": "…", "status": "fail",
+      "command_index": 1, "evidence": "the failing output, quoted" },
+    { "id": "AC-3", "text": "…", "status": "untested",
+      "command_index": 1, "evidence": "the suite ran, but nothing in it exercises this criterion" }
   ]
 }
 ```
@@ -114,7 +114,6 @@ objects and `status` is one of exactly three words — `pass`, `fail`, `untested
 `met` or `ok`. An envelope carrying any other status fails to parse and the whole run is refused,
 because a synonym reads as a pass to a person and means nothing to the control plane, and a
 criterion with no command behind it is exactly the one somebody needs to see.
-
 
 {{rigour}}
 
