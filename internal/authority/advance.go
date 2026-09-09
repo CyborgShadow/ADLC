@@ -65,8 +65,14 @@ func NextState(from State, capability, verdict string, radius config.Radius, pol
 		// one of them has cleared, and that is computed by Refresh from the
 		// record rather than proposed by whichever run happened to finish last.
 		if !IsVerification(capability) {
+			// Named as one role rather than three, because this sentence is what
+			// a refused agent reads to work out what happened to it. A tester
+			// told that verification is "the tester's, the judge's and the
+			// validator's" concludes it was sent to the wrong item and goes
+			// looking for a dispatch bug, when what is true is that its task no
+			// longer exists.
 			return stall(from, capability,
-				"verification is the tester's, the judge's and the validator's; nothing else clears this stage")
+				"verification is the judge's alone; the gate and the acceptance criteria now answer what the tester and the validator were asked")
 		}
 		if pass {
 			// A self-edge: decided like any other proposal, so every guard on it
@@ -223,10 +229,14 @@ func CapabilityFor(s State) (capability string, priority int) {
 	case StateReviewed, StateJanitoring:
 		return config.CapCurate, 4
 	case StateVerifying:
-		// A stage with several outstanding tasks has no single capability.
-		// CapabilitiesFor answers for it; this one reports the first still
-		// outstanding so callers that can only think in one still work.
-		return config.CapTest, 5
+		// The stage's one task. This returned CapTest from when it held three
+		// and this function reported the first outstanding one — which quietly
+		// made `test` look like a capability the lifecycle still dispatches,
+		// long after nothing did. `config check` then reported the tester as a
+		// role with work and no lane to drain it, every run, over work that does
+		// not exist; and a warning that fires on a deliberate choice is one
+		// people learn to scroll past.
+		return config.CapJudge, 5
 	case StateInProgress:
 		return config.CapImplement, 8
 	case StateReady:

@@ -42,7 +42,16 @@ func Gather(l *ledger.Ledger, itemID, runID string, commitReachable func(string)
 		return f, err
 	}
 	for _, p := range props {
-		if p.Admitted && State(p.To) == StateReadyForTesting {
+		// StateVerifying, because that is where a builder drives an item now.
+		// This read StateReadyForTesting, a state the lifecycle stopped entering
+		// when the three serial checking stages collapsed into one — so it
+		// matched nothing, ImplementRunID stayed empty, and the guard at
+		// ReqIndependentVerifier that compares it to the proposing run never
+		// fired. The role half of that guard still held (a worker that
+		// implements cannot verify), which is why nothing looked broken; the run
+		// half, which catches one run doing both, was answering about a state no
+		// item reaches.
+		if p.Admitted && State(p.To) == StateVerifying {
 			f.ImplementRunID = p.RunID
 			break // newest first
 		}

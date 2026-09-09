@@ -145,7 +145,7 @@ func (d *Dispatcher) mergeGate() merge.GateFunc {
 		// Fall back to whatever gates work leaving the builder. A merge queue
 		// with no checks fast-forwards anything, which is most of what this
 		// step exists to prevent.
-		from, to = string(authority.StateInProgress), string(authority.StateReadyForTesting)
+		from, to = string(authority.StateInProgress), string(authority.StateVerifying)
 		checks = d.Cfg.ChecksForEdge(from, to)
 	}
 	if len(checks) == 0 {

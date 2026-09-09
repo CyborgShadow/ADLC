@@ -1506,3 +1506,40 @@ func TestTheDispatcherGivesTheScopeRulesTheFactsTheyJudgeOn(t *testing.T) {
 		t.Errorf("an item claiming an open item's file was refused as %q, want file_scope_collision — the open scopes never reached the rule", byID["S1-004"])
 	}
 }
+
+// The author guard has two halves and only one of them was working.
+//
+// ReqIndependentVerifier refuses a verification proposal on two grounds: the
+// worker's ROLE (a worker that implements may not verify) and the RUN's identity
+// (the exact run that produced the work may not judge it). The second compares
+// against Facts.ImplementRunID, and authority_test.go builds that fact by hand —
+// so the rule was covered and the gathering of it was not. Gather looked for an
+// admitted transition into `ready_for_testing`, a state the lifecycle stopped
+// entering when the three checking stages became one, so the field stayed empty
+// and the comparison was against "". Nothing looked broken, because the role
+// half still refused the obvious cases.
+//
+// This test is at the dispatch level deliberately: it is the wiring that failed,
+// not the rule.
+func TestTheRunThatBuiltTheWorkIsIdentifiedForTheAuthorGuard(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	// The builder's own admitted move out of in_progress, which is what names
+	// the run that must not be allowed to verify its own work.
+	if _, err := h.Led.Append("t", ledger.KindTransitionAdmitted, "S1-001", ledger.TransitionOutcome{
+		RunID: "e-built-it", ItemID: "S1-001", Worker: "frontend",
+		From: string(authority.StateInProgress), To: string(authority.StateVerifying),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := authority.Gather(h.Led, "S1-001", "j-1", func(string) bool { return true }, "", testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.ImplementRunID != "e-built-it" {
+		t.Fatalf("the run that drove the item into verification is %q, want e-built-it — with it empty the author guard compares every verifier against nothing", f.ImplementRunID)
+	}
+}

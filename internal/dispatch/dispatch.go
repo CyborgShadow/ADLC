@@ -1430,14 +1430,23 @@ func (d *Dispatcher) Refresh() (int, error) {
 			to, reason, detail := string(authority.StateReviewed), "verification_complete",
 				"every task in the stage passed: "+strings.Join(authority.VerificationCapabilities(), ", ")
 			if len(failed) > 0 {
-				// Backward, once, with everything the stage observed. The
-				// builder gets all three complaints at once instead of one per
-				// round, and adversarial review still outranks the rest: a
-				// blocker is a rejection whoever else agreed.
+				// Backward, once, with everything the stage observed.
+				//
+				// There is no rejection branch here any more, and its absence is
+				// the point. It read `failed[CapValidate] -> rejected`, from when
+				// three tasks ran together and a validator's blocker outranked
+				// two passes. `verification.failed` is only written for a
+				// capability IsVerification admits, that is the judge alone, and
+				// nothing else writes the kind — so the branch could not be
+				// entered by anything the dispatcher does. A test hand-seeded the
+				// event and kept it looking alive.
+				//
+				// A rejection now arrives the way every other decision does: the
+				// judge reports `reject`, NextState routes it to
+				// verifying -> rejected, and the authority admits it against
+				// ReqBlockerFinding. Recording a failure and inferring a
+				// rejection from it was a second path to one decision.
 				to, reason = string(authority.StateInProgress), "verification_failed"
-				if _, blocked := failed[config.CapValidate]; blocked {
-					to = string(authority.StateRejected)
-				}
 				detail = "the stage reported and " + plural(len(failed), "task", "tasks") +
 					" did not clear — " + failedTasks(failed)
 			}
