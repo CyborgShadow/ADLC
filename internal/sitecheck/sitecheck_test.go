@@ -76,6 +76,22 @@ func ruleCases() map[string]ruleCase {
 		"html.data-source": {clean, func(t *testing.T) fstest.MapFS {
 			return swap(t, goodSite(t), "index.html", `data-source="s3"`, `data-source="s9"`)
 		}},
+		"html.source-pinned": {clean, func(t *testing.T) fstest.MapFS {
+			// A citation that resolves inside the page and was never fetched:
+			// html.data-source passes it, because #s3 still exists and still
+			// carries a link.
+			return swap(t, goodSite(t), "index.html",
+				`https://pmc.ncbi.nlm.nih.gov/articles/PMC10340037/`,
+				`https://example.org/invented-oxytocin-paper`)
+		}},
+		"html.source-topic": {clean, func(t *testing.T) fstest.MapFS {
+			// The purring source under the oxytocin claim. Both halves are real
+			// — a pinned URL, an id that resolves — so this is the case no rule
+			// about resolution can see.
+			return swap(t, goodSite(t), "index.html",
+				`data-topic="oxytocin-touch" data-source="s3"`,
+				`data-topic="oxytocin-touch" data-source="s2"`)
+		}},
 		"html.uncertain": {clean, func(t *testing.T) fstest.MapFS {
 			return swap(t, goodSite(t), "index.html", `class="fact uncertain"`, `class="fact"`)
 		}},
@@ -673,6 +689,169 @@ func TestTheAddedRulesNameTheDefectAndNotJustTheRule(t *testing.T) {
 			if !strings.Contains(line, want) {
 				t.Errorf("the %s line does not carry %q: %s", c.ruleID, want, line)
 			}
+		}
+	}
+}
+
+// TestThePinnedSourcesAreOnePerTopicAndAbsoluteHTTPS holds the allowlist to
+// what it promises: five entries, one for each topic the page covers, each
+// naming an author, a year and a URL somebody could open. It runs the real
+// table and then tables that break it one way each, because a check that only
+// ever sees the good list passes on the day it stops looking — and this one
+// guards the only thing standing between a citation and an invention.
+func TestThePinnedSourcesAreOnePerTopicAndAbsoluteHTTPS(t *testing.T) {
+	if got := pinnedProblems(pinnedSources); len(got) != 0 {
+		t.Errorf("the pinned table does not satisfy its own rules: %s", strings.Join(got, "; "))
+	}
+	if len(pinnedSources) != len(requiredTopics) {
+		t.Errorf("%d pinned sources for %d topics: one per topic is what makes a citation checkable against the claim it sits under",
+			len(pinnedSources), len(requiredTopics))
+	}
+
+	// Each mutation is one defect, so a report that stops naming one of them is
+	// visible rather than absorbed by the others.
+	drop := func(topic string) []pinnedSource {
+		var out []pinnedSource
+		for _, p := range pinnedSources {
+			if p.Topic != topic {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	edit := func(topic string, f func(*pinnedSource)) []pinnedSource {
+		out := append([]pinnedSource(nil), pinnedSources...)
+		for i := range out {
+			if out[i].Topic == topic {
+				f(&out[i])
+			}
+		}
+		return out
+	}
+
+	for _, c := range []struct {
+		name string
+		list []pinnedSource
+		want string
+	}{
+		{"a topic with no source", drop("purring"), `"purring" has no pinned source`},
+		{"a topic pinned twice", append(drop("purring"), pinnedSources[1], pinnedSources[1]), `"purring" has 2 pinned sources`},
+		{"a topic the page does not cover", append(drop("purring"),
+			pinnedSource{Topic: "kneading", Author: "A", Year: 2020, URL: "https://example.org/x"}),
+			`"kneading" is pinned but is not one of the topics`},
+		{"an http URL", edit("purring", func(p *pinnedSource) { p.URL = "http://example.org/x" }), "is not https"},
+		{"a bare DOI", edit("purring", func(p *pinnedSource) { p.URL = "10.1038/s41598-025-31536-7" }), "is not https"},
+		{"a relative URL", edit("purring", func(p *pinnedSource) { p.URL = "/articles/PMC12695941/" }), "is not https"},
+		{"no URL at all", edit("purring", func(p *pinnedSource) { p.URL = "" }), "names no URL"},
+		{"no author", edit("purring", func(p *pinnedSource) { p.Author = " " }), "names no author"},
+		{"no year", edit("purring", func(p *pinnedSource) { p.Year = 0 }), "names no year"},
+	} {
+		got := strings.Join(pinnedProblems(c.list), "; ")
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: pinnedProblems did not report %q, it reported %q", c.name, c.want, got)
+		}
+	}
+}
+
+// TestThePurringSourceRecordsWhatItTreatsAsContested is the pairing the page
+// depends on. html.uncertain requires purring to be the section written in a
+// hedged voice; a source pinned under it that called the mechanism settled
+// would put the page and its own citation in disagreement, with nothing on
+// either surface saying so.
+func TestThePurringSourceRecordsWhatItTreatsAsContested(t *testing.T) {
+	p, ok := pinnedFor("https://pmc.ncbi.nlm.nih.gov/articles/PMC12695941/")
+	if !ok {
+		t.Fatal("the purring source is not in the allowlist")
+	}
+	if p.Topic != "purring" {
+		t.Fatalf("that URL is pinned to %q, not purring", p.Topic)
+	}
+	if strings.TrimSpace(p.Contested) == "" {
+		t.Error("the purring entry records nothing as contested, while the page states its purring claim as a maybe")
+	}
+
+	// The hedged section and the entry have to be about the same topic. Reading
+	// it off the fixture rather than asserting the string keeps the two from
+	// being edited apart.
+	fsys := goodSite(t)
+	root := parseHTML(string(fsys["index.html"].Data))
+	hedged := root.findAll(func(n *node) bool {
+		return n.tag == "section" && n.hasClass("fact") && n.hasClass("uncertain")
+	})
+	if len(hedged) != 1 {
+		t.Fatalf("the page has %d sections marked \"fact uncertain\", want 1", len(hedged))
+	}
+	if got := hedged[0].attrs["data-topic"]; got != p.Topic {
+		t.Errorf("the hedged section covers %q but the entry recording a contested source is pinned to %q", got, p.Topic)
+	}
+}
+
+// TestTheCitationRulesNameTheURLAndTheTopic pins the half of each line a reader
+// acts on. AC-2 and AC-3 of S1-007 are each phrased as a command whose OUTPUT
+// carries a particular thing — the URL that is not pinned, the topic and the
+// source id that disagree — so a Detail cut down to "bad citation" satisfies
+// TestRules and sends a reviewer to a page with five sources on it.
+func TestTheCitationRulesNameTheURLAndTheTopic(t *testing.T) {
+	fixtures := ruleCases()
+	for _, c := range []struct {
+		ruleID string
+		want   []string
+	}{
+		{"html.source-pinned", []string{"s3", "https://example.org/invented-oxytocin-paper", "not a pinned source"}},
+		{"html.source-topic", []string{"oxytocin-touch", "s2", "purring"}},
+	} {
+		f, ok := fixtures[c.ruleID]
+		if !ok || f.firing == nil {
+			t.Errorf("%s has no firing fixture, so this test asserts over nothing", c.ruleID)
+			continue
+		}
+		got := runRule(t, c.ruleID, f.firing(t))
+		if len(got) != 1 {
+			t.Errorf("%s gave %d findings (%s), want 1", c.ruleID, len(got), joinFindings(got))
+			continue
+		}
+		line := got[0].String()
+		for _, want := range c.want {
+			if !strings.Contains(line, want) {
+				t.Errorf("the %s line does not carry %q: %s", c.ruleID, want, line)
+			}
+		}
+	}
+}
+
+// TestAnOmittedTopicIsNamedRatherThanPassingBySilence is S1-007's AC-4. A page
+// that simply leaves a subject out cites nothing wrong and resolves everything
+// it does cite, so every citation rule passes it; what refuses it is the
+// declared topic list, and the finding has to name the topic that is missing
+// rather than report a count.
+func TestAnOmittedTopicIsNamedRatherThanPassingBySilence(t *testing.T) {
+	fsys := goodSite(t)
+	body := string(fsys["index.html"].Data)
+	const section = `<section class="fact" data-topic="choosing-a-person" data-source="s5">`
+	start := strings.Index(body, section)
+	if start < 0 {
+		t.Fatal("the fixture no longer has a choosing-a-person section to remove")
+	}
+	end := strings.Index(body[start:], "</section>")
+	if end < 0 {
+		t.Fatal("the choosing-a-person section is not closed")
+	}
+	trimmed := body[:start] + body[start+end+len("</section>"):]
+	fsys = setFile(fsys, "index.html", []byte(trimmed))
+
+	got := runRule(t, "html.topics", fsys)
+	if len(got) != 1 {
+		t.Fatalf("html.topics gave %d findings (%s), want 1", len(got), joinFindings(got))
+	}
+	if !strings.Contains(got[0].Detail, "choosing-a-person") {
+		t.Errorf("the finding does not name the topic that was left out: %q", got[0].Detail)
+	}
+
+	// The citation rules stay quiet, which is why the topic list is what has to
+	// refuse this: four sections citing four pinned sources are each correct.
+	for _, id := range []string{"html.source-pinned", "html.source-topic"} {
+		if fired := runRule(t, id, fsys); len(fired) != 0 {
+			t.Errorf("%s fired on a page whose remaining citations are all correct: %s", id, joinFindings(fired))
 		}
 	}
 }

@@ -98,25 +98,70 @@ func checkHTMLTopics(s *site) []Finding {
 
 const sourcesSectionID = "sources"
 
+// sourcesSection and sourceEntries are the one definition of what the citation
+// rules read, because three rules resolve a citation and a second definition
+// would let them disagree about what an entry is: html.data-source would report
+// a reference as resolved while html.source-pinned reported the entry it
+// resolved to as absent, and a reader would have to guess which was right.
+func sourcesSection(f *htmlFile) *node {
+	for _, n := range f.root.tags("section") {
+		if n.attrs["id"] == sourcesSectionID {
+			return n
+		}
+	}
+	return nil
+}
+
+// sourceEntries maps each id inside the sources section to the element carrying
+// it. An entry is anything with an id, not specifically an <li>, so a list
+// rewritten as a <dl> or a set of <p> stays checked rather than quietly
+// stopping being a source list.
+func sourceEntries(sources *node) map[string]*node {
+	out := map[string]*node{}
+	if sources == nil {
+		return out
+	}
+	for _, n := range sources.findAll(func(n *node) bool { return n.attrs["id"] != "" }) {
+		if _, taken := out[n.attrs["id"]]; !taken {
+			out[n.attrs["id"]] = n
+		}
+	}
+	return out
+}
+
+// entryURL is the document a source entry points at. A citation is a link:
+// without one the entry is a name and a year, which is exactly what an invented
+// citation also has.
+func entryURL(entry *node) string {
+	if href, ok := entry.attrs["href"]; ok {
+		return strings.TrimSpace(href)
+	}
+	for _, n := range entry.findAll(func(n *node) bool { _, ok := n.attrs["href"]; return ok }) {
+		return strings.TrimSpace(n.attrs["href"])
+	}
+	return ""
+}
+
+// citingNodes returns the elements inside a section that carry data-source,
+// including the section itself. The page puts the citation on the <section>,
+// but a claim cited on the paragraph that makes it is the same citation and has
+// to be checked the same way.
+func citingNodes(sec *node) []*node {
+	var out []*node
+	if _, ok := sec.attrs["data-source"]; ok {
+		out = append(out, sec)
+	}
+	return append(out, sec.findAll(func(n *node) bool { _, ok := n.attrs["data-source"]; return ok })...)
+}
+
 // checkHTMLDataSource resolves every citation against the sources section. A
 // data-source pointing at nothing is a citation that looks like evidence in
 // the markup and is evidence of nothing on the page.
 func checkHTMLDataSource(s *site) []Finding {
 	var out []Finding
 	for _, f := range s.htmls {
-		var sources *node
-		for _, n := range f.root.tags("section") {
-			if n.attrs["id"] == sourcesSectionID {
-				sources = n
-				break
-			}
-		}
-		ids := map[string]bool{}
-		if sources != nil {
-			for _, n := range sources.findAll(func(n *node) bool { return n.attrs["id"] != "" }) {
-				ids[n.attrs["id"]] = true
-			}
-		}
+		sources := sourcesSection(f)
+		ids := sourceEntries(sources)
 		cited := f.root.findAll(func(n *node) bool { _, ok := n.attrs["data-source"]; return ok })
 		if len(cited) == 0 {
 			continue
@@ -129,14 +174,98 @@ func checkHTMLDataSource(s *site) []Finding {
 		}
 		for _, n := range cited {
 			for _, ref := range strings.Fields(n.attrs["data-source"]) {
-				if !ids[ref] {
+				if _, ok := ids[ref]; !ok {
 					out = append(out, Finding{RuleID: "html.data-source", Path: f.path,
 						Detail: fmt.Sprintf("<%s> cites data-source %q, which is not an id inside section#%s (ids there: %s)",
-							n.tag, ref, sourcesSectionID, strings.Join(sortedKeys(ids), ", "))})
+							n.tag, ref, sourcesSectionID, strings.Join(entryIDs(ids), ", "))})
 				}
 			}
 		}
 	}
+	return out
+}
+
+// checkHTMLSourcePinned refuses a citation nobody fetched. Every other rule
+// about the sources list asks whether a reference resolves inside the page,
+// which an invented source satisfies for the price of adding an <li>: a
+// plausible author, a plausible year and a URL that was never opened reads
+// exactly like the four beside it. The allowlist in sources.go is the only
+// thing that can tell them apart, because each entry there is a URL some run
+// requested and recorded a status for.
+func checkHTMLSourcePinned(s *site) []Finding {
+	var out []Finding
+	for _, f := range s.htmls {
+		sources := sourcesSection(f)
+		if sources == nil {
+			continue // html.data-source owns a page whose citations resolve to nothing
+		}
+		entries := sourceEntries(sources)
+		for _, id := range entryIDs(entries) {
+			raw := entryURL(entries[id])
+			if raw == "" {
+				out = append(out, Finding{RuleID: "html.source-pinned", Path: f.path,
+					Detail: fmt.Sprintf("source #%s links to nothing: a name and a year is what an invented citation has too", id)})
+				continue
+			}
+			if _, ok := pinnedFor(raw); !ok {
+				out = append(out, Finding{RuleID: "html.source-pinned", Path: f.path,
+					Detail: fmt.Sprintf("source #%s cites %q, which is not a pinned source; the pinned ones are %s",
+						id, raw, strings.Join(pinnedURLs(), ", "))})
+			}
+		}
+	}
+	return out
+}
+
+// checkHTMLSourceTopic refuses a real source attached to the wrong claim. That
+// defect passes every check that only asks whether a reference resolves: the
+// URL is one somebody fetched, the id exists in the sources list, and the
+// citation still says nothing about the sentence it is attached to. What the
+// allowlist adds is the topic each source was read for, so the page and the
+// table can be held to agreeing about which claim it supports.
+func checkHTMLSourceTopic(s *site) []Finding {
+	var out []Finding
+	for _, f := range s.htmls {
+		sources := sourcesSection(f)
+		if sources == nil {
+			continue // html.data-source owns that
+		}
+		entries := sourceEntries(sources)
+		for _, sec := range factSections(f) {
+			topic := strings.TrimSpace(sec.attrs["data-topic"])
+			if topic == "" {
+				continue // html.topics owns a section that names no topic
+			}
+			for _, n := range citingNodes(sec) {
+				for _, ref := range strings.Fields(n.attrs["data-source"]) {
+					entry, ok := entries[ref]
+					if !ok {
+						continue // html.data-source owns a reference that resolves to nothing
+					}
+					pinned, ok := pinnedFor(entryURL(entry))
+					if !ok {
+						continue // html.source-pinned owns a source nobody fetched
+					}
+					if pinned.Topic != topic {
+						out = append(out, Finding{RuleID: "html.source-topic", Path: f.path,
+							Detail: fmt.Sprintf("data-topic %q cites source %q, which was read for %q: a real source under the wrong claim resolves like a correct one",
+								topic, ref, pinned.Topic)})
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// entryIDs orders a set of source ids, so two runs over the same page report
+// the same findings in the same order.
+func entryIDs(entries map[string]*node) []string {
+	out := make([]string, 0, len(entries))
+	for id := range entries {
+		out = append(out, id)
+	}
+	sort.Strings(out)
 	return out
 }
 

@@ -77,6 +77,8 @@ var rules = []Rule{
 	{ID: "html.fact-parts", Family: "html", check: checkHTMLFactParts},
 	{ID: "html.topics", Family: "html", check: checkHTMLTopics},
 	{ID: "html.data-source", Family: "html", check: checkHTMLDataSource},
+	{ID: "html.source-pinned", Family: "html", check: checkHTMLSourcePinned},
+	{ID: "html.source-topic", Family: "html", check: checkHTMLSourceTopic},
 	{ID: "html.uncertain", Family: "html", check: checkHTMLUncertain},
 	{ID: "html.img-alt", Family: "html", check: checkHTMLImgAlt},
 	{ID: "html.img-src", Family: "html", check: checkHTMLImgSrc},
