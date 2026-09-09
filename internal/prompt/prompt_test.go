@@ -435,6 +435,27 @@ func TestAPreambleCaughtMidWriteKeepsTheLoadedCopy(t *testing.T) {
 		t.Errorf("the clause check lost the clause the loaded copy still carries: %+v", got)
 	}
 
+	// A fence opened and not yet closed: the truncation landing a few bytes
+	// later. Nothing parses the preamble, so the whole fragment would be served
+	// as the fleet policy — the same failure as above, reached by a read that is
+	// not empty and so passes the guard above it.
+	if err := os.WriteFile(path, []byte("---\nid: _pre"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asm, err = lib.Assemble("builder", map[string]string{"work_item_id": "S1-032", "workdir": "w"})
+	if err != nil {
+		t.Fatalf("a half-fenced preamble should not stop a dispatch: %v", err)
+	}
+	if !strings.Contains(asm.Text, "You never write the ledger.") {
+		t.Errorf("a fragment was dispatched as the whole fleet policy: %q", asm.Text)
+	}
+	if lib.PreambleText() == "" || lib.PreambleSHA() != digest(preamble) {
+		t.Error("the loaded preamble was replaced by a fence that was never closed")
+	}
+	if got := lib.CheckClauses([]string{"You never write the ledger."}); len(got) != 0 {
+		t.Errorf("the clause check lost the clause the loaded copy still carries: %+v", got)
+	}
+
 	// The clean case: a whole merged preamble still reaches the next assembly.
 	merged := "---\nid: _preamble\n---\nMERGED POLICY. You never write the ledger.\n"
 	if err := os.WriteFile(path, []byte(merged), 0o644); err != nil {
@@ -446,5 +467,28 @@ func TestAPreambleCaughtMidWriteKeepsTheLoadedCopy(t *testing.T) {
 	}
 	if !strings.Contains(asm.Text, "MERGED POLICY") {
 		t.Errorf("a whole merged preamble was refused as if it were mid-write: %q", asm.Text)
+	}
+}
+
+// The other side of the fence guard. It turns on what the loaded copy had, not
+// on what a preamble ought to look like: key it to the fresh read alone and a
+// fleet whose policy file carries no front matter is frozen at its startup copy
+// for the life of the process — exactly the staleness the refresh exists to
+// remove, reintroduced by the guard protecting it, and silently.
+func TestAFencelessPreambleStillRefreshes(t *testing.T) {
+	lib := library(t, map[string]string{
+		"_preamble.md": "FLEET POLICY. You never write the ledger.\n",
+		"builder.md":   builder,
+	})
+	merged := "MERGED POLICY. You never write the ledger.\n"
+	if err := os.WriteFile(filepath.Join(lib.Dir, "_preamble.md"), []byte(merged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asm, err := lib.Assemble("builder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(asm.Text, "MERGED POLICY") {
+		t.Errorf("a fenceless preamble was frozen at its startup copy: %q", asm.Text)
 	}
 }

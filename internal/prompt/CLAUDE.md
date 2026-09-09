@@ -53,11 +53,16 @@ trusts a writer that gives it none of the guarantees `writeFile` does — `git m
 that returns nothing is not an error to fall through on: an empty role body dispatches an agent
 with the preamble and no job, which is what `SetPrompt` refuses in those words, and an empty
 preamble makes `Assemble` drop fleet policy and the seam with it, so the run carries none of the
-mandatory clauses and nothing reports it. So a fresh read is only taken when it is a whole prompt:
+mandatory clauses and nothing reports it. So a fresh read is only taken when it is a whole file:
 a blank body, or front matter the loaded copy had and the fresh read has lost — an opened fence not
-yet closed — keeps the copy already loaded. A truncation landing after the front matter still reads
-as a short prompt and cannot be told from one; that window is narrowed, not closed, and the gate's
-clause check is what catches a committed tree.
+yet closed — keeps the copy already loaded. **Both guards apply on both paths.** The preamble is
+never parsed, so a fragment reaching it is served as the entire fleet policy rather than as one
+role's body; guarding only the role file leaves the wider failure open on the narrower path. Note
+that the fence test keys on what the loaded copy had, not on what a file ought to look like: key it
+to the fresh read alone and a preamble carrying no front matter is frozen at its startup copy for
+the life of the process. A truncation landing after the front matter still reads as a short file
+and cannot be told from one; that window is narrowed, not closed, and the gate's clause check is
+what catches a committed tree.
 
 **Reading the map without the lock.** One process holds one library and both the scheduler and the
 dashboard are given it — `adlc schedule run --serve` runs them side by side. A Go map read during a
@@ -71,8 +76,9 @@ stored, assembly being stable, a missing clause being reported, and a BOM not ch
 identity. It also pins the refresh from three sides: a role prompt and the preamble edited on disk
 by something other than `SetPrompt` reaching the next assembly, an unchanged file still assembling
 byte for byte the same, and a vanished file keeping the copy already loaded rather than stopping
-the dispatch. Two more pin the mid-write guard from both sides: a truncated or half-fenced role
-prompt and a truncated preamble each keeping the loaded copy, clauses and seam intact, and a whole
-merged file still reaching the next assembly so the guard cannot pass by refusing everything.
+the dispatch. Three more pin the mid-write guard from every side: a role prompt and a preamble
+each caught truncated and each caught half-fenced keep the loaded copy, clauses and seam intact; a
+whole merged file still reaches the next assembly, so the guard cannot pass by refusing everything;
+and a preamble that never had front matter still refreshes, so it cannot pass by freezing one.
 `survey_test.go` pins that a project with no prompts still gets an answer and that
 the survey separates what is there from what is named.

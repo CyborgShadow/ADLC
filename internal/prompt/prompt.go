@@ -212,7 +212,34 @@ func (l *Library) reloadPreamble() {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
+	// The same window a few bytes later: a fence opened and not yet closed.
+	// reloadPrompt refuses this shape because readPrompt hands the fragment back
+	// as the body; here it is worse, because nothing parses the preamble at all,
+	// so every byte of the fragment is served as the whole fleet policy — a run
+	// dispatched with none of the mandatory clauses it must not delete from its
+	// own instructions, and Assemble returning no error to say so.
+	//
+	// A truncation landing after the front matter still reads as a whole, short
+	// preamble and cannot be told from one, so this narrows the window rather
+	// than closing it — as on the role path. The gate's clause check is what
+	// catches a committed tree.
+	if hasClosedFront(l.Preamble) && !hasClosedFront(text) {
+		return
+	}
 	l.Preamble = text
+}
+
+// hasClosedFront reports whether text opens a front matter fence and closes it.
+//
+// It mirrors the fence test readPrompt parses with, but cannot share that code:
+// readPrompt needs the closing index into text it has already normalised, while
+// the preamble is stored with its line endings as read. So this tolerates both
+// endings rather than assuming the caller normalised — a CRLF preamble would
+// otherwise fail the test on every read, and a guard comparing the loaded copy
+// against the fresh one would then be dead on the hosts that have them.
+func hasClosedFront(s string) bool {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.HasPrefix(s, "---\n") && strings.Contains(s[4:], "\n---")
 }
 
 func (l *Library) get(id string) (Prompt, error) {
