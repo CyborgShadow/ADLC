@@ -1246,15 +1246,13 @@ func TestJudgeS1023RefusedVerificationRecordsRedAndClearsNothing(t *testing.T) {
 }
 
 // TestAFailedVerificationTaskIsRecordedOnTheClaim is the other half of the
-// asymmetry the guard above rests on, and the half a merge could quietly drop.
+// asymmetry the guard above rests on, and the half a merge resolution can drop
+// in silence. The comment on the verification.failed append in dispatchOne
+// states why that half is recorded on the claim instead; this is the assertion
+// that holds it there.
 //
-// A claimed PASS clears a task, so it is recorded only once the gate has
-// confirmed it. A claimed FAILURE grants the item nothing — it can only hold
-// the stage back — and it has to reach the record whatever happens to the
-// transition off the back of it, because the stage settles once with
-// everything it observed. Here the gate refuses that transition too, and the
-// report still lands: without this, a failing task whose own edge went RED
-// would report nothing at all and the stage would never settle.
+// The case it needs is the awkward one: the gate refuses the transition off
+// the back of the failing report as well, and the report still has to land.
 func TestAFailedVerificationTaskIsRecordedOnTheClaim(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
