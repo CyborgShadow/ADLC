@@ -34,9 +34,13 @@ func TestCostIsComputedFromRecordedUsage(t *testing.T) {
 // The firing case and the clean case differ only in whether anybody counted:
 // the same four zeros price as UNKNOWN when the counters are all the evidence
 // there is, and as a real zero when the caller can vouch for the measurement.
+// Both go through CostOf, because that is where measurement is answered — see
+// TestTheCostFlagIsAboutThePriceTableOnly for why it is not answered in Cost.
 func TestAnUnmeasuredRunCostsUnknownNotNothing(t *testing.T) {
-	// Absent usage block: a priced model, and still nothing to price.
-	c, known := Cost(budget(), "model-a", ledger.Usage{})
+	// Absent usage block: a priced model, and still nothing to price. The
+	// counters are all the evidence there is, so Measured() is the whole answer.
+	absent := ledger.Usage{}
+	c, known := CostOf(budget(), "model-a", absent, absent.Measured())
 	if known {
 		t.Fatalf("a run nobody measured must not price as %s", c)
 	}
@@ -54,11 +58,31 @@ func TestAnUnmeasuredRunCostsUnknownNotNothing(t *testing.T) {
 	}
 
 	// And the record is what the two are told apart by.
-	if (ledger.Usage{}).Measured() {
+	if absent.Measured() {
 		t.Error("an all-zero usage block is the shape of one nobody filled in")
 	}
 	if !(ledger.Usage{CacheReadTokens: 1}).Measured() {
 		t.Error("a non-zero counter is evidence somebody counted, whichever counter it is")
+	}
+}
+
+// TestTheCostFlagIsAboutThePriceTableOnly pins the meaning two callers outside
+// this package already read off Cost's second value. internal/dispatch and
+// cmd/adlc turn a false into "this model has no price entry", so an earlier
+// attempt at this item, which also returned false for a run nobody measured,
+// made the shipped binary print `model "claude-opus-5" has no price entry` for
+// an envelope with no usage block — about a model priced by the defaults. That
+// sends an operator to add a price already there and buries the fact that held.
+//
+// Both directions, because a flag quietly given a second meaning is caught only
+// by asserting what it does NOT mean as well as what it does.
+func TestTheCostFlagIsAboutThePriceTableOnly(t *testing.T) {
+	if c, priced := Cost(budget(), "model-a", ledger.Usage{}); !priced {
+		t.Errorf("a priced model is priced whether or not anybody counted its tokens, got %s unpriced; "+
+			"a false here reaches an operator as \"model-a has no price entry\", which is untrue", c)
+	}
+	if _, priced := Cost(budget(), "model-nobody-priced", ledger.Usage{InputTokens: 1}); priced {
+		t.Error("a model in neither the operator's table nor the defaults must still report unpriced")
 	}
 }
 

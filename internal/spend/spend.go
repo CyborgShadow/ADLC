@@ -47,30 +47,52 @@ func (m Micros) String() string {
 	return fmt.Sprintf("%s$%d.%02d", neg, v/1_000_000, (v%1_000_000)/10_000)
 }
 
-// Cost prices one run's usage.
+// Cost prices one run's usage at the model's rate.
 //
-// The cost is UNKNOWN — ok false — two ways, and neither of them is zero. The
-// model may have no price entry. Or nobody counted the tokens: an envelope
-// that omits its `usage` block parses to four zeros, and pricing those at the
-// going rate produces a confident $0.00 for a run that may have cost anything.
-// Both are how a spend cap comes to be never reached.
+// The flag says whether the model had a price entry, and nothing else. It is
+// deliberately not also the answer to "did anybody count the tokens", because
+// two callers outside this package — internal/dispatch and cmd/adlc — render a
+// false as the sentence "this model has no price entry". A flag carrying both
+// unknowns therefore makes the tool state something untrue about a model that
+// is priced: an envelope with no `usage` block under claude-opus-5 printed
+// `model "claude-opus-5" has no price entry`, which sends an operator to add a
+// price that is already there and buries the fact that actually held, which is
+// that nobody counted. One bool cannot carry two unknowns without misnaming
+// one of them.
+//
+// So the measurement question lives in CostOf, and a caller holding the usage
+// block answers it explicitly. Cost prices four zeros at the going rate and
+// returns a confident zero, which is the trap this item exists about: a surface
+// spending money on behalf of a run it cannot vouch for goes through CostOf
+// instead. Teaching the dispatcher and the CLI to say WHICH unknown they hit
+// needs both of those files, outside this item's file scope, and is open as
+// S1-017-Q2.
 //
 // The value returned alongside a false ok is zero rather than Unknown, because
 // callers record it in the ledger's cost column and a sentinel written there
 // would be read back as money. The flag is what carries the meaning; a caller
 // that ignores it turns an unknown cost into a free one.
 func Cost(b config.Budget, model string, u ledger.Usage) (Micros, bool) {
-	return CostOf(b, model, u, u.Measured())
+	c, src := CostFrom(b, model, u)
+	return c, src != config.PriceUnpriced
 }
 
-// CostOf prices usage whose measurement the caller can vouch for.
+// CostOf prices usage the caller can say whether anybody measured.
 //
-// Cost has to infer measurement from the counters, because an omitted usage
-// block and a genuine zero arrive as the same four zeros. A caller that
-// watched the block itself — a harness reporting a real zero, or a test
-// pinning that case — says so here and gets a priced zero rather than an
-// UNKNOWN. Passing false is how a caller that knows the figures were never
-// filled in refuses to have them priced at all.
+// An omitted usage block and a genuine zero arrive as the same four zeros, so
+// only a caller that watched the block arrive can tell them apart. Passing
+// false is how it refuses to have counters nobody filled in priced at the going
+// rate, which produces a confident $0.00 for a run that may have cost anything
+// and is how a spend cap comes to be never reached. A caller holding nothing
+// but the counters passes u.Measured() and gets the same refusal.
+//
+// Nothing in the running fleet reaches here yet, and that is the open half of
+// this item rather than dead code: the dispatcher and the CLI are the two
+// callers that hold the usage block, and moving them onto this pair — the
+// recorded cost for the ledger column, the flag for the cap — is what
+// S1-017-Q2 asks for and what their file scope currently forbids. It is the
+// only place the absent zero and the counted one are told apart at the pricing
+// boundary, so deleting it as uncalled would delete the distinction with it.
 func CostOf(b config.Budget, model string, u ledger.Usage, measured bool) (Micros, bool) {
 	if !measured {
 		return 0, false
