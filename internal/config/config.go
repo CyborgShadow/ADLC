@@ -399,7 +399,6 @@ func (c *Config) validate() error {
 	if len(c.Workers) == 0 {
 		return fmt.Errorf("no workers declared")
 	}
-	done := 0
 	wseen := map[string]bool{}
 	for _, w := range c.Workers {
 		if w.Type == "" {
@@ -413,13 +412,26 @@ func (c *Config) validate() error {
 			if !knownCapability(c) {
 				return fmt.Errorf("worker %s: unknown capability %q", w.Type, c)
 			}
-			if c == CapValidate {
-				done++
-			}
 		}
 	}
-	if done == 0 {
+	// The terminal edge needs an owner, and it must not be the worker that did
+	// the work.
+	if len(c.WorkersWith(CapValidate)) == 0 {
 		return fmt.Errorf("no worker declares the %q capability: the terminal edge needs an owner, and it must not be the worker that did the work", CapValidate)
+	}
+	// And every other task in the verification stage needs one too.
+	//
+	// Verification holds three tasks — test, judge and adversarial review — and
+	// an item leaves the stage only when all three have cleared. A roster
+	// missing any of them strands every item there forever: the lane for the
+	// missing capability ticks, finds work it cannot route, and the item waits
+	// for a verdict nobody can give. That reads as a busy fleet, which is the
+	// failure this whole validation section exists to refuse.
+	for _, need := range []string{CapTest, CapJudge} {
+		if len(c.WorkersWith(need)) == 0 {
+			return fmt.Errorf(
+				"no worker declares the %q capability. Verification requires test, judge and validate to all pass before an item leaves the stage, so an item would wait there forever for a verdict nobody can give — and a fleet stalled that way looks exactly like a busy one", need)
+		}
 	}
 	for area, owner := range c.Routing {
 		if !wseen[owner] {

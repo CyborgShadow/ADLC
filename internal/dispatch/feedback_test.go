@@ -350,3 +350,50 @@ func TestAnUnreviewedPlanAdvisesSourceOnlyWorkAndHoldsTheRest(t *testing.T) {
 		}
 	}
 }
+
+// Each lane sees its own task in a stage that holds several.
+//
+// The lane filter was applied before the stage was expanded, against the first
+// of its capabilities — so a judge lane asked for judge work, was compared
+// against test, and skipped every item in verification. It ticked 269 times and
+// dispatched nothing while three items sat waiting for a judge, and every
+// liveness figure stayed green the whole time.
+func TestEachLaneSeesItsOwnTaskInAStageWithSeveral(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+
+	for _, cap := range authority.VerificationCapabilities() {
+		got, err := d.Candidates(Filter{Capability: cap})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("the %s lane saw %d candidates in verification, want 1", cap, len(got))
+		}
+		if got[0].Capability != cap {
+			t.Errorf("the %s lane was offered %s work", cap, got[0].Capability)
+		}
+	}
+
+	// And a task already cleared is not offered again: the lane that did it
+	// would otherwise pick the same item up for the rest of the stage.
+	if _, err := d.Led.Append("cli", ledger.KindVerificationPassed, "S1-001",
+		ledger.VerificationPassed{ItemID: "S1-001", Capability: config.CapTest,
+			RunID: "t-1", Round: 0}); err != nil {
+		t.Fatal(err)
+	}
+	done, err := d.Candidates(Filter{Capability: config.CapTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(done) != 0 {
+		t.Fatalf("a cleared task was offered again: %+v", done)
+	}
+	// The others are still outstanding.
+	if left, _ := d.Candidates(Filter{Capability: config.CapJudge}); len(left) != 1 {
+		t.Fatalf("clearing one task hid the others; judge saw %d", len(left))
+	}
+}

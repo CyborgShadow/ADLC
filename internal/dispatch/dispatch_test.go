@@ -180,6 +180,7 @@ func specialists() ([]config.WorkerDecl, map[string]string) {
 		{Type: "frontend", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}, Areas: []string{"ui"}},
 		{Type: "generalist", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}},
 		{Type: "verifier", Layer: "verification", Prompt: "verifier", Capabilities: []string{config.CapTest}},
+		{Type: "judge", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapJudge}},
 		{Type: "security", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapValidate}, Areas: []string{"auth"}},
 		{Type: "validator", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapValidate}},
 		{Type: "planner", Layer: "direction", Prompt: "generator", Capabilities: []string{config.CapPlan}},

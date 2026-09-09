@@ -22,6 +22,7 @@ func base() map[string]any {
 		"workers": []map[string]any{
 			{"type": "builder", "prompt": "impl", "capabilities": []string{CapImplement}},
 			{"type": "checker", "prompt": "verify", "capabilities": []string{CapTest}},
+			{"type": "adjudicator", "prompt": "judge", "capabilities": []string{CapJudge}},
 			{"type": "reviewer", "prompt": "review", "capabilities": []string{CapValidate}},
 		},
 		"routing": map[string]string{"core": "builder"},
@@ -53,7 +54,7 @@ func mustLoad(t *testing.T, m map[string]any) *Config {
 
 func TestAValidConfigLoads(t *testing.T) {
 	c := mustLoad(t, base())
-	if c.Project != "t" || len(c.Checks) != 1 || len(c.Workers) != 3 {
+	if c.Project != "t" || len(c.Checks) != 1 || len(c.Workers) != 4 {
 		t.Fatalf("unexpected: %+v", c)
 	}
 	// Defaults are filled rather than left zero, so nothing downstream has to
@@ -159,6 +160,8 @@ func TestACommentIsNotAnUnknownField(t *testing.T) {
 func TestOwnerForPrefersTheAreaThenTheGeneralist(t *testing.T) {
 	m := base()
 	m["workers"] = []map[string]any{
+		{"type": "checker", "prompt": "p", "capabilities": []string{CapTest}},
+		{"type": "adjudicator", "prompt": "p", "capabilities": []string{CapJudge}},
 		{"type": "alpha", "prompt": "p", "capabilities": []string{CapValidate}, "areas": []string{"security"}},
 		{"type": "general", "prompt": "p", "capabilities": []string{CapValidate}},
 		{"type": "zulu", "prompt": "p", "capabilities": []string{CapValidate}, "areas": []string{"perf"}},

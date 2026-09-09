@@ -220,7 +220,17 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 		if capability == "" {
 			continue
 		}
-		if f.Capability != "" && f.Capability != capability {
+		// The lane filter is applied per TASK, below, and not here.
+		//
+		// A stage with several outstanding tasks has no single capability, and
+		// CapabilityFor answers with the first of them. Filtering on that
+		// answer threw the whole item away before its other tasks were ever
+		// considered: a judge lane asked for judge work, was compared against
+		// test, and skipped every item in verification. The judge lane ticked
+		// 269 times and dispatched nothing while three items sat waiting for a
+		// judge, and every liveness figure stayed green throughout.
+		if f.Capability != "" && f.Capability != capability &&
+			st != authority.StateVerifying {
 			continue
 		}
 		if !f.allowsArea(it.Area) {
