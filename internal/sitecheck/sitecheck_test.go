@@ -284,7 +284,11 @@ func TestParseFamilies(t *testing.T) {
 		t.Errorf("an empty -rule should select every family, got %v, %v", got, err)
 	}
 
-	for _, bad := range []string{"typos", "credits,typos", "credits,"} {
+	// "sources" is the fifth family S1-006 AC-5 forbids by name, and the
+	// plausible one to reach for because the page carries a #sources section. A
+	// rule filed under it would not be refused loudly; it would be unreachable
+	// through -rule and so never run, which is the quiet half of that criterion.
+	for _, bad := range []string{"typos", "credits,typos", "credits,", "sources", "credits,sources"} {
 		if _, err := ParseFamilies(bad); err == nil {
 			t.Errorf("ParseFamilies(%q) was accepted; an unknown family that silently runs everything is a filter that stopped filtering", bad)
 		} else if _, ok := err.(*UnknownFamilyError); !ok {
@@ -621,5 +625,54 @@ func TestImgSrcIsResolvedAgainstThePageThatCarriesIt(t *testing.T) {
 	}
 	if got := runRule(t, "html.no-external-ref", external); len(got) == 0 {
 		t.Error("nothing reported an off-site img src")
+	}
+}
+
+// TestTheAddedRulesNameTheDefectAndNotJustTheRule holds the half of a line the
+// reader acts on. TestRules requires a non-empty Detail, and a Detail cut down
+// to "broken image" satisfies that while telling a reviewer a file is wrong and
+// nothing about what to open; S1-006's AC-1, AC-2 and AC-4 are each phrased as
+// a command whose OUTPUT carries a particular thing — the src as it is written
+// on the page, the decode error, the paragraph over budget — so each is pinned
+// separately here rather than through one shape they would all pass loosely.
+//
+// The findings are read straight from the rules because the command prints
+// Finding.String() and nothing else, which TestFindingNamesTheRuleAndThePath
+// pins, and because a test in this package reads no site off disk.
+func TestTheAddedRulesNameTheDefectAndNotJustTheRule(t *testing.T) {
+	cases := []struct {
+		ruleID string
+		want   []string
+	}{
+		// The src as written, not only the path it resolved to: the reader is
+		// being sent to an attribute to edit.
+		{"html.img-src", []string{`src="img/cat-c.png"`, "not a file in the checked tree"}},
+		// The path, the decode error, and the formats that would have worked.
+		// Without the error the line says a file is bad without saying that
+		// nothing about it was established, which is the whole distinction
+		// between this rule and the skip it replaced.
+		{"images.decodable", []string{"img/cat-c.webp", "image: unknown format", "gif, jpeg, png"}},
+		// The paragraph, which is its section's data-topic: a page with five
+		// fact sections otherwise names a file and leaves five to read.
+		{"html.sentence-budget", []string{"p.little", "self-domestication", "12 word budget"}},
+	}
+	fixtures := ruleCases()
+	for _, c := range cases {
+		f, ok := fixtures[c.ruleID]
+		if !ok || f.firing == nil {
+			t.Errorf("%s has no firing fixture, so this test asserts over nothing", c.ruleID)
+			continue
+		}
+		got := runRule(t, c.ruleID, f.firing(t))
+		if len(got) != 1 {
+			t.Errorf("%s gave %d findings (%s), want 1", c.ruleID, len(got), joinFindings(got))
+			continue
+		}
+		line := got[0].String()
+		for _, want := range c.want {
+			if !strings.Contains(line, want) {
+				t.Errorf("the %s line does not carry %q: %s", c.ruleID, want, line)
+			}
+		}
 	}
 }
