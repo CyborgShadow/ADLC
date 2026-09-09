@@ -97,3 +97,35 @@ func TestAClaimIsFoundByCheckIdNotBySubstring(t *testing.T) {
 		t.Error("a claim must not be findable by its command text")
 	}
 }
+
+// The claim about a check is its LAST run, not its first.
+//
+// An agent that runs a check, sees it fail, fixes the cause and runs it again
+// records both — and it should: the working is the evidence. But the claim it
+// is making is about the tree it is proposing, which is the final run. Taking
+// the first compared the gate's observation of the tree as it IS against the
+// agent's note of the tree as it WAS, and refused the work for a discrepancy
+// that was really an agent showing its working.
+func TestAClaimIsTheLastRunOfACheck(t *testing.T) {
+	env := &Envelope{Commands: []Command{
+		{CheckID: "fmt", Cmd: "gofmt -l .", ExitCode: 0, OutputTail: "internal/a.go"},
+		{CheckID: "test", Cmd: "go test ./...", ExitCode: 1},
+		{CheckID: "fmt", Cmd: "gofmt -l .", ExitCode: 0, OutputTail: ""},
+	}}
+	got, ok := env.Claim("fmt")
+	if !ok {
+		t.Fatal("the envelope reported a check and the claim was not found")
+	}
+	if got.OutputTail != "" {
+		t.Errorf("took the earlier run (%q); the claim is about the tree being proposed", got.OutputTail)
+	}
+
+	// Unaffected when a check was run once, which is the ordinary case.
+	if c, ok := env.Claim("test"); !ok || c.ExitCode != 1 {
+		t.Errorf("a single run was not returned intact: %+v", c)
+	}
+	// And a check nobody ran is still absent rather than empty-but-present.
+	if _, ok := env.Claim("vet"); ok {
+		t.Error("a check the envelope never mentions was reported as claimed")
+	}
+}

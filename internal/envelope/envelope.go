@@ -254,14 +254,29 @@ func (e *Envelope) SHA() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Claim returns the worker's account of one declared check, if it gave one.
+// Claim returns what the envelope says about a check, which is its LAST run of
+// it.
+//
+// An agent that runs a check, sees it fail, fixes the cause and runs it again
+// records both — and it should: the working is the evidence. But the claim it
+// is making is about the tree it is proposing, and that is the final run. Taking
+// the first one compared the gate's observation of the tree as it IS against
+// the agent's note of the tree as it WAS, found them different, and refused the
+// proposal for claim_discrepancy.
+//
+// That punished an agent for showing its work, which is precisely backwards:
+// the alternative it teaches is to record only the run that passed, and an
+// envelope edited down to its good news is the thing this matcher exists to
+// catch.
 func (e *Envelope) Claim(checkID string) (Command, bool) {
+	var last Command
+	found := false
 	for _, c := range e.Commands {
 		if c.CheckID == checkID {
-			return c, true
+			last, found = c, true
 		}
 	}
-	return Command{}, false
+	return last, found
 }
 
 // Blockers returns the blocker-severity findings.
