@@ -319,3 +319,60 @@ func (d *Dispatcher) stopTheLoop(seg ledger.Segment, rejections int) {
 	d.log("STOPPED %s — its breakdown has been rejected %d times and the fleet is not converging. Raised %s and dispatched nothing further on it. Answer that and it moves again.",
 		seg.ID, rejections, id)
 }
+
+// howMuchRigour is the effort this work is worth, in the run's own terms.
+//
+// Every role was written for a change that reaches production, and every role
+// applied that to everything. A validator spent seventeen minutes reviewing a
+// four-item plan for a static page for two children — re-running the gate,
+// executing probes, re-deriving claims — and did it three times. Nine runs and
+// two hours went into planning a thing a person would have written in twenty
+// minutes, and not one of those runs was wrong to be careful. They were never
+// told what was at stake.
+//
+// So the stake is stated. It is derived from the blast radius already declared
+// on the work rather than invented here: `none` is work that reaches nothing,
+// and the ceremony that protects a production change is pure cost on it.
+func (d *Dispatcher) howMuchRigour(c Candidate) string {
+	radius := c.Item.Radius
+	if c.Kind == KindSegment {
+		radius = d.widestRadius(c.Segment.ID)
+	}
+	switch radius {
+	case "", string(config.RadiusNone):
+		return "## How much rigour this is worth\n\n" +
+			"Blast radius **none**: nothing here reaches a running system, a machine, or anybody's data. " +
+			"The worst outcome is a file somebody deletes.\n\n" +
+			"Match your effort to that. Read what you need and no more; trust a check you have just " +
+			"run rather than re-deriving it a second way; do not propose new tooling, new checks or CI " +
+			"changes unless the work cannot be done without them. If this is taking longer than a " +
+			"careful person would spend on it, you are over-working it — report what you have.\n\n" +
+			"Being thorough where thoroughness buys nothing is not free: it is paid for in the time " +
+			"somebody is waiting, and in the rounds of review your own volume then costs."
+	case string(config.RadiusHost):
+		return "## How much rigour this is worth\n\n" +
+			"Blast radius **host**: this reaches one machine. Verify what you claim by running it, " +
+			"and say plainly what you could not check."
+	}
+	return "## How much rigour this is worth\n\n" +
+		"Blast radius **" + radius + "**: this reaches something real and hard to take back. " +
+		"Re-derive the load-bearing claims by execution rather than by reading, name what you could " +
+		"not prove, and prefer refusing to guessing. Here the ceremony is the point."
+}
+
+// widestRadius is the largest blast radius among a deliverable's items, which
+// is the only stake signal that exists before an approval is requested.
+func (d *Dispatcher) widestRadius(segmentID string) string {
+	items, err := d.Led.Items(segmentID)
+	if err != nil || len(items) == 0 {
+		return ""
+	}
+	widest := ""
+	rank := -1
+	for _, it := range items {
+		if r := config.Radius(it.Radius).Rank(); r > rank {
+			rank, widest = r, it.Radius
+		}
+	}
+	return widest
+}

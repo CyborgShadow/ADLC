@@ -133,3 +133,41 @@ func TestAPlanThatKeepsBeingRejectedStopsAndAsks(t *testing.T) {
 		t.Errorf("the question was raised %d times; asking again every tick is not asking harder", seen)
 	}
 }
+
+// The rigour a run applies is proportional to what the work can break.
+//
+// Every role was written for a change that reaches production, and applied that
+// to everything: a validator spent seventeen minutes, three times over, on a
+// four-item plan for a static page that reaches nothing. Being thorough where
+// thoroughness buys nothing is paid for in the time somebody is waiting.
+func TestRigourScalesToTheBlastRadius(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	d := h.D
+
+	none := d.howMuchRigour(Candidate{Item: ledger.Item{Radius: "none"}})
+	if !strings.Contains(none, "nothing here reaches a running system") {
+		t.Errorf("work that breaks nothing is not told so: %q", none)
+	}
+	if !strings.Contains(none, "over-working it") {
+		t.Error("nothing tells a run on trivial work that thoroughness has a cost")
+	}
+
+	// The firing case in the other direction: the ceremony must NOT be talked
+	// down where it is the entire point.
+	global := d.howMuchRigour(Candidate{Item: ledger.Item{Radius: "global"}})
+	if !strings.Contains(global, "ceremony is the point") {
+		t.Errorf("high-radius work was told to go easy: %q", global)
+	}
+	if strings.Contains(global, "over-working") {
+		t.Error("a global-radius change was told it might be over-working")
+	}
+
+	// A deliverable takes the widest radius of the work under it, because the
+	// plan for a set of items is as consequential as its worst item.
+	h.segment(t, "S2", "seg", "brief", 3)
+	h.item(t, "S2-001", "S2", "ui", "queued")
+	seg := d.howMuchRigour(Candidate{Kind: KindSegment, Segment: ledger.Segment{ID: "S2"}})
+	if seg == "" {
+		t.Fatal("a deliverable was given no sense of what its work can break")
+	}
+}

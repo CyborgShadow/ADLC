@@ -94,6 +94,8 @@ Fill in `usage` from whatever your harness reports; it is what the spend cap is 
 else can check out again.
 
 
+{{rigour}}
+
 {{what_went_wrong}}
 
 {{lessons}}

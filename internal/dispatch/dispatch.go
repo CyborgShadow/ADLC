@@ -749,9 +749,10 @@ func (d *Dispatcher) promptVars(c Candidate, runID string, ws *Workspace) map[st
 		// What already went wrong, and what the fleet has learned. Empty is the
 		// normal case and reads as nothing rather than as a heading with no
 		// content under it.
-		"what_went_wrong": "", "lessons": "", "attempt": "1",
+		"what_went_wrong": "", "lessons": "", "attempt": "1", "rigour": "",
 	}
 	v["lessons"] = d.lessons(c.Worker, c.Item.Area)
+	v["rigour"] = d.howMuchRigour(c)
 	if c.Kind == KindSegment {
 		v["segment_id"] = c.Segment.ID
 		v["title"] = c.Segment.Title
