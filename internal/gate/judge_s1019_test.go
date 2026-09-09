@@ -2,7 +2,6 @@ package gate
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -10,25 +9,17 @@ import (
 	"github.com/CyborgShadow/ADLC/internal/config"
 )
 
-// TestJudgeS1019HangHelper is the long-running command the clean case below
-// needs. It is not a test: it is a process that outlives a one-second budget
-// and has to be killed, and it only does that when the parent asks for it by
-// name and sets the env var. Re-executing the test binary is used because
-// neither `sleep` nor `timeout` is present on every host this suite runs on.
-func TestJudgeS1019HangHelper(t *testing.T) {
-	if os.Getenv("ADLC_JUDGE_S1019_HANG") == "" {
-		t.Skip("helper process; runs only when the parent asks for it")
-	}
-	time.Sleep(2 * time.Minute)
-}
-
-// hangCheck declares a check whose command outlasts any budget worth waiting for.
+// hangCheck declares a check whose command outlasts any budget worth waiting
+// for. It runs the package's one hang helper — TestHangUntilKilled, with
+// hangCmd and hangEnv in gate_test.go — rather than a second copy of it: two
+// processes that exist only to be killed are two things to keep in step, and
+// the next reader has to diff them to discover they are the same process.
 func hangCheck(t *testing.T, id string, timeoutSeconds int) *config.Check {
 	t.Helper()
 	return check(t, config.Check{
 		ID:             id,
-		Command:        []string{os.Args[0], "-test.run=^TestJudgeS1019HangHelper$", "-test.timeout=5m"},
-		Env:            []string{"ADLC_JUDGE_S1019_HANG=1"},
+		Command:        hangCmd(t),
+		Env:            []string{hangEnv},
 		Verdict:        config.VerdictExitZero,
 		TimeoutSeconds: timeoutSeconds,
 	})
@@ -54,11 +45,6 @@ func TestJudgeAC1RunBudgetIsNotBlamedOnTheCheck(t *testing.T) {
 
 	if strings.Contains(obs.Why, "timed out after") {
 		t.Errorf("AC-1: Why blames the check for a timeout it was never given a second of: %q", obs.Why)
-	}
-	if strings.Contains(obs.Why, "15m0s - check not run") || strings.Contains(obs.Why, "15m0s") {
-		// The criterion forbids the reading 'timed out after 15m0s'; naming the
-		// budget it never got is allowed, so only the timeout phrasing is fatal.
-		t.Logf("AC-1: Why mentions 15m0s: %q", obs.Why)
 	}
 	low := strings.ToLower(obs.Why)
 	if !strings.Contains(low, "run") || !strings.Contains(low, "budget") {
