@@ -1316,13 +1316,9 @@ func TestAFailedVerificationTaskIsRecordedOnTheClaim(t *testing.T) {
 // All of them carry a claimed pass or a RED gate, so every one of them passes
 // against a guard that reads the destination alone. This is the combination
 // that does not: a task reporting its OWN failure over a tree whose checks are
-// green. A setback takes the same verifying->verifying self-edge a pass does,
-// and the tester's edge requires a green gate and matching claims but not a
-// passing verdict — so the transition is admitted here, and the destination
-// carries nothing that tells this run from a cleared one. Without the verdict
-// term, dispatchOne logs NOT VERIFIED and VERIFIED for the same run, and three
-// failing tasks complete the stage: Refresh sends the item to reviewed with
-// every verification question answered no.
+// green. The comment on that guard in dispatchOne states why the destination
+// cannot tell such a run from a cleared one, and what it costs when nothing
+// else does; this is the assertion that holds the verdict term there.
 func TestAFailingTaskDoesNotClearItselfOverAGreenGate(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
