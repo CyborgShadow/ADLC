@@ -177,6 +177,18 @@ required change. It parsed, and it no longer says what you meant.
 The refusal usually names the subfield, but not always: `outputs.criteria` written as a list of
 strings is refused by the JSON decoder in its own words, which name a Go type rather than the
 field. Where the message does not tell you the shape, the one stated here is the definition.
+`output_tail` is re-judged, not read. The control plane runs each declared check itself, then
+judges the `output_tail` you recorded for that check in the check's own verdict channel — the
+same rule it judged its own run in — and refuses a claim that comes out better than what it
+observed. So the field carries the command's real output and never a note about it:
+
+- An `output_empty` check (`gofmt -l` is one) is judged on whether anything was printed, so a
+  clean run's `output_tail` is the empty string. A description of the silence — `(printed
+  nothing)`, `no files listed` — is read as printed output, which is that check's failure.
+- A `go_test_json` check is judged by parsing `go test -json` lines, so its `output_tail` is
+  the verbatim lines the declared command emitted. A prose summary parses as zero tests, and a
+  run that discovered zero tests has failed.
+
 
 {{rigour}}
 
