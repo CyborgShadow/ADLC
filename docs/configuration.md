@@ -30,11 +30,15 @@ structure — they belong in a commit somebody reviewed, next to the prompt file
 ## source_roots
 
 ```json
-"source_roots": ["cmd", "internal", "agents", "site"]
+"source_roots": ["cmd", "internal", "agents", "site", "adlc.json", ".gitattributes"]
 ```
 
 Scopes every tree-walking guard. An unscoped walk counts vendored dependencies, build output and
 generated files as uncommitted work, and refuses runs over a tree nobody edited. Required.
+
+A root may be a plain file as well as a directory. The two files above are the ones that configure
+the guards themselves: left out of this list, `adlc.json` could be edited and the gate would still
+report a clean tree over it.
 
 ## checks
 
