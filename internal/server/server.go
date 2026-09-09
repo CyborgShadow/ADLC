@@ -363,7 +363,8 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 	case s.turns.any() && (refresh == 0 || refresh > 2):
 		// Something is running and the answer is worth waiting for.
 		refresh = 2
-	case page == "home" || page == "console" || page == "questions" || page == "approvals":
+	case page == "home" || page == "console" || page == "questions" ||
+		page == "approvals" || page == "roadmap":
 		// These pages are forms somebody types into, and a page that reloads
 		// itself throws away what they had half-written. Answering a question
 		// means typing a reason, and the reason is the part that is useful in
@@ -372,6 +373,15 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 		// Nothing on them changes usefully on its own either: a question that
 		// arrives while you are answering another one can wait for the reload
 		// that answering causes.
+		//
+		// The roadmap is on this list because it carries the three gates a
+		// person owns, and each of them asks for a reason in a textarea. It was
+		// left off, and the client-side guard did not cover for it: removing a
+		// <meta http-equiv="refresh"> after the browser has parsed it does not
+		// cancel a navigation the browser has already scheduled, so the guard
+		// only ever helped on pages that were not asking to be typed into. The
+		// reason a deliverable was signed off is exactly the sentence this page
+		// was throwing away.
 		refresh = 0
 	}
 	return &pageData{

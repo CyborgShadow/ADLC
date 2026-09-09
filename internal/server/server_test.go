@@ -390,3 +390,36 @@ func TestAQuestionWithNoTextIsShownAsDefective(t *testing.T) {
 		t.Fatal("a question with no text renders as a blank heading over a recommendation")
 	}
 }
+
+// A page that asks for a sentence must not reload itself while it is being
+// written.
+//
+// The rule was a list of page names, and the roadmap was left off it — so the
+// three gates a person owns, each of which asks for a reason in a textarea,
+// sat on the one page that threw the reason away every few seconds. The
+// client-side guard did not cover for it either: removing a
+// <meta http-equiv="refresh"> after the browser has parsed it does not cancel a
+// navigation already scheduled, so it only ever helped where the tag was not
+// emitted in the first place.
+//
+// Asserting over every form-bearing page rather than the one that broke,
+// because the defect is the enumeration, not the entry.
+func TestNoPageThatAsksForAReasonReloadsItselfWhileItIsWritten(t *testing.T) {
+	s := newServer(t)
+	// The fixture disables refreshing entirely, which would satisfy this test
+	// without the rule existing. Turn it on so the question being asked is which
+	// pages OPT OUT.
+	s.Cfg.Server.RefreshSeconds = 15
+	for _, page := range []string{"roadmap", "home", "console", "questions", "approvals"} {
+		_, body := get(t, s, "/"+page)
+		if strings.Contains(body, `http-equiv="refresh"`) {
+			t.Errorf("/%s reloads itself, and it asks somebody to type a reason — the sentence is the part that is useful in six months", page)
+		}
+	}
+	// The clean case, without which the guard above is satisfied by never
+	// refreshing anything: a page that is only read still refreshes, or the
+	// dashboard stops being live.
+	if _, body := get(t, s, "/overview"); !strings.Contains(body, `http-equiv="refresh"`) {
+		t.Error("a page nobody types into must still refresh, or the fleet's own state goes stale in front of the reader")
+	}
+}
