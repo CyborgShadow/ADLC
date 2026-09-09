@@ -3,8 +3,11 @@ package gate
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/envelope"
@@ -385,5 +388,90 @@ func TestAnAgentIsNotRefusedForClaimingWorseThanTheGateFound(t *testing.T) {
 	}
 	if issues[0].Kind != "discrepancy" {
 		t.Errorf("the wrong kind of issue: %+v", issues[0])
+	}
+}
+
+// --- timeouts -------------------------------------------------------------
+
+// hangEnv gates the helper below. The timeout tests need a command that
+// outlives its budget on every host this suite runs on, and neither `sleep`
+// nor `timeout` is one of those; the test binary re-executing itself is.
+const hangEnv = "ADLC_GATE_HANG=1"
+
+// TestHangUntilKilled is not a test of anything. It is the long-running
+// command the timeout tests execute, and it runs only when re-executed with
+// hangEnv set.
+func TestHangUntilKilled(t *testing.T) {
+	if os.Getenv("ADLC_GATE_HANG") == "" {
+		t.Skip("helper process for the timeout tests; not run directly")
+	}
+	time.Sleep(30 * time.Second)
+}
+
+// hangCmd is argv for the helper above.
+func hangCmd(t *testing.T) []string {
+	t.Helper()
+	// cmd.Dir is a temp directory, so a relative os.Args[0] would be resolved
+	// against the wrong tree.
+	self, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatalf("locating the test binary: %v", err)
+	}
+	return []string{self, "-test.run=^TestHangUntilKilled$"}
+}
+
+// TestARunOutOfBudgetSaysSoInsteadOfBlamingTheCheck is the firing case.
+//
+// The check's context is derived from the run's, so an expired run expires it
+// too — and the observation then read "timed out after 15m0s" about a check
+// that was never given a second of those fifteen minutes. That sends whoever
+// reads it hunting a hang that did not happen, and hides the thing that did.
+func TestARunOutOfBudgetSaysSoInsteadOfBlamingTheCheck(t *testing.T) {
+	cfg := mustConfig(t, []config.Check{{
+		ID: "slow", Command: hangCmd(t), Env: []string{hangEnv},
+		Verdict: config.VerdictExitZero, TimeoutSeconds: 900,
+	}})
+	r := &Runner{Cfg: cfg, Dir: t.TempDir()}
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	obs := r.runOne(ctx, cfg.Check("slow"))
+
+	if strings.Contains(obs.Why, "timed out after") {
+		t.Errorf("a check never given its own budget must not be blamed for a timeout, got %q", obs.Why)
+	}
+	if !strings.Contains(obs.Why, "the run's budget was exhausted") {
+		t.Errorf("the reason should name the run's budget as what ran out, got %q", obs.Why)
+	}
+	// It did not run, so it cannot have passed, and it did not hang either.
+	if obs.Verdict != StatusUnknown {
+		t.Errorf("a check that was never given its budget is UNKNOWN, got %s (%s)", obs.Verdict, obs.Why)
+	}
+	if obs.Ran {
+		t.Errorf("the check never started; recording it as ran claims evidence nobody has")
+	}
+}
+
+// TestACheckThatOutlivesItsOwnBudgetIsStillRed is the clean case for the guard
+// above: with the run still inside its budget, a check that hangs past its own
+// is reported as the hang it is. A guard that reclassified every timeout would
+// pass the firing case and disarm the one rule this package has about hangs.
+func TestACheckThatOutlivesItsOwnBudgetIsStillRed(t *testing.T) {
+	cfg := mustConfig(t, []config.Check{{
+		ID: "slow", Command: hangCmd(t), Env: []string{hangEnv},
+		Verdict: config.VerdictExitZero, TimeoutSeconds: 1,
+	}})
+	r := &Runner{Cfg: cfg, Dir: t.TempDir()}
+
+	obs := r.runOne(context.Background(), cfg.Check("slow"))
+
+	if obs.Verdict != StatusRed {
+		t.Errorf("a hang is RED — a check nobody can wait for is one that gets skipped; got %s (%s)", obs.Verdict, obs.Why)
+	}
+	if obs.Why != "timed out after 1s" {
+		t.Errorf("the reason should name the check's own budget, got %q", obs.Why)
+	}
+	if !obs.TimedOut {
+		t.Errorf("timed_out should record that this check ran out of its own time")
 	}
 }

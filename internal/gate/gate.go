@@ -250,6 +250,17 @@ func (r *Runner) runOne(ctx context.Context, ch *config.Check) Observation {
 	obs.Output = tail(buf.String(), 8000)
 
 	switch {
+	case err != nil && ctx.Err() != nil:
+		// The run's own budget ran out, not the check's. The child context
+		// inherits the parent's expiry, so a check that was never given a second
+		// of its declared 15 minutes reported "timed out after 15m0s" and sent
+		// whoever read it hunting a hang that never happened. The check did not
+		// run, so this is UNKNOWN and not the RED a real hang earns.
+		obs.Why = fmt.Sprintf(
+			"the run's budget was exhausted before the check could be given its own %s — check not run, NOT passed",
+			ch.Timeout())
+		obs.Verdict = StatusUnknown
+		return obs
 	case errors.Is(cctx.Err(), context.DeadlineExceeded):
 		// A hang is a failure, not a wait. A check nobody can wait for is a check
 		// that will be skipped, and a skipped check is an absent one.

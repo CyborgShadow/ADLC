@@ -27,7 +27,10 @@ That is what `go_test_json` and `count_min` are for.
 **Collapsing three values into two.** A missing tool or directory is `UNKNOWN` and satisfies
 nothing. A hang is `RED` — a check nobody can wait for is a check that gets skipped, and a skipped
 check is an absent one. A behavioural check with no artifact digest is `UNKNOWN`, because evidence
-about a running artifact means nothing without naming what it ran against.
+about a running artifact means nothing without naming what it ran against. A check the run's own
+budget expired before is `UNKNOWN` and not the `RED` a hang earns: the check's context inherits
+the run's expiry, so reporting "timed out after 15m0s" there blames a check that was never given
+a second of those fifteen minutes, and sends whoever reads it hunting a hang that never happened.
 
 **Walking the tree unscoped.** `TreeState` refuses to guess: with no `source_roots` it returns an
 error rather than reporting clean. An unscoped walk counts vendored dependencies and build output
@@ -43,4 +46,6 @@ the rule says so, a run that discovered nothing is a failure, a counting check r
 scan, an absent tool is `UNKNOWN` not green, a behavioural check with no artifact is `UNKNOWN`, a
 fabricated exit code is a discrepancy, an honest `not_run` never is, a claim is judged in the
 channel the observation was, silence about a failing check is an omission but silence about a
-passing one is not, and a gate with no declared checks is not green.
+passing one is not, a gate with no declared checks is not green, and a run that ran out of its own
+budget says so rather than blaming a check it never started — while a check that really does
+outlive its own budget is still `RED`.
