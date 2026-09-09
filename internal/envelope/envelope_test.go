@@ -1,6 +1,8 @@
 package envelope
 
 import (
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -127,5 +129,67 @@ func TestAClaimIsTheLastRunOfACheck(t *testing.T) {
 	// And a check nobody ran is still absent rather than empty-but-present.
 	if _, ok := env.Claim("vet"); ok {
 		t.Error("a check the envelope never mentions was reported as claimed")
+	}
+}
+
+// Criterion status is a closed vocabulary of three words.
+//
+// "met" is the synonym roles keep reaching for, and it is the dangerous one: it
+// reads as a pass to a person and matches nothing here, so a criterion nobody
+// tested would arrive looking satisfied. Refusing it at the parser is what makes
+// the preamble's three words the only three, and the refusal names the field so
+// the next run can find what to fix.
+func TestCriterionStatusIsAClosedVocabulary(t *testing.T) {
+	withCriteria := func(entries string) string {
+		return strings.Replace(minimal, `"outputs": {}`, `"outputs": {"criteria":[`+entries+`]}`, 1)
+	}
+
+	// Firing case: a synonym for pass is not a status.
+	bad := withCriteria(`{"id":"AC-1","text":"t","status":"met","command_index":0,"evidence":"e"}`)
+	_, err := Parse([]byte(bad))
+	if err == nil {
+		t.Fatal(`"met" is not a status; an untested criterion would arrive looking satisfied`)
+	}
+	if _, ok := err.(ErrMalformed); !ok {
+		t.Errorf("should be ErrMalformed so it is refusable rather than fatal, got %T", err)
+	}
+	if !strings.Contains(err.Error(), "outputs.criteria") {
+		t.Errorf("the refusal must name the field to fix, got %q", err)
+	}
+
+	// Clean case: each of the three parses, and survives a round-trip through
+	// JSON — the statuses have to still be there when the ledger reads them back.
+	want := []string{"pass", "fail", "untested"}
+	good := withCriteria(`{"id":"AC-1","text":"t","status":"pass","command_index":0,"evidence":"e"},` +
+		`{"id":"AC-2","text":"t","status":"fail","command_index":0,"evidence":"e"},` +
+		`{"id":"AC-3","text":"t","status":"untested","command_index":0,"evidence":"e"}`)
+	e, err := Parse([]byte(good))
+	if err != nil {
+		t.Fatalf("all three of pass, fail and untested must parse: %v", err)
+	}
+	statuses := func(e *Envelope) []string {
+		var out []string
+		for _, c := range e.Criteria() {
+			out = append(out, c.Status)
+		}
+		return out
+	}
+	if got := statuses(e); !slices.Equal(got, want) {
+		t.Fatalf("statuses %v, want %v", got, want)
+	}
+
+	round, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := Parse(round)
+	if err != nil {
+		t.Fatalf("a parsed envelope must re-parse: %v", err)
+	}
+	if got := statuses(again); !slices.Equal(got, want) {
+		t.Errorf("after a round-trip statuses %v, want %v", got, want)
+	}
+	if len(again.FailedCriteria()) != 1 {
+		t.Errorf("the failing criterion should be reachable through FailedCriteria(), got %d", len(again.FailedCriteria()))
 	}
 }

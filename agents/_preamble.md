@@ -93,6 +93,28 @@ Fill in `usage` from whatever your harness reports; it is what the spend cap is 
 **Commit before you claim anything about your work**, so the evidence describes a tree somebody
 else can check out again.
 
+`outputs` carries whatever your role produces, and its shape is fixed wherever the control plane
+reads it. Where your role reports on the acceptance criteria, `outputs.criteria` is an array of
+objects and `status` is one of exactly three words — `pass`, `fail`, `untested`:
+
+```json
+"outputs": {
+  "criteria": [
+    { "id": "AC-1", "status": "pass", "command_index": 0,
+      "evidence": "what the command at that index showed" },
+    { "id": "AC-2", "status": "fail", "command_index": 1,
+      "evidence": "the failing output, quoted" },
+    { "id": "AC-3", "status": "untested", "command_index": 1,
+      "evidence": "the suite ran, but nothing in it exercises this criterion" }
+  ]
+}
+```
+
+**A criterion nobody tested is `untested`** — never `pass`, and never a word of your own such as
+`met` or `ok`. An envelope carrying any other status fails to parse and the whole run is refused,
+because a synonym reads as a pass to a person and means nothing to the control plane, and a
+criterion with no command behind it is exactly the one somebody needs to see.
+
 
 {{rigour}}
 
