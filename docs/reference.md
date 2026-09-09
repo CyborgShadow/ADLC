@@ -109,7 +109,7 @@ adlc run finish -id … [-envelope path]
 ## gate
 
 ```bash
-adlc gate run [-workdir .] [-from in_progress -to ready_for_testing] [-artifact sha256:…]
+adlc gate run [-workdir .] [-from in_progress -to verifying] [-artifact sha256:…]
 ```
 
 Runs the declared checks here and reports what was observed. With `-from`/`-to`, only the checks
@@ -121,7 +121,7 @@ Exits 6 if red, 7 if it could not be run.
 
 ```bash
 adlc transition table
-adlc transition propose -item S1-001 -to ready_for_testing [-run …] [-worker …] [-pm] [-envelope path] [-reason "…"]
+adlc transition propose -item S1-001 -to verifying [-run …] [-worker …] [-pm] [-envelope path] [-reason "…"]
 ```
 
 `table` prints every edge in the authority with who may propose it and what must be true.

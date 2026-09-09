@@ -30,7 +30,7 @@ structure — they belong in a commit somebody reviewed, next to the prompt file
 ## source_roots
 
 ```json
-"source_roots": ["cmd", "internal", "agents"]
+"source_roots": ["cmd", "internal", "agents", "site"]
 ```
 
 Scopes every tree-walking guard. An unscoped walk counts vendored dependencies, build output and
@@ -46,7 +46,7 @@ A check is a command, the channel its verdict is read from, and the lifecycle ed
   "kind": "source",
   "command": ["gofmt", "-l", "./cmd", "./internal"],
   "verdict": "output_empty",
-  "required_for": ["in_progress->ready_for_testing", "testing->ready_for_review"]
+  "required_for": ["in_progress->verifying", "verifying->verifying", "verifying->reviewed"]
 }
 ```
 

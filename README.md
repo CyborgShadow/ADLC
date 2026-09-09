@@ -96,14 +96,14 @@ plane executes the declared commands in the run's own tree and compares what it 
 what the agent claimed:
 
 ```
-REFUSED  S1-001  in_progress -> ready_for_testing
+REFUSED  S1-001  in_progress -> verifying
   [claim_discrepancy] for test the verdict is the output, not the exit code:
   the envelope's own output reads RED (zero tests reported a result — a run that
   discovered nothing is a failure, not a pass), the gate observed GREEN (59 tests ran)
 ```
 
-**Checking is a state, not a schedule.** An item cannot leave `testing` without a tester or
-`judging` without a judge, and neither can be the run that did the work. A verification layer that
+**Checking is a state, not a schedule.** An item cannot leave `verifying` without a tester, a judge
+and a validator, and none of them can be the run that did the work. A verification layer that
 quietly stops running is then a queue that visibly stops draining, rather than an absence nobody
 notices.
 

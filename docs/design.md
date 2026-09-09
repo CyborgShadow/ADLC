@@ -57,8 +57,8 @@ lane that stops firing stops producing ticks and becomes a derived alarm.
 
 ## Verification is a state, not a schedule
 
-An item cannot leave `testing` without a tester or `judging` without a judge, and neither can be
-the run that did the work. Checking is the next step of an item already in flight rather than a
+An item cannot leave `verifying` without a tester, a judge and a validator, and none of them can
+be the run that did the work. Checking is the next step of an item already in flight rather than a
 competing job, and the dispatcher drains from the finished end — so checking never queues behind
 building.
 
