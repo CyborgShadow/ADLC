@@ -1,13 +1,10 @@
 # The fixture directories are checked by byte and by line, so they are pinned to
-# LF for the same reason the repository root pins *.go: on Windows git converts
-# to CRLF on checkout, and a fixture whose bytes differ between the tree the
-# criteria were demonstrated on and the tree a reviewer checks out is a fixture
-# that proves something about neither.
+# LF: on Windows git converts to CRLF on checkout, and a fixture whose bytes
+# differ between the tree the criteria were demonstrated on and the tree a
+# reviewer checks out is a fixture that proves something about neither.
 #
-# The root .gitattributes pins the source and config types the toolchain reads;
-# these four are the types only this package's testdata uses. Images are left
-# alone — git detects them as binary and converts nothing.
-*.html text eol=lf
-*.css  text eol=lf
-*.tsv  text eol=lf
-*.txt  text eol=lf
+# Only *.txt is pinned here. The root .gitattributes already pins *.html, *.css
+# and *.tsv for the whole tree and marks the image types binary, so restating
+# any of those here would be a second copy of a setting whose only possible
+# effect is to disagree with the first.
+*.txt text eol=lf
