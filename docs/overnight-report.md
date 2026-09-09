@@ -4,6 +4,37 @@ You asked for a working product and an ADLC that can redo a test in under two
 hours. Here is what happened, what I changed, and what I would not decide for
 you.
 
+
+## The thing you should look at first
+
+**The cat website is barely built, and the reason is in the plan, not the
+pipeline.** Of 32 work items, 9 are done — and almost all of the finished work
+is the ADLC fixing itself. The deliverable's own items are a strict serial
+chain, four layers deep:
+
+```
+S1-003 (cats + stylesheet) → S1-004 (facts) ┐
+S1-007 (citations) → S1-009 → S1-012 ───────┴→ S1-011 (the page) → S1-008 (CI)
+```
+
+Only S1-003 and S1-007 can run at all right now; everything else waits on them.
+The parallelism you asked for is real and it is working — eleven runs abreast as
+I write this — but what filled it was twenty self-improvement items the improver
+raised, not the website. The website is five sequential item-lifecycles no matter
+how many agents you point at it.
+
+Two things follow, and both are your call rather than mine:
+
+- **The planner serialised the deliverable.** Some of it is genuinely necessary —
+  S1-011 holds `site/cats/index.html`, which is in no other item's file scope, so
+  nothing else *can* write the page. Some of it may not be. That graph is a
+  product judgement and I did not rewrite it.
+- **Self-improvement items compete with the deliverable on equal terms.** Nothing
+  in the queue prefers the thing you asked for over the fleet's own maintenance,
+  and the fleet is very good at finding work for itself. The overnight run
+  produced a much better ADLC and a much thinner website, and that ordering was
+  not chosen by anybody.
+
 ## The headline
 
 **The ADLC built, verified and merged its own work, unattended.** Seven commits
