@@ -30,7 +30,7 @@ structure — they belong in a commit somebody reviewed, next to the prompt file
 ## source_roots
 
 ```json
-"source_roots": ["cmd", "internal", "agents", "site", "adlc.json", ".gitattributes"]
+"source_roots": ["cmd", "internal", "agents", "docs", "README.md", "adlc.json", ".gitattributes"]
 ```
 
 Scopes every tree-walking guard. An unscoped walk counts vendored dependencies, build output and
@@ -128,7 +128,7 @@ A role declares **capabilities** and, optionally, **areas**.
 | `plan` | decompose an approach into proposed work items |
 | `implement` | build one item |
 | `test` | execute the tests and report what ran |
-| `judge` | check an item against its acceptance criteria |
+| `judge` | rule on whether an item serves the brief and fits the deliverable |
 | `validate` | review adversarially, and check a plan against its intent. The only capability that can reject |
 | `curate` | the hygiene pass over what landed |
 | `arbitrate` | judge the change against the system rather than against the item |

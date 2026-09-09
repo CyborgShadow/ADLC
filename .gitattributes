@@ -13,22 +13,9 @@
 .gitattributes text eol=lf
 .gitignore     text eol=lf
 
-# The site tree is served as files, so what git stores is what a browser gets.
-# Left to git's own guess on Windows, an HTML or CSS file checked out with CRLF
-# and committed back differs from the same file on a Linux runner, and the diff
-# somebody then reviews is every line of a page nobody edited.
-*.html    text eol=lf
-*.css     text eol=lf
-*.tsv     text eol=lf
-
-# Images marked binary so git never applies eol conversion to them: a JPEG with
-# 0x0a bytes rewritten to 0x0d0a is a corrupt file that still has its extension,
-# and it fails at the browser rather than at the commit. The *.webp rule records
-# how such a file would be stored if one ever reached the tree; it is not
-# permission to commit one — S1-006 fixes the admitted formats at jpeg, png and
-# gif, and S1-003 refuses any other extension under img/.
-*.jpg     binary
-*.jpeg    binary
-*.png     binary
-*.gif     binary
-*.webp    binary
+# There are deliberately no rules here for served assets — HTML, CSS, images.
+# The rules that were here covered a site tree that has been scrapped, and a
+# pinned line ending for a file type the repository does not hold is a rule
+# nobody can test: the first file to arrive under it would be the one that finds
+# out whether it was still right. A project that adds such a tree adds its rules
+# with it, next to the files they govern.

@@ -306,7 +306,7 @@ func TestAnAnchoredCountPatternFindsTheLineItNames(t *testing.T) {
 
 	for _, output := range []string{
 		"images checked: 6\n",
-		"scanning site/cats\nimages checked: 6\nall rules passed\n",
+		"scanning assets\nimages checked: 6\nall rules passed\n",
 	} {
 		m := ch.Counter().FindStringSubmatch(output)
 		if len(m) < 2 || m[1] != "6" {

@@ -257,7 +257,7 @@ func TestALineAnchoredCountStillRefusesOutputThatDoesNotCarryIt(t *testing.T) {
 
 	// Firing: nothing in this output is the line the pattern names — the count is
 	// on a line with other text, so the anchors do their job and reject it.
-	const noCount = "scanning site/cats\nwarning: images checked: 6 of them were skipped\ndone\n"
+	const noCount = "scanning assets\nwarning: images checked: 6 of them were skipped\ndone\n"
 	v, n, why := judge(ch, 0, noCount)
 	if v != StatusRed || n != 0 {
 		t.Fatalf("output not carrying the pattern must be RED with 0, got %s n=%d (%s)", v, n, why)
@@ -267,7 +267,7 @@ func TestALineAnchoredCountStillRefusesOutputThatDoesNotCarryIt(t *testing.T) {
 	}
 
 	// Clean: the line the pattern names, which before the fix also counted 0.
-	if v, n, why := judge(ch, 0, "scanning site/cats\nimages checked: 6\nall rules passed\n"); v != StatusGreen || n != 6 {
+	if v, n, why := judge(ch, 0, "scanning assets\nimages checked: 6\nall rules passed\n"); v != StatusGreen || n != 6 {
 		t.Errorf("a scan that reported its count must pass, got %s n=%d (%s)", v, n, why)
 	}
 }
@@ -305,7 +305,7 @@ func TestTheGateAndTheClaimMatcherReadOneCounter(t *testing.T) {
 		ID: "images", Command: []string{"x"}, Verdict: config.VerdictCountMin,
 		CountPattern: `^images checked: ([0-9]+)$`, MinCount: 6,
 	}})
-	const ran = "scanning site/cats\nimages checked: 6\nall rules passed\n"
+	const ran = "scanning assets\nimages checked: 6\nall rules passed\n"
 	res := &Result{Checks: []Observation{{
 		CheckID: "images", Rule: config.VerdictCountMin, Ran: true,
 		ExitCode: 0, Output: ran, Count: 6, Verdict: StatusGreen, Why: "examined 6",
@@ -316,7 +316,7 @@ func TestTheGateAndTheClaimMatcherReadOneCounter(t *testing.T) {
 	// counted 0 over this output and agreed on RED — so what is pinned here is
 	// agreement on GREEN over a scan that did run.
 	truthful := res.CompareClaims(cfg, envWith(t, []envelope.Command{
-		{CheckID: "images", Cmd: "sitecheck", ExitCode: 0, OutputTail: ran},
+		{CheckID: "images", Cmd: "imagecheck", ExitCode: 0, OutputTail: ran},
 	}))
 	if len(truthful) != 0 {
 		t.Fatalf("an envelope quoting the output the gate judged GREEN must not be refused, got %+v", truthful)
@@ -336,11 +336,11 @@ func TestTheGateAndTheClaimMatcherReadOneCounter(t *testing.T) {
 	// pinned here is unchanged: both sides read the same counter.
 	empty := &Result{Checks: []Observation{{
 		CheckID: "images", Rule: config.VerdictCountMin, Ran: true,
-		ExitCode: 0, Output: "scanning site/cats\ndone\n", Count: 0,
+		ExitCode: 0, Output: "scanning assets\ndone\n", Count: 0,
 		Verdict: StatusRed, Why: "examined 0",
 	}}}
 	doctored := empty.CompareClaims(cfg, envWith(t, []envelope.Command{
-		{CheckID: "images", Cmd: "sitecheck", ExitCode: 0, OutputTail: ran},
+		{CheckID: "images", Cmd: "imagecheck", ExitCode: 0, OutputTail: ran},
 	}))
 	if len(doctored) != 1 || doctored[0].Kind != "discrepancy" {
 		t.Fatalf("an envelope claiming a count the gate never saw must be refused, got %+v", doctored)

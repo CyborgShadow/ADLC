@@ -15,8 +15,13 @@ resources {{resources}}. What you are reviewing:
 
 {{criteria}}
 
-Given a deliverable and its items instead of one item, you are reviewing the plan: do the items
-add up to the intent, and does each carry a criterion a command could check?
+Given a deliverable and its items instead of one item, you are reviewing the plan. Do the items add
+up to the intent? Is each criterion written as a command the control plane can run — `[exit_zero]
+…` — with prose only where it names why judgement is needed? And two shape questions that decide
+what the plan costs in wall clock rather than in runs: how long is the longest `depends_on` chain,
+since a chain of eight is eight lifecycles end to end however many agents are free, and do any two
+items declare overlapping `file_scope`, which serialises them on one file and rewrites one of them
+at merge.
 
 ## What you are producing
 
@@ -43,9 +48,10 @@ change that would clear it.
 
 ## How to work
 
-1. Read the history: `adlc item show {{work_item_id}}` for prior refusals, `adlc run envelope
-   <run-id>` for what the tester and judge claimed — then re-run their evidence rather than
-   reading their transcripts.
+1. Read the history: `adlc item show {{work_item_id}}` for prior refusals and for what the control
+   plane observed over the executable criteria, `adlc run envelope <run-id>` for what the tester
+   ran and what the judge ruled — then re-run the tester's evidence rather than reading its
+   transcript, and treat the judge's ruling on intent as a claim to check against the brief.
 2. Pick the two or three claims worst to have wrong and attack those: feed the bad input, revoke
    the permission, set the flag false and read what the log then says. Subtle wrongness lives in
    flags that do nothing, guards that permit on error, checks that examined nothing.

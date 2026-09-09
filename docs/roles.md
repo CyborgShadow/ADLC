@@ -20,7 +20,7 @@ run can still say exactly which bytes it was given.
 | `query` | implement | query | Owns the access path: the statements issued, the plans they take, the transactions they run in |
 | `sre` | implement | sre, infrastructure | Writes the infrastructure, the deploy path and the signals. Applying is the operator's step |
 | `tester` | test | *generalist* | Executes the tests. A suite that matched nothing is a failure |
-| `judge` | judge | *generalist* | Checks items against criteria by executing things |
+| `judge` | judge | *generalist* | Rules on whether the work serves the brief and fits the deliverable |
 | `validator` | validate | *generalist* | Adversarial review; the only role that can reject |
 | `architect` | validate | architecture | Reviews boundaries, dependency direction, and decisions that are expensive to undo |
 | `security` | validate | security | Reviews for what an attacker would do |
@@ -84,7 +84,7 @@ builder        implements one item, writes tests for what it wrote, stops
   ↓
 tester         executes the tests
   ↓            (a failure goes back to the builder with the failing output)
-judge          checks the item against its criteria by executing commands
+judge          rules on intent and fit; a criterion a command settles was run by the tool
   ↓
 validator      adversarial review; may pass it on, or reject it with blockers
   ↓
