@@ -53,6 +53,12 @@ AC-3 [output_empty] gofmt -l ./cmd ./internal
 Rules available: `exit_zero`, `exit_in`, `output_empty`, `output_nonempty`, `output_matches`,
 `output_not_matches`, `go_test_json`, `count_min`.
 
+**`go run` cannot express an exit code.** It returns 1 for any non-zero exit of the program it
+ran, and reports the real code only as text on stderr (`exit status 3`), which no exit-code rule
+reads. So an `exit_in` or `exit_zero` criterion pinning anything other than 0 or 1 must name a
+built binary — `go build -o adlc.exe ./cmd/adlc` first, then run `./adlc.exe` — or the criterion
+passes on a code nobody checked.
+
 Plain prose is still allowed and is sometimes correct — "the page is readable by a five-year-old"
 is a real criterion no command settles. But every prose criterion costs a judge run of ten minutes
 or more, so write prose only where you mean it. An item whose criteria are all commands is verified
