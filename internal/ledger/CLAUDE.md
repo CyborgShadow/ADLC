@@ -10,6 +10,8 @@ The append-only, hash-chained record, and the only thing in this module that wri
 - `blob.go` — content-addressed prompt and envelope bytes, which is what makes a run reproducible
   rather than merely described.
 - `read.go`, `console.go` — read paths for the reporting surfaces.
+- `build.go` — which build wrote a row, and the rule that an absent revision is `unknown` rather
+  than a value anything will treat as a match.
 
 ## What goes wrong here
 
@@ -35,6 +37,12 @@ recovery is to upgrade the binary. A tamper detector that cries tamper at its ow
 ignored, and an ignored detector is not a control. If you add an event kind, add it to `KnownKinds`
 in the same change — and expect older binaries to read it as `UNKNOWN`, which is the point.
 
+**Adding a field to the hash preimage.** `HashEvent` covers a fixed list, and `adlc_event.build_rev`
+is deliberately not on it. An older binary recomputing a hash cannot know about a column it was
+compiled before, so folding a new field in makes every row this build writes read as `TAMPERED` to
+that binary — the one thing this verifier must never say when nothing is wrong. A new column on the
+chain is protected by the append-only triggers, which is the same protection every other column has.
+
 **Assuming a trigger that exists still fires.** `guardsFire` attempts the writes the guards exist to
 refuse, inside a rolled-back transaction. Presence in `sqlite_master` is not evidence.
 
@@ -51,3 +59,9 @@ truncated chain is caught by the anchor, a newer build's event kind reads `UNKNO
 `UNKNOWN`. It also pins that the append-only guards actually refuse, that projections rebuild from
 the chain, that a worker with no runs is still counted, and that a started run with no end is
 `UNKNOWN` rather than a pass.
+
+`build_test.go` pins the recorded build: a stamped build's revision reaches the chain and comes back
+off it, a build with no VCS stamp records `unknown` and never matches anything, and a hand-built v1
+ledger — the pre-`build_rev` table shape — opens, migrates, reads as `UNKNOWN` and verifies `INTACT`
+with all its v1 hashes still correct. The schema stamp moves forward on migration and is never
+lowered.

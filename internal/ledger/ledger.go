@@ -335,6 +335,10 @@ type Ledger struct {
 	// which is why the timers stay — a lane whose wake-up was missed is late,
 	// not stopped, and its idle ticks still prove it is alive.
 	OnAppend func(Event)
+	// revision is stamped on every row this ledger appends. It is read once
+	// from the build rather than per append, so that every row of one process
+	// names the same build even if the binary is replaced underneath it.
+	revision string
 }
 
 // Event is one row of the chain.
@@ -347,7 +351,15 @@ type Event struct {
 	Payload  []byte
 	PrevHash string
 	Hash     string
+	// BuildRev is the build of the control plane that appended this row, as the
+	// column holds it. Empty means the row predates the field; read it through
+	// Revision() rather than directly, so an absence cannot be printed as a
+	// build somebody could go and look up.
+	BuildRev string
 }
+
+// Revision is which build appended this event, or RevisionUnknown.
+func (e Event) Revision() string { return RevisionOf(e.BuildRev) }
 
 // Open opens or creates a ledger.
 //
@@ -390,7 +402,7 @@ func Open(path string) (*Ledger, error) {
 	if aerr != nil {
 		abs = path
 	}
-	l := &Ledger{db: db, now: time.Now, path: abs}
+	l := &Ledger{db: db, now: time.Now, path: abs, revision: BuildRevision()}
 	if _, err := db.Exec(schemaSQL); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
@@ -411,12 +423,31 @@ func Open(path string) (*Ledger, error) {
 // SetClock injects a clock. Tests need determinism; nothing else calls it.
 func (l *Ledger) SetClock(f func() time.Time) { l.now = f }
 
+// SetRevision injects the revision stamped on subsequent appends. Tests need a
+// build they can name; nothing else calls it. It cannot forge an absence — an
+// empty value still records RevisionUnknown, because a row this build wrote is
+// a row this build could have stamped.
+func (l *Ledger) SetRevision(rev string) { l.revision = RevisionOf(rev) }
+
+// Revision is the build this ledger stamps on the rows it appends.
+func (l *Ledger) Revision() string { return RevisionOf(l.revision) }
+
 // DB exposes the handle for read-only projections.
 func (l *Ledger) DB() *sql.DB { return l.db }
 
 // Close closes the database.
 func (l *Ledger) Close() error { return l.db.Close() }
 
+// ensureMeta records the layout this file now has, and moves that number
+// forward only.
+//
+// Forward, because the migrations above have just run: a file that has been
+// given this build's columns is this build's layout, and a stamp left behind at
+// the version it was created under is a stamp that describes a file that no
+// longer exists. Only forward, because a newer ledger opened by an older binary
+// must keep saying it is newer — quietly restamping it to something this build
+// can write is how an out-of-date binary would come to report a record it
+// cannot fully read as INTACT.
 func (l *Ledger) ensureMeta() error {
 	var v string
 	err := l.db.QueryRow(`SELECT value FROM adlc_meta WHERE key='schema_version'`).Scan(&v)
@@ -428,7 +459,14 @@ func (l *Ledger) ensureMeta() error {
 	case err != nil:
 		return err
 	}
-	return nil
+	stored, cerr := strconv.Atoi(v)
+	if cerr != nil || stored >= SchemaVersion {
+		// An unreadable stamp is left exactly as it is. Overwriting it would
+		// destroy the only evidence of whatever wrote it.
+		return nil
+	}
+	_, err = l.db.Exec(`UPDATE adlc_meta SET value=? WHERE key='schema_version'`, strconv.Itoa(SchemaVersion))
+	return err
 }
 
 // StoredSchemaVersion is the version recorded in the file, which may be newer
@@ -468,6 +506,13 @@ func canonical(v any) ([]byte, error) {
 // HashEvent computes an event's hash. It is exported because Verify recomputes
 // it, and because a caller auditing a ledger from outside this package must be
 // able to reproduce the arithmetic without trusting the code that wrote it.
+//
+// The preimage is fixed forever. A field added to the chain — the recorded
+// build revision is the first — stays out of it, because an older binary
+// recomputing this hash cannot know about a field it was compiled before, and
+// would report a perfectly healthy chain as TAMPERED. The new column is
+// protected by the append-only triggers, which is the same protection every
+// other column on the row has.
 func HashEvent(prevHash string, seq, tsMS int64, kind Kind, actor, subject string, payload []byte) string {
 	h := sha256.New()
 	write := func(s string) { h.Write([]byte(s)); h.Write([]byte{0x1e}) }
@@ -510,12 +555,13 @@ func (l *Ledger) Append(actor string, kind Kind, subject string, payload any) (E
 	ev := Event{
 		Seq: prevSeq + 1, TsMS: l.now().UnixMilli(), Kind: kind,
 		Actor: actor, Subject: subject, Payload: body, PrevHash: prevHash,
+		BuildRev: l.Revision(),
 	}
 	ev.Hash = HashEvent(ev.PrevHash, ev.Seq, ev.TsMS, ev.Kind, ev.Actor, ev.Subject, ev.Payload)
 
 	if _, err := tx.Exec(
-		`INSERT INTO adlc_event(seq,ts_ms,kind,actor,subject,payload,prev_hash,hash) VALUES(?,?,?,?,?,?,?,?)`,
-		ev.Seq, ev.TsMS, string(ev.Kind), ev.Actor, ev.Subject, string(ev.Payload), ev.PrevHash, ev.Hash,
+		`INSERT INTO adlc_event(seq,ts_ms,kind,actor,subject,payload,prev_hash,hash,build_rev) VALUES(?,?,?,?,?,?,?,?,?)`,
+		ev.Seq, ev.TsMS, string(ev.Kind), ev.Actor, ev.Subject, string(ev.Payload), ev.PrevHash, ev.Hash, ev.BuildRev,
 	); err != nil {
 		return Event{}, err
 	}
@@ -543,9 +589,14 @@ func (l *Ledger) Append(actor string, kind Kind, subject string, payload any) (E
 	return ev, nil
 }
 
+// eventColumns is the one definition of what reading a chain row means. Both
+// read paths use it, so a column added here cannot reach one surface and not
+// the other.
+const eventColumns = `seq,ts_ms,kind,actor,subject,payload,prev_hash,hash,build_rev`
+
 // Events walks the chain in order. A zero limit means all of them.
 func (l *Ledger) Events(from int64, limit int) ([]Event, error) {
-	q := `SELECT seq,ts_ms,kind,actor,subject,payload,prev_hash,hash FROM adlc_event WHERE seq>=? ORDER BY seq`
+	q := `SELECT ` + eventColumns + ` FROM adlc_event WHERE seq>=? ORDER BY seq`
 	args := []any{from}
 	if limit > 0 {
 		q += ` LIMIT ?`
@@ -556,18 +607,23 @@ func (l *Ledger) Events(from int64, limit int) ([]Event, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Event
-	for rows.Next() {
-		var e Event
-		var kind, payload string
-		if err := rows.Scan(&e.Seq, &e.TsMS, &kind, &e.Actor, &e.Subject, &payload, &e.PrevHash, &e.Hash); err != nil {
-			return nil, err
-		}
-		e.Kind = Kind(kind)
-		e.Payload = []byte(payload)
-		out = append(out, e)
+	return scanEvents(rows)
+}
+
+// RevisionAt names the build that appended one event, or RevisionUnknown when
+// nothing recorded it. A sequence number nobody wrote is an absence too, not an
+// error: asking which build decided something that never happened has an
+// honest answer.
+func (l *Ledger) RevisionAt(seq int64) (string, error) {
+	var rev string
+	err := l.db.QueryRow(`SELECT build_rev FROM adlc_event WHERE seq=?`, seq).Scan(&rev)
+	if err == sql.ErrNoRows {
+		return RevisionUnknown, nil
 	}
-	return out, rows.Err()
+	if err != nil {
+		return RevisionUnknown, err
+	}
+	return RevisionOf(rev), nil
 }
 
 // ---------------------------------------------------------------- projection

@@ -91,7 +91,7 @@ func (l *Ledger) EventsOfKind(kinds []Kind, subject string, limit int) ([]Event,
 		ph[i] = "?"
 		args = append(args, string(k))
 	}
-	q := `SELECT seq,ts_ms,kind,actor,subject,payload,prev_hash,hash FROM adlc_event
+	q := `SELECT ` + eventColumns + ` FROM adlc_event
 	      WHERE kind IN (` + strings.Join(ph, ",") + `)`
 	if subject != "" {
 		q += ` AND subject=?`
@@ -126,7 +126,7 @@ func scanEvents(rows *sql.Rows) ([]Event, error) {
 		var e Event
 		var kind, payload string
 		if err := rows.Scan(&e.Seq, &e.TsMS, &kind, &e.Actor, &e.Subject,
-			&payload, &e.PrevHash, &e.Hash); err != nil {
+			&payload, &e.PrevHash, &e.Hash, &e.BuildRev); err != nil {
 			return nil, err
 		}
 		e.Kind = Kind(kind)

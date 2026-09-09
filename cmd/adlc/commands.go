@@ -743,11 +743,7 @@ func cmdLedger(e *env, args []string) int {
 				break
 			}
 			shown++
-			mark := " "
-			if !ledger.KnownKinds[ev.Kind] {
-				mark = "?"
-			}
-			fmt.Printf("%s%6d  %-24s %-20s %-10s %s\n", mark, ev.Seq, ev.Kind, ev.Subject, ev.Actor, shortHash(ev.Hash))
+			fmt.Println(eventLine(ev))
 		}
 		if shown == 0 {
 			fmt.Println("no matching events")
@@ -757,8 +753,22 @@ func cmdLedger(e *env, args []string) int {
 	return fail("ledger: unknown subcommand %q", args[0])
 }
 
+// eventLine renders one row of the chain, including the build that appended
+// it. A row from before that was recorded prints "unknown" rather than a blank
+// column, because a blank reads as "nothing to say here" and this one has
+// something to say: nobody knows.
+func eventLine(ev ledger.Event) string {
+	mark := " "
+	if !ledger.KnownKinds[ev.Kind] {
+		mark = "?"
+	}
+	return fmt.Sprintf("%s%6d  %-24s %-20s %-10s %-14s %s",
+		mark, ev.Seq, ev.Kind, ev.Subject, ev.Actor, ledger.ShortRevision(ev.Revision()), shortHash(ev.Hash))
+}
+
 func printVerify(rep *ledger.Report) {
-	fmt.Printf("LEDGER %s — %d event(s), head seq %d %s\n\n", rep.Verdict, rep.Events, rep.HeadSeq, shortHash(rep.HeadHash))
+	fmt.Printf("LEDGER %s — %d event(s), head seq %d %s\n", rep.Verdict, rep.Events, rep.HeadSeq, shortHash(rep.HeadHash))
+	fmt.Printf("verified by build %s\n\n", ledger.ShortRevision(ledger.BuildRevision()))
 	for _, tier := range []ledger.Tier{ledger.TierIntegrity, ledger.TierKnowledge} {
 		fmt.Printf("%s\n", strings.ToUpper(string(tier)))
 		for _, c := range rep.Checks {

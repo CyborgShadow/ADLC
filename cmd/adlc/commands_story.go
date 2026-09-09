@@ -84,6 +84,9 @@ func cmdRunStory(e *env, sub string, args []string) int {
 		fmt.Printf("  recorded at the time   %s\n", rp.Recorded)
 		fmt.Printf("  re-derived now         %s\n", rp.Rederived)
 		fmt.Printf("  gate against this tree %s\n", orDash(rp.GateNow))
+		fmt.Printf("  decided by build       %s\n", ledger.ShortRevision(rp.DecidedBy))
+		fmt.Printf("  re-derived by build    %s\n", ledger.ShortRevision(rp.ReplayedBy))
+		fmt.Printf("  builds                 %s\n", rp.BuildNote)
 		if rp.Detail != "" {
 			fmt.Printf("  detail                 %s\n", rp.Detail)
 		}

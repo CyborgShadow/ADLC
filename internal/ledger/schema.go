@@ -3,7 +3,12 @@ package ledger
 // SchemaVersion is the ledger layout this build writes. It is recorded in the
 // database and compared on open: a build older than the ledger it is handed
 // reports UNKNOWN rather than guessing.
-const SchemaVersion = 1
+//
+// v2 added adlc_event.build_rev. The number is bumped rather than the meaning of
+// v1 changed, because a v1 ledger is still a real thing an older binary is
+// entitled to read correctly, and a version whose meaning moves underneath it
+// makes every past ledger unreadable in a way nothing can detect.
+const SchemaVersion = 2
 
 // schemaSQL is applied on init and is forward-only.
 //
@@ -20,6 +25,14 @@ const SchemaVersion = 1
 // the evidence of itself: dropping the final N events leaves a chain that
 // still walks cleanly. The anchor is a second place the tip is written, so a
 // truncated chain disagrees with it.
+//
+// Third, adlc_event.build_rev records which build appended the row, and it sits
+// OUTSIDE the hash preimage. That is deliberate: fold it in and every ledger
+// this build writes reads as TAMPERED to an older binary, whose HashEvent
+// cannot know about a field that did not exist — and a tamper detector that
+// accuses at somebody else's obsolescence is the one thing this verifier must
+// never be. The column is protected the same way every other column on this
+// table is, by the append-only triggers below.
 //
 // Everything else is a projection. Projections are derived, are written only
 // by the replay path, and are checked by rebuilding them from the chain and
@@ -39,7 +52,8 @@ CREATE TABLE IF NOT EXISTS adlc_event (
   subject    TEXT    NOT NULL DEFAULT '',
   payload    TEXT    NOT NULL,
   prev_hash  TEXT    NOT NULL,
-  hash       TEXT    NOT NULL
+  hash       TEXT    NOT NULL,
+  build_rev  TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TRIGGER IF NOT EXISTS adlc_event_no_update
@@ -271,5 +285,8 @@ var migrations = []string{
 	`ALTER TABLE adlc_segment ADD COLUMN rank INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE adlc_item ADD COLUMN rationale TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE adlc_run ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
+	// Rows written before v2 keep the empty default, which reads as UNKNOWN
+	// rather than as a build anybody can name.
+	`ALTER TABLE adlc_event ADD COLUMN build_rev TEXT NOT NULL DEFAULT ''`,
 	`CREATE INDEX IF NOT EXISTS adlc_event_kind ON adlc_event(kind, subject, seq)`,
 }

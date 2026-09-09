@@ -262,6 +262,76 @@ func TestReplayOfAGeneratorReRunsTheAdmissionRules(t *testing.T) {
 	}
 }
 
+// TestReplayNamesBothBuildsAndDoesNotConflateThem is the attribution property.
+// A replay that disagrees has two possible causes — the rules moved or the
+// record did — and the first one is a difference between two builds. Naming
+// neither leaves the reader with a mystery instead of a lead.
+func TestReplayNamesBothBuildsAndDoesNotConflateThem(t *testing.T) {
+	l, cfg := fixture(t)
+	// A build this test can name, so the assertion holds whether or not the test
+	// binary itself was stamped.
+	const decided = "0f1e2d3c4b5a69788796a5b4c3d2e1f000112233"
+	l.SetRevision(decided)
+	seedRun(t, l)
+
+	rp, err := Rederive(context.Background(), l, cfg, t.TempDir(), "p-1", at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rp.DecidedBy != decided {
+		t.Errorf("the replay should name the build that decided, got %q", rp.DecidedBy)
+	}
+	if rp.ReplayedBy != ledger.BuildRevision() {
+		t.Errorf("the replay should name the build re-deriving, got %q", rp.ReplayedBy)
+	}
+	if rp.SameBuild {
+		t.Errorf("these are not the same build (%s vs %s) and the replay must not say they are",
+			rp.DecidedBy, rp.ReplayedBy)
+	}
+	if !strings.Contains(rp.BuildNote, ledger.ShortRevision(decided)) {
+		t.Errorf("the note should name the deciding build: %q", rp.BuildNote)
+	}
+}
+
+// TestAReplayWithNothingToStampSaysSoRatherThanClaimingAMatch is the firing
+// case for the same rule on the path where nobody recorded anything at all.
+func TestAReplayWithNothingToStampSaysSoRatherThanClaimingAMatch(t *testing.T) {
+	l, cfg := fixture(t)
+	l.SetRevision("")
+	seedRun(t, l)
+
+	rp, err := Rederive(context.Background(), l, cfg, t.TempDir(), "p-1", at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rp.DecidedBy != ledger.RevisionUnknown {
+		t.Errorf("an unstamped build should read %q, got %q", ledger.RevisionUnknown, rp.DecidedBy)
+	}
+	if rp.SameBuild {
+		t.Error("an unstamped build must never render as agreeing with this one")
+	}
+	if !strings.Contains(rp.BuildNote, "cannot claim") {
+		t.Errorf("the note must say why it cannot compare them: %q", rp.BuildNote)
+	}
+}
+
+// TestTheBuildNoteOnlyClaimsAMatchWhenThereIsOne is the clean case: two
+// identical known revisions do read as one build, so the note above is not
+// passing by refusing everything.
+func TestTheBuildNoteOnlyClaimsAMatchWhenThereIsOne(t *testing.T) {
+	same := buildNote("abc123abc123", "abc123abc123")
+	if !strings.Contains(same, "same build") {
+		t.Errorf("two identical known builds are the same build: %q", same)
+	}
+	differ := buildNote("abc123abc123", "def456def456")
+	if strings.Contains(differ, "same build") {
+		t.Errorf("two different builds must not read as one: %q", differ)
+	}
+	if !strings.Contains(differ, "abc123abc123") || !strings.Contains(differ, "def456def456") {
+		t.Errorf("both builds should be named: %q", differ)
+	}
+}
+
 func TestOfRunOnAMissingRunIsAnError(t *testing.T) {
 	l, cfg := fixture(t)
 	if _, err := OfRun(l, cfg, "nope"); err == nil {

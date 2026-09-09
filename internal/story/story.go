@@ -262,6 +262,55 @@ type Replay struct {
 	// change; a decision cannot.
 	GateNow string
 	Notes   []string
+
+	// DecidedBy is the build of the control plane that made the recorded
+	// decision, as the chain records it. ReplayedBy is the build re-deriving it
+	// now.
+	//
+	// Both are named because a replay that disagrees has two possible causes —
+	// the rules changed, or the record did — and the first one is a difference
+	// between two builds. Without saying which builds, a disagreement is a
+	// mystery rather than a lead.
+	DecidedBy  string
+	ReplayedBy string
+	// SameBuild is true only when both revisions are known AND equal. An
+	// unstamped build is never reported as agreeing with this one.
+	SameBuild bool
+	// BuildNote says in a sentence what the two revisions mean for this replay.
+	BuildNote string
+}
+
+// buildNote states the relationship between the deciding and replaying builds,
+// and refuses to overstate it.
+//
+// The failure it prevents is a replay reading "the decision reproduces" over
+// two builds nobody can identify — which is a claim about determinism drawn
+// from an absence of evidence.
+func buildNote(decided, replaying string) string {
+	switch {
+	case ledger.SameBuild(decided, replaying):
+		return fmt.Sprintf("re-derived by the same build that decided it (%s)", ledger.ShortRevision(decided))
+	case ledger.KnownRevision(decided) && ledger.KnownRevision(replaying):
+		return fmt.Sprintf("decided by build %s and re-derived by build %s — the rules may have moved between them, so a disagreement is explicable rather than alarming",
+			ledger.ShortRevision(decided), ledger.ShortRevision(replaying))
+	}
+	return fmt.Sprintf("decided by build %s and re-derived by build %s — at least one of those is not identified, so this replay cannot claim the two are the same build",
+		ledger.ShortRevision(decided), ledger.ShortRevision(replaying))
+}
+
+// nameBuilds records which build decided and which is replaying, on every
+// path out of Rederive. It is set before the first early return: a replay that
+// stops early still has to say who is asking.
+func nameBuilds(l *ledger.Ledger, s *Run, rp *Replay) {
+	rp.DecidedBy = ledger.RevisionUnknown
+	if len(s.Proposals) > 0 {
+		if rev, err := l.RevisionAt(s.Proposals[0].Seq); err == nil {
+			rp.DecidedBy = rev
+		}
+	}
+	rp.ReplayedBy = ledger.BuildRevision()
+	rp.SameBuild = ledger.SameBuild(rp.DecidedBy, rp.ReplayedBy)
+	rp.BuildNote = buildNote(rp.DecidedBy, rp.ReplayedBy)
 }
 
 // Rederive re-runs a past decision from the record and compares.
@@ -284,6 +333,7 @@ func Rederive(ctx context.Context, l *ledger.Ledger, cfg *config.Config, repo, r
 		return nil, err
 	}
 	rp := &Replay{RunID: runID, Recorded: "(no decision recorded)"}
+	nameBuilds(l, s, rp)
 	if len(s.Proposals) > 0 {
 		p := s.Proposals[0]
 		if p.Admitted {
