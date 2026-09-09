@@ -37,11 +37,12 @@ Two things follow, and both are your call rather than mine:
 
 ## The headline
 
-**The ADLC built, verified and merged its own work, unattended.** Seven commits
-reached the trunk through the full lifecycle — engineer, then test, judge and
-adversarial review running together, then hygiene, then coherence review, then
-the merge queue — with the gate re-run on the rebased tree each time. The trunk
-is green: 290 tests passing on agent-written work.
+**The ADLC built, verified and merged its own work, unattended.** Sixty-two
+commits reached the trunk overnight through the full lifecycle — engineer, then
+test, judge and adversarial review running together, then hygiene, then
+coherence review, then the merge queue — with the gate re-run on the rebased
+tree each time. The trunk is green: 325 tests across 16 packages, most of them
+written by agents.
 
 The first item to make it through is a real fix with 108 lines of test behind
 it: an anchored `count_pattern` was finding nothing where it should have found
@@ -51,14 +52,14 @@ the line it names.
 
 | | |
 |---|---|
-| Runs finished | 45 overnight |
-| Agent time | 7h 55m |
+| Runs finished | 188 |
+| Recorded spend | $40.75, and that is a floor — see below |
 | First three items | 13–15 runs each, ~3h 30m wall each |
 | Items dispatched after the fixes | 2 runs each, 4–14 minutes |
 
 That contrast is the whole story. The first three items paid for every defect in
 the pipeline; the ones after them went through cleanly. **The design was not the
-problem — nine specific bugs were, and eight of them were mine.**
+problem — thirteen specific bugs were, and twelve of them were mine.**
 
 ## What was broken, in the order it bit
 
