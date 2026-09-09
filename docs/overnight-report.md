@@ -20,7 +20,7 @@ the line it names.
 
 | | |
 |---|---|
-| Runs finished | 45 |
+| Runs finished | 45 overnight |
 | Agent time | 7h 55m |
 | First three items | 13–15 runs each, ~3h 30m wall each |
 | Items dispatched after the fixes | 2 runs each, 4–14 minutes |
@@ -83,21 +83,22 @@ problem — nine specific bugs were, and eight of them were mine.**
 Each of these has a test that was verified to fail without the fix.
 
 
-## Two more, found by counting refusals rather than by watching
 
-The fleet was healthy by 08:30 and still throwing runs away. Counting the
-refusals by reason rather than reading the log found two more classes, both
-fixed and both guarded.
+## Three more, found by counting refusals rather than by watching
+
+The fleet was healthy by 08:30 and still throwing runs away. Counting refusals
+by reason rather than reading the log found three more classes, all fixed, each
+with a guard verified to fail without the fix.
 
 **10. Five of seven malformed envelopes were formatting, not meaning.** Agents
 wrote `criteria` as an object keyed by criterion id, `"met"` where the schema
-says `"pass"`, and findings as prose. None of them was wrong about the work; each
-threw away a whole run. `Parse` already held the line — forgiving about
-encoding, unforgiving about meaning, because refusing a fenced envelope costs a
-run to punish formatting — and it now extends to shape and stops exactly there.
-A status word maps only from a closed list; an unstated finding severity is
-resolved against the worker's own verdict so it fails closed; a severity from no
-vocabulary is still refused rather than guessed. The raw bytes are untouched, so
+says `"pass"`, and findings as prose. None was wrong about the work; each threw
+away a whole run. `Parse` already held the line — forgiving about encoding,
+unforgiving about meaning, because refusing a fenced envelope costs a run to
+punish formatting — and it now extends to shape and stops exactly there. A
+status word maps only from a closed list; an unstated finding severity is
+resolved against the worker's own verdict, so it fails closed; a severity from
+no vocabulary is still refused rather than guessed. Raw bytes are untouched, so
 the blob on the chain is what the agent wrote and every re-shaping is auditable
 against it.
 
@@ -118,20 +119,45 @@ A failed task is now a self-edge, exactly like a passing one. `NextState` stays
 a pure function of state, capability, verdict and radius — it still knows
 nothing about siblings — and `Refresh` settles the stage from the record:
 forward when every task passed, backward once every task has *reported*,
-carrying every failure in one line. Adversarial review still outranks the rest:
-a blocker rejects whoever else agreed.
+carrying every failure in one line and bumping the round. Adversarial review
+still outranks the rest: a blocker rejects whoever else agreed.
+
+**12. A branch that could not rebase went round the merge queue forever.** A
+rebase that conflicts against a fixed trunk conflicts identically every time, so
+the merge lane attempted the same impossible rebase on every tick while the item
+looked, on every surface, exactly like work nobody had got round to. That is the
+shape a stall takes when nothing errors. It now goes back to a builder with the
+conflict named, which is the only actor that can resolve one. `trunk_moved`
+stays retryable, because that one really does succeed next time.
+
+**And a thirteenth thing, which is not a bug.** An answered question reached
+nobody. The item unblocked and the run that picked it up was a fresh agent with
+no memory of the decision, so it re-derived it or asked it again — two runs
+raised the same question about the same acceptance criterion, neither able to
+see the other's, and both stopped for a person who had already answered. Settled
+decisions now ride in the slot the preamble already renders, headed separately
+and told plainly that they are settled. No role prompt changed.
 
 ## Decisions I took for you
 
-Recorded in full in `docs/decisions-overnight.md`, attributed on the chain to
-`claude` rather than to you — the ledger exists to say who decided.
+Six, recorded in full in `docs/decisions-overnight.md` and attributed on the
+chain to `claude` rather than to you — the ledger exists to say who decided.
 
 - **S1-010-Q1** — an agent correctly diagnosed the gating-edge bug and refused to
   add a check declaration to make its own gate pass. I told it the diagnosis was
   right and the fix was the other direction.
-- **S1-002-Q1** — an acceptance criterion required `go run` to exit 2, which no
-  Go program can do. Accepted its lean: assert against the built binary rather
-  than weaken the program's exit codes to fit the test.
+- **S1-002-Q1 and Q2** — an acceptance criterion required `go run` to exit 2,
+  which no Go program can do. Accepted its lean: assert against the built binary
+  rather than weaken the program's exit codes to fit the test. Asked twice, by
+  two runs that could not see each other's question.
+- **S1-017-Q2 / QJ1, S1-005-Q1, S1-017-Q1/Q3/Q4, S1-016-Q1, S1-018-Q1,
+  S1-001-QJ1** — scope calls, follow-up items and one "leave it derived".
+- **S1-019-Q1** — an agent reported that every self-service `adlc` command was
+  broken for it. Its diagnosis of the DSN was right and its refusal to make the
+  handle writable was right; the cause was neither of the two it offered. Its
+  workspace is cut from a branch older than the fix, so `go run ./cmd/adlc` in
+  its own tree builds an `adlc` that predates DSN support. No item — and a real
+  design trap it found, below.
 
 I did not touch sign-off, approvals or blast-radius policy. Those are the three
 gates a person owns, and me pressing them would make the record say something
@@ -139,25 +165,34 @@ untrue about who decided.
 
 ## Left for you
 
+- **A worker self-services with a binary built from its own branch**, so any
+  change to the control plane's CLI contract is invisible to every run already
+  in flight, and looks to that run like a defect in the tree it is holding.
+  S1-019 found this. The fix is to bring an item's branch up to trunk when its
+  workspace is prepared — merging where clean, carrying on where not. I have not
+  done it: it rewrites real branches carrying real work, and I want you watching
+  that one rather than waking up to it.
 - **The stored schema version says 2 and no merged code defines a 2.** I left it
   alone. Editing a ledger by hand so a report reads better is the one repair this
   system must never make. `ledger verify` will keep saying UNKNOWN until a build
-  defines a schema 2 — which is the honest answer, not a fault.
+  defines a schema 2 — the honest answer, not a fault.
 - **Post-verification ceremony.** After verification an item still goes through a
   janitor, an arbiter and an improver — three more full agent runs, serially, on
-  work whose blast radius is `none`. Collapsing or skipping those for source-only
-  work is the largest remaining speed-up, and it changes what the ADLC *is*, so
-  it is your call rather than mine.
+  work whose blast radius is `none`. Collapsing them for source-only work is the
+  largest remaining speed-up, and it changes what the ADLC *is*, so it is your
+  call rather than mine.
 - **`blast.plan_gate_min` is `host`**, so source-only work starts on a breakdown
   still under review. You chose that; worth confirming now you have seen it run.
 
 ## Can it redo a test in two hours?
 
 On the evidence: yes, if nothing new breaks. Items dispatched after the fixes
-took 2 runs and minutes rather than 15 runs and hours. A fresh deliverable would
-spend roughly 40 minutes on research, planning and plan review before any code,
-then items flow in parallel waves of 8.
+took 2 runs and minutes rather than 15 runs and hours, and the queue now runs
+eight abreast with test, judge and review on one commit at once. A fresh
+deliverable spends roughly 40 minutes on research, planning and plan review
+before any code, then items flow in parallel waves.
 
 I would not promise it until it has been watched once from an empty ledger. The
-honest position is that every stall found tonight is fixed and guarded, and the
-ones nobody has hit yet are still out there.
+honest position is that every stall found overnight is fixed and guarded — nine
+found by watching, three more by counting refusals — and the ones nobody has hit
+yet are still out there.
