@@ -55,5 +55,5 @@ fabricated exit code is a discrepancy, an honest `not_run` never is, a claim is 
 channel the observation was, silence about a failing check is an omission but silence about a
 passing one is not, a gate with no declared checks is not green, a run that ran out of its own
 budget says so rather than blaming a check it never started, and a run somebody *cancelled* says
-that instead of naming a budget — while an expired run still names its budget and a check that
-really does outlive its own budget is still `RED`.
+that instead of naming a budget — while a check that really does outlive its own budget is still
+`RED`.

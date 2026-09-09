@@ -489,9 +489,10 @@ func TestARunOutOfBudgetSaysSoInsteadOfBlamingTheCheck(t *testing.T) {
 }
 
 // TestACheckThatOutlivesItsOwnBudgetIsStillRed is the second clean case for
-// the guards above: with the run still inside its budget, a check that hangs past its own
-// is reported as the hang it is. A guard that reclassified every timeout would
-// pass the firing case and disarm the one rule this package has about hangs.
+// the guards above: with the run still inside its budget, a check that hangs
+// past its own is reported as the hang it is. A guard that reclassified every
+// timeout would pass the firing case and disarm the one rule this package has
+// about hangs.
 func TestACheckThatOutlivesItsOwnBudgetIsStillRed(t *testing.T) {
 	cfg := mustConfig(t, []config.Check{{
 		ID: "slow", Command: hangCmd(t), Env: []string{hangEnv},
