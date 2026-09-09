@@ -132,23 +132,32 @@ func TestAClaimIsTheLastRunOfACheck(t *testing.T) {
 	}
 }
 
-// Criterion status is a closed vocabulary of three words.
+// Criterion status is a closed vocabulary of three words, and the refusal for a
+// word outside it names the field.
 //
-// "met" is the synonym roles keep reaching for, and it is the dangerous one: it
-// reads as a pass to a person and matches nothing here, so a criterion nobody
-// tested would arrive looking satisfied. Refusing it at the parser is what makes
-// the preamble's three words the only three, and the refusal names the field so
-// the next run can find what to fix.
+// statusWords lets a known synonym through under its declared spelling, so the
+// dangerous case is no longer a synonym but a word from nowhere: it stops at
+// validate, and unless the refusal says WHICH field it is, the next run gets a
+// rejection it cannot classify and works around rather than fixes. Naming the
+// field is the half of the guard that makes the message actionable, and it is
+// the half nothing else here holds.
 func TestCriterionStatusIsAClosedVocabulary(t *testing.T) {
 	withCriteria := func(entries string) string {
 		return strings.Replace(minimal, `"outputs": {}`, `"outputs": {"criteria":[`+entries+`]}`, 1)
 	}
 
-	// Firing case: a synonym for pass is not a status.
-	bad := withCriteria(`{"id":"AC-1","text":"t","status":"met","command_index":0,"evidence":"e"}`)
+	// Firing case: a word no vocabulary knows. Asserting it is absent from
+	// statusWords is what stops this going quiet — the day somebody makes this
+	// word a synonym, the guard would start passing for the wrong reason, which
+	// is how S1-025's first attempt was invalidated by a change it never saw.
+	const fromNowhere = "roughly there"
+	if _, ok := statusWords[fromNowhere]; ok {
+		t.Fatalf("%q is now a known synonym, so it no longer fires this guard; pick another", fromNowhere)
+	}
+	bad := withCriteria(`{"id":"AC-1","text":"t","status":"` + fromNowhere + `","command_index":0,"evidence":"e"}`)
 	_, err := Parse([]byte(bad))
 	if err == nil {
-		t.Fatal(`"met" is not a status; an untested criterion would arrive looking satisfied`)
+		t.Fatalf("%q is not a status and normalise cannot read it; it must be refused", fromNowhere)
 	}
 	if _, ok := err.(ErrMalformed); !ok {
 		t.Errorf("should be ErrMalformed so it is refusable rather than fatal, got %T", err)

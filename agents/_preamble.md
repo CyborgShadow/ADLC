@@ -110,10 +110,12 @@ objects and `status` is one of exactly three words — `pass`, `fail`, `untested
 }
 ```
 
-**A criterion nobody tested is `untested`** — never `pass`, and never a word of your own such as
-`met` or `ok`. An envelope carrying any other status fails to parse and the whole run is refused,
-because a synonym reads as a pass to a person and means nothing to the control plane, and a
-criterion with no command behind it is exactly the one somebody needs to see.
+**A criterion nobody tested is `untested`** — never `pass`. Write one of the three words rather
+than a synonym: a word with an unambiguous meaning, such as `met` or `ok`, is read as the declared
+word it means, so reaching for one on a criterion you never exercised is exactly how an untested
+criterion arrives looking satisfied. A word from no vocabulary at all is refused naming
+`outputs.criteria`, and the whole run with it. A criterion with no command behind it is the one
+somebody needs to see, so say so.
 
 {{rigour}}
 
