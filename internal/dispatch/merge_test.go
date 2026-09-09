@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/CyborgShadow/ADLC/internal/authority"
+	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
@@ -192,5 +193,74 @@ func TestABranchThatCannotRebaseGoesBackToABuilder(t *testing.T) {
 	}
 	if authority.State(it.State) != authority.StateInProgress {
 		t.Fatalf("only a builder can resolve a conflict, got %s", it.State)
+	}
+}
+
+// A merge gate that comes back RED names the check that failed.
+//
+// The refusal used to read "<edge> came back RED" and nothing else, and the
+// merge lane appends no gate.observed row — so that one sentence was the whole
+// record of the run. Recovering the cause meant a detached worktree at the
+// trunk, the item's commits cherry-picked onto it and the gate run there by
+// hand: work the gate had already done.
+func TestAMergeGateThatComesBackRedNamesTheFailingCheck(t *testing.T) {
+	// `go version` prints a line and exits 0, so one command is RED under "the
+	// output is the verdict" and GREEN under exit-zero — on any host that can
+	// run this suite at all.
+	land := func(t *testing.T, rule config.VerdictRule) (MergeResult, []ledger.Proposal) {
+		t.Helper()
+		ws, routing := specialists()
+		h := newHarness(t, ws, routing)
+		h.segment(t, "S1", "seg", "", 0)
+		h.item(t, "S1-001", "S1", "ui", "ready_to_merge")
+		gitRepo(t, h, "S1-001", "adlc/p-merge")
+		h.Cfg.Dispatch.Trunk = "main"
+		h.Cfg.Checks = []config.Check{{
+			ID: "fmt", Command: []string{"go", "version"}, Verdict: rule,
+			RequiredFor: []string{"merging->merged"},
+		}}
+		res, err := h.D.Merge(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		props, err := h.Led.Proposals("S1-001", true, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res, props
+	}
+
+	// Firing case: one declared check is RED on the rebased tree.
+	res, props := land(t, config.VerdictOutputEmpty)
+	if len(res.Landed) != 0 {
+		t.Fatalf("a red gate must not land anything: %+v", res)
+	}
+	var refusal string
+	for _, p := range props {
+		if p.Reason == string(authority.ReasonMergeGateFailed) {
+			refusal = p.Detail
+		}
+	}
+	if refusal == "" {
+		t.Fatalf("no merge_gate_failed refusal was recorded: %+v", props)
+	}
+	if !strings.Contains(refusal, "fmt") {
+		t.Errorf("the refusal does not name the check that failed, so it is the whole record of nothing: %q", refusal)
+	}
+	if !strings.Contains(refusal, "printed") {
+		t.Errorf("the refusal does not say what the check observed: %q", refusal)
+	}
+
+	// Clean case: the same tree, the same command, a rule it satisfies. Without
+	// it the assertions above would pass just as well the day the gate started
+	// refusing everything.
+	green, clean := land(t, config.VerdictExitZero)
+	if len(green.Landed) != 1 || green.Landed[0] != "S1-001" {
+		t.Fatalf("a green gate must land the work: %+v (idle %q)", green, green.Idle)
+	}
+	for _, p := range clean {
+		if p.Reason == string(authority.ReasonMergeGateFailed) {
+			t.Errorf("a green gate recorded a refusal anyway: %q", p.Detail)
+		}
 	}
 }

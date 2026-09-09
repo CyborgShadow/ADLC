@@ -83,7 +83,14 @@ func (d *Dispatcher) whatWentWrong(itemID string, attempts int) string {
 		if strings.TrimSpace(p.Detail) != "" {
 			fmt.Fprintf(&b, " — %s", oneLine(p.Detail, 400))
 		}
-		fmt.Fprintf(&b, " (run %s)\n", p.RunID)
+		// Not every refusal has a run. The merge lane is the control plane's own
+		// step, so its refusals carry no run id, and printing the field anyway
+		// rendered "(run )" — which reads as a run that failed to record itself
+		// and sent readers looking for it beside the well-formed ids above.
+		if p.RunID != "" {
+			fmt.Fprintf(&b, " (run %s)", p.RunID)
+		}
+		b.WriteString("\n")
 	}
 	b.WriteString("\nDo not simply try the same thing again. If you believe a refusal was wrong, say so in your summary with the evidence; do not work around it.")
 	return b.String()

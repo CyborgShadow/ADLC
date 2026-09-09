@@ -833,3 +833,37 @@ func TestARefusalCountIsWhatWasRecordedAndNotWhatIsPrinted(t *testing.T) {
 		t.Errorf("listed %d refusals of the 2 recorded: %q", n, untruncated)
 	}
 }
+
+func TestARefusalWithNoRunRendersNoRunID(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	d := h.D
+	h.segment(t, "S1", "seg", "Build the thing", 3)
+	h.item(t, "S1-001", "S1", "ui", "in_progress")
+
+	// Firing case: exactly what the merge lane appends.
+	if _, err := d.Led.Append("cli", ledger.KindTransitionRefused, "S1-001", ledger.TransitionOutcome{
+		ItemID: "S1-001", From: "merging", To: "merged",
+		Reason: "merge_gate_failed", Detail: "merging->merged came back RED — test (exit 1)",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := d.whatWentWrong("S1-001", 1)
+	if !strings.Contains(got, "merge_gate_failed") {
+		t.Fatalf("the merge refusal is not in what the next run is told: %q", got)
+	}
+	if strings.Contains(got, "(run") {
+		t.Errorf("a refusal no run produced was given a run id anyway: %q", got)
+	}
+
+	// Clean case: a refusal a run did produce still names it, or the fix above
+	// would have removed the attribution from every refusal that has one.
+	if _, err := d.Led.Append("cli", ledger.KindTransitionRefused, "S1-001", ledger.TransitionOutcome{
+		ItemID: "S1-001", RunID: "e-2", From: "in_progress", To: "ready_for_testing",
+		Reason: "gate_red", Detail: "two tests fail in internal/gate",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.whatWentWrong("S1-001", 2); !strings.Contains(got, "(run e-2)") {
+		t.Errorf("a refusal a run produced must still name it: %q", got)
+	}
+}

@@ -158,8 +158,39 @@ func (d *Dispatcher) mergeGate() merge.GateFunc {
 		if err != nil {
 			return false, "", err
 		}
-		return r.Green(), fmt.Sprintf("%s came back %s", edge, r.Status), nil
+		return r.Green(), fmt.Sprintf("%s came back %s%s", edge, r.Status, blame(r)), nil
 	}
+}
+
+// blame names the checks a non-green gate is non-green because of.
+//
+// The merge lane appends no gate.observed row, so the refusal's one sentence is
+// the entire record of the run. Saying only "<edge> came back RED" left the next
+// builder to reconstruct the failure by hand — a detached worktree at the trunk,
+// the item's commits cherry-picked onto it, the gate run there — which is the
+// work the gate had just done and thrown away in the reporting. The Result
+// already carries every name.
+func blame(r *gate.Result) string {
+	if r.Green() {
+		return ""
+	}
+	if r.NoChecksDeclared {
+		return " — " + r.Summary()
+	}
+	var parts []string
+	for _, o := range r.Failed() {
+		parts = append(parts, fmt.Sprintf("%s (%s)", o.CheckID, o.Why))
+	}
+	// A gate that is not green with nothing RED failed because a check could not
+	// be run at all. Naming only the RED ones there would report the same silence
+	// this exists to end, and an absent tool is not a pass.
+	for _, o := range r.Unknown() {
+		parts = append(parts, fmt.Sprintf("%s could not run (%s)", o.CheckID, o.Why))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " — " + strings.Join(parts, "; ")
 }
 
 // branchFor is the branch that carries this item's work.
