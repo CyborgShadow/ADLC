@@ -795,8 +795,19 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	// those clear the whole stage, and the item leaves verification on nothing
 	// but three claims. A refusal is evidence the claim was wrong; a task cleared
 	// by one is not verified at all.
+	//
+	// The verdict is still a term, because the destination stopped carrying it.
+	// A setback takes the SAME self-edge a pass does (authority/advance.go: a
+	// failing task must not eject its in-flight siblings), and the tester's
+	// verifying->verifying edge requires a green gate and matching claims but
+	// not ReqVerdictPass — so `to == StateVerifying` alone admits a task that
+	// reported its own failure over a green tree and then marks it cleared.
+	// That is this same defect inverted: three tasks reporting fail would
+	// complete the stage and send the item to reviewed with every verification
+	// question answered no. The gate's answer and the claim have to agree, and
+	// each is one term here.
 	if c.From == authority.StateVerifying && to == authority.StateVerifying &&
-		authority.IsVerification(c.Capability) {
+		authority.IsVerification(c.Capability) && env.Verdict == "pass" {
 		if _, err := d.Led.Append(d.Actor, ledger.KindVerificationPassed, c.Item.ID,
 			ledger.VerificationPassed{
 				ItemID: c.Item.ID, Capability: c.Capability, RunID: runID,

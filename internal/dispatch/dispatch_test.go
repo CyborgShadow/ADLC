@@ -1309,3 +1309,63 @@ func TestAFailedVerificationTaskIsRecordedOnTheClaim(t *testing.T) {
 		t.Fatalf("%d verification.passed recorded for a task that reported fail", n)
 	}
 }
+
+// TestAFailingTaskDoesNotClearItselfOverAGreenGate is the firing case for the
+// verdict term on that guard, and the case the four tests above cannot see.
+//
+// All of them carry a claimed pass or a RED gate, so every one of them passes
+// against a guard that reads the destination alone. This is the combination
+// that does not: a task reporting its OWN failure over a tree whose checks are
+// green. A setback takes the same verifying->verifying self-edge a pass does,
+// and the tester's edge requires a green gate and matching claims but not a
+// passing verdict — so the transition is admitted here, and the destination
+// carries nothing that tells this run from a cleared one. Without the verdict
+// term, dispatchOne logs NOT VERIFIED and VERIFIED for the same run, and three
+// failing tasks complete the stage: Refresh sends the item to reviewed with
+// every verification question answered no.
+func TestAFailingTaskDoesNotClearItselfOverAGreenGate(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	h.edgeCheck(config.VerdictExitZero) // the gate will observe GREEN here
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "fail")
+
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Dispatched {
+		t.Fatalf("the test task was not dispatched: %s", res.Idle)
+	}
+	// Admitted is the premise, not an aspiration: the setback self-edge is a
+	// proposal like any other and a green gate satisfies it. If this ever stops
+	// holding the test has stopped exercising the guard, so it fails loudly
+	// rather than passing on a refusal that would mask the append below.
+	if !res.Admitted {
+		t.Fatalf("the setback self-edge was refused as %s (%s); this test needs it ADMITTED, "+
+			"because a refused run proves nothing about a guard that runs after the decision",
+			res.Reason, res.Detail)
+	}
+
+	passed, err := h.Led.VerificationsFor("S1-001", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if passed[config.CapTest] {
+		t.Fatal("a task that reported fail cleared itself: the stage counts a failure as a verification")
+	}
+	if n := len(verificationEvents(t, h, "S1-001")); n != 0 {
+		t.Fatalf("%d verification.passed recorded for a task that reported fail over a green gate", n)
+	}
+
+	// The other half of the same run: the failure still has to reach the record,
+	// or the guard could be satisfied by recording nothing at all.
+	failed, err := h.Led.EventsOfKind([]ledger.Kind{ledger.KindVerificationFailed}, "S1-001", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("%d verification.failed recorded for one failing task, want exactly 1", len(failed))
+	}
+}
