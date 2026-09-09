@@ -4,7 +4,7 @@
   "version": 1,
   "project": "adlc",
 
-  "source_roots": ["cmd", "internal", "agents", "site", "adlc.json", ".gitattributes"],
+  "source_roots": ["cmd", "internal", "agents", "site", "docs", "README.md", "adlc.json", ".gitattributes"],
 
   "checks": [
     {
