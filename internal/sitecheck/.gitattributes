@@ -4,9 +4,9 @@
 # criteria were demonstrated on and the tree a reviewer checks out is a fixture
 # that proves something about neither.
 #
-# The root .gitattributes covers *.go and *.md; these are the types only this
-# package's testdata uses. Images are left alone — git detects them as binary
-# and converts nothing.
+# The root .gitattributes pins the source and config types the toolchain reads;
+# these four are the types only this package's testdata uses. Images are left
+# alone — git detects them as binary and converts nothing.
 *.html text eol=lf
 *.css  text eol=lf
 *.tsv  text eol=lf

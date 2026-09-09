@@ -92,7 +92,7 @@ func loadSite(fsys fs.FS) (*site, error) {
 			if err != nil {
 				return err
 			}
-			s.csss = append(s.csss, &cssFile{textFile: textFile{path: p, body: string(b)}, rules: parseCSS(p, string(b))})
+			s.csss = append(s.csss, &cssFile{textFile: textFile{path: p, body: string(b)}, rules: parseCSS(string(b))})
 		}
 		return nil
 	})

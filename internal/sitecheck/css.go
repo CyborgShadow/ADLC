@@ -19,7 +19,6 @@ type cssDecl struct {
 }
 
 type cssRule struct {
-	file     string
 	prelude  string // the selector list, or the at-rule including its condition
 	line     int
 	decls    []cssDecl
@@ -32,14 +31,13 @@ type cssFile struct {
 }
 
 type cssParser struct {
-	file string
 	src  string
 	i    int
 	line int
 }
 
-func parseCSS(file, src string) []*cssRule {
-	p := &cssParser{file: file, src: stripCSSComments(src), line: 1}
+func parseCSS(src string) []*cssRule {
+	p := &cssParser{src: stripCSSComments(src), line: 1}
 	return p.block()
 }
 
@@ -110,7 +108,7 @@ func (p *cssParser) blockWithDecls() ([]*cssRule, []cssDecl) {
 			p.adv()
 			kids, kidDecls := p.blockWithDecls()
 			rules = append(rules, &cssRule{
-				file: p.file, prelude: text, line: startLine,
+				prelude: text, line: startLine,
 				decls: kidDecls, children: kids,
 			})
 		case ';':
