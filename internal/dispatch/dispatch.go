@@ -666,16 +666,21 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	if model == "" {
 		model = d.Cfg.Budget.DefaultModel
 	}
-	cost, priced := spend.Cost(d.Cfg.Budget, model, usage)
-	if !priced {
+	recorded, forCap, unpriced := runCost(d.Cfg.Budget, model, usage)
+	if unpriced {
 		d.log("UNPRICED %s used model %q, which has no price entry; its cost is unknown, not zero", runID, model)
 	}
 	if _, berr := d.Led.PutBlob(ledger.BlobEnvelope, env.Raw()); berr != nil {
 		return res, true, berr
 	}
-	d.finish(runID, env.Verdict, env.SHA(), env.HeadSHA, env.Artifact, usage, int64(cost))
-	if v := spend.CheckRun(d.Cfg.Budget, cost); !v.OK {
-		d.log("OVER BUDGET %s — %s", runID, v.Detail)
+	d.finish(runID, env.Verdict, env.SHA(), env.HeadSHA, env.Artifact, usage, int64(recorded))
+	if v := spend.CheckRun(d.Cfg.Budget, forCap); !v.OK {
+		// The reason is in the line because CheckRun has two of them and they
+		// send a reader to different places: a run over the cap has a bill
+		// somebody can go and look at, and a run nobody measured has none.
+		// Logging both as OVER BUDGET buries the second, which is the one that
+		// used to pass silently.
+		d.log("SPEND REFUSED %s (%s) — %s", runID, v.Reason, v.Detail)
 	}
 	d.recordQuestions(runID, c, env)
 	d.recordLessons(runID, c, env)
@@ -1001,6 +1006,35 @@ func (d *Dispatcher) runGate(ctx context.Context, dir string, from, to authority
 	r := &gate.Runner{Cfg: d.Cfg, Dir: dir, Artifact: artifact,
 		Vars: map[string]string{"workdir": dir, "artifact": artifact}}
 	return r.RunEdge(ctx, string(from), string(to))
+}
+
+// runCost prices one finished run for the two surfaces that read the figure,
+// which need opposite things from a run nobody measured.
+//
+// An envelope with no `usage` block parses to four zeros, and so would a run
+// that consumed nothing — but no model run consumes nothing, so only a caller
+// holding the block can tell an absent count from a counted one. spend.CostOf
+// is where that distinction is made at the pricing boundary; this is the
+// dispatcher handing it what it alone knows.
+//
+// recorded goes in the ledger's cost column, which is read back and summed as
+// money, so an unmeasured run records zero there and is counted as unmeasured
+// from its usage block instead — a sentinel in that column would be totalled.
+// forCap goes to the per-run cap, which must not clear a run whose cost nobody
+// can bound: comparing a silent zero against the cap clears precisely the runs
+// the cap exists to catch, and that is how a cap comes never to be reached.
+//
+// unpriced is the model question alone, and is false for an unmeasured run
+// because nothing was priced there. Reporting it true would print "no price
+// entry" about a model that has one, and send an operator to add a price that
+// is already in the table.
+func runCost(b config.Budget, model string, u ledger.Usage) (recorded, forCap spend.Micros, unpriced bool) {
+	measured := u.Measured()
+	c, priced := spend.CostOf(b, model, u, measured)
+	if !measured {
+		return c, spend.Unknown, false
+	}
+	return c, c, !priced
 }
 
 func (d *Dispatcher) finish(runID, verdict, envSHA, headSHA, artifact string, u ledger.Usage, cost int64) {

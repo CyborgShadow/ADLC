@@ -15,6 +15,7 @@ import (
 	"github.com/CyborgShadow/ADLC/internal/lease"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 	"github.com/CyborgShadow/ADLC/internal/prompt"
+	"github.com/CyborgShadow/ADLC/internal/spend"
 )
 
 var testNow = time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
@@ -840,5 +841,119 @@ func TestAQuestionWithAFreeIdKeepsTheIdTheAgentGave(t *testing.T) {
 	}
 	if h.logged("QUESTION ID TAKEN") {
 		t.Error("a free id was treated as a collision")
+	}
+}
+
+// spendEnvelope is a worker's report whose only interesting property is what it
+// says about tokens. The verdict is a fail in both spend tests below, so the
+// only thing that differs between them is the usage block and neither is also a
+// test about gates, transitions or generated items.
+func spendEnvelope(usage map[string]any) string {
+	env := map[string]any{
+		"envelope_version": "1",
+		"run_id":           "{{run_id}}",
+		"worker_type":      "frontend",
+		"verdict":          "fail",
+		"summary":          "did the work and reported it",
+		"commands_run":     []any{},
+	}
+	if usage != nil {
+		env["usage"] = usage
+	}
+	b, _ := json.Marshal(env)
+	return string(b)
+}
+
+// pricedBudget is a real per-run cap over a model the default table prices, so
+// a test asserting a run was cleared by the cap is not asserting that against a
+// cap of zero, which means unlimited and clears everything.
+func pricedBudget() config.Budget {
+	return config.Budget{DefaultModel: "claude-sonnet-5", PerRunMicros: 1_000_000}
+}
+
+// TestARunNobodyMeasuredIsUnknownNotFree is the firing case.
+//
+// An envelope with no usage block parses to four zeros, and pricing those at
+// the going rate produced a confident $0.00 — which the per-run cap then
+// cleared, every time, for exactly the runs whose cost nobody could bound. The
+// cap was therefore never reached however many of them there were.
+func TestARunNobodyMeasuredIsUnknownNotFree(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.Cfg.Budget = pricedBudget()
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "in_progress")
+	h.Run.envelope = spendEnvelope(nil)
+
+	if _, err := h.D.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	run, err := h.Led.Run(h.Run.lastInv.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Usage.Measured() {
+		t.Fatalf("the envelope carried no usage block, so nothing was measured: %+v", run.Usage)
+	}
+
+	// The two halves of the figure, which disagree on purpose.
+	recorded, forCap, unpriced := runCost(h.Cfg.Budget, "claude-sonnet-5", run.Usage)
+	if forCap.Known() {
+		t.Errorf("an unmeasured run's cost is UNKNOWN, not a number the cap can compare; got %s", forCap)
+	}
+	if v := spend.CheckRun(h.Cfg.Budget, forCap); v.OK || v.Reason != "spend_unknown" {
+		t.Errorf("the per-run cap must refuse a run it cannot price, naming spend_unknown; got %+v", v)
+	}
+	if recorded != 0 || int64(run.CostMicros) != int64(recorded) {
+		t.Errorf("the ledger's cost column is read back as money and must hold zero rather than the sentinel; recorded %d, ledger %d", recorded, run.CostMicros)
+	}
+	if !h.logged("spend_unknown") {
+		t.Errorf("the refusal left no trace in the log: %v", h.Logs)
+	}
+	// The model is in the default price table, so blaming the price table here
+	// would send an operator to add a price that is already there.
+	if unpriced || h.logged("UNPRICED") {
+		t.Errorf("a priced model was reported as having no price entry: %v", h.Logs)
+	}
+}
+
+// TestAMeasuredRunUnderTheCapIsStillAdmitted is the clean case: without it the
+// test above passes on the day the cap refuses every run there is.
+func TestAMeasuredRunUnderTheCapIsStillAdmitted(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.Cfg.Budget = pricedBudget()
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "in_progress")
+	h.Run.envelope = spendEnvelope(map[string]any{"input_tokens": 1000, "output_tokens": 500})
+
+	if _, err := h.D.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	run, err := h.Led.Run(h.Run.lastInv.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1000 input at $3/Mtok and 500 output at $15/Mtok, in micros.
+	const want = 3_000 + 7_500
+	if run.CostMicros != want {
+		t.Errorf("the ledger's cost column must hold what the run actually cost; want %d, got %d", want, run.CostMicros)
+	}
+	if !spend.Micros(run.CostMicros).Known() {
+		t.Errorf("a counted run's cost was written as the absent-cost sentinel: %d", run.CostMicros)
+	}
+	recorded, forCap, unpriced := runCost(h.Cfg.Budget, "claude-sonnet-5", run.Usage)
+	if int64(recorded) != want || forCap != recorded {
+		t.Errorf("a measured run's two figures are one number; recorded %s, for the cap %s", recorded, forCap)
+	}
+	if unpriced {
+		t.Error("a model in the default price table was reported as unpriced")
+	}
+	if v := spend.CheckRun(h.Cfg.Budget, forCap); !v.OK {
+		t.Errorf("a run well under the per-run cap must be admitted; got %+v", v)
+	}
+	if h.logged("SPEND REFUSED") {
+		t.Errorf("a run under the cap was refused: %v", h.Logs)
 	}
 }
