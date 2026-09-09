@@ -89,22 +89,54 @@ func TestAStaleReadIsNamedAsOne(t *testing.T) {
 	}
 }
 
-func TestOnlyAValidatorMayCloseReview(t *testing.T) {
-	c := cfg(t)
-	a := New(c)
-	e := env(t, func(m map[string]any) { m["worker_type"] = "performer" })
+// TestOnlyTheJudgeMayClearAVerificationTask pins who the stage belongs to at
+// the edge rather than at the routing.
+//
+// The performer is the original case: a builder closing its own review is the
+// conflict of interest the separation exists to prevent. The tester and the
+// validator are here because their tasks left the stage, and an edge that
+// merely stops being dispatched to them still admits them if something else
+// proposes it. Refused by name is the difference between a role that cannot
+// clear a task and one that nothing currently asks to.
+func TestOnlyTheJudgeMayClearAVerificationTask(t *testing.T) {
+	a := New(cfg(t))
+	f := func() Facts {
+		return Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true}
+	}
+	for _, worker := range []string{"performer", "tester", "validator"} {
+		e := env(t, func(m map[string]any) { m["worker_type"] = worker })
+		d := a.Decide(Request{RunID: "r-1", Worker: worker, From: StateVerifying, To: StateVerifying,
+			Env: e, Gate: greenGate(), Now: now}, f())
+		if d.Admitted || d.Reason != ReasonWrongProposer {
+			t.Errorf("%s cleared a verification task; got admitted=%v %s", worker, d.Admitted, d.Reason)
+		}
+	}
+	// Clean case: the judge may, or nothing ever leaves verification and the
+	// refusals above would pass on a stage that had stopped working entirely.
+	d := a.Decide(Request{RunID: "j-1", Worker: "judge", From: StateVerifying, To: StateVerifying,
+		Env: judgeEnv(t, "pass"), Gate: greenGate(), Now: now}, f())
+	if !d.Admitted {
+		t.Fatalf("the judge should be able to clear the stage's only task, got [%s] %s", d.Reason, d.Detail)
+	}
+}
 
-	d := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateVerifying, To: StateVerifying,
-		Env: e, Gate: greenGate(), Now: now}, Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true})
-	if d.Admitted || d.Reason != ReasonWrongProposer {
-		t.Fatalf("a performer must not be able to finish its own work; got admitted=%v %s", d.Admitted, d.Reason)
-	}
-	// Clean case: the validator may.
-	d2 := a.Decide(Request{RunID: "r-1", Worker: "validator", From: StateVerifying, To: StateVerifying,
-		Env: e, Gate: greenGate(), Now: now}, Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true})
-	if !d2.Admitted {
-		t.Fatalf("the validator should be able to close review, got [%s] %s", d2.Reason, d2.Detail)
-	}
+// judgeEnv is a judge's report on an item with one acceptance criterion: the
+// criterion held, and it cites a command the envelope says was run.
+//
+// The verdict is a parameter because the two answers differ in exactly one
+// place. A judge now rules on whether the work serves the brief, which is a
+// question no command answers — so "every criterion held" and "this is not
+// what was asked for" is a coherent envelope, and it is the shape the fleet's
+// actual failure arrives in.
+func judgeEnv(t *testing.T, verdict string) *envelope.Envelope {
+	t.Helper()
+	return env(t, func(m map[string]any) {
+		m["worker_type"] = "judge"
+		m["verdict"] = verdict
+		m["outputs"] = map[string]any{"criteria": []map[string]any{
+			{"id": "AC-1", "status": "pass", "command_index": 0, "evidence": "ran it"},
+		}}
+	})
 }
 
 // TestAVerifierCannotBeTheRunThatDidTheWork pins the conflict of interest the
@@ -359,15 +391,34 @@ func TestABlockingQuestionMustCarryALean(t *testing.T) {
 	}
 }
 
+// TestAnOpenBlockingQuestionHoldsTheItem pins that an item does not leave
+// verification while somebody has been asked something and has not answered.
+//
+// It is asserted on verifying -> reviewed, the control plane's own edge, which
+// is where ReqQuestionsAnswered sits. That is deliberate rather than
+// incidental: the guard used to hang off the validator's task edge, so it fired
+// only if a validator happened to be the last of three to report — a question
+// raised after that run finished held nothing at all. The stage now settles at
+// one place, and the question is checked at that place, so an item cannot walk
+// past an open blocking question by any ordering of the runs inside it.
 func TestAnOpenBlockingQuestionHoldsTheItem(t *testing.T) {
 	a := New(cfg(t))
-	e := env(t, func(m map[string]any) { m["worker_type"] = "validator" })
-	f := Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true,
+	open := Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true,
 		OpenBlockingQs: []ledger.Question{{ID: "Q-1", Blocking: true, Text: "which way?"}}}
-	d := a.Decide(Request{RunID: "r-1", Worker: "validator", From: StateVerifying, To: StateVerifying,
-		Env: e, Gate: greenGate(), Now: now}, f)
-	if d.Admitted || d.Reason != ReasonOpenQuestion {
+	// Worker is empty: the move out of the stage is the control plane's, computed
+	// from the record, and is never proposed by whichever run finished last.
+	req := Request{From: StateVerifying, To: StateReviewed, Now: now,
+		Env: judgeEnv(t, "pass"), Gate: greenGate(),
+		Reason: "every task in the stage passed"}
+	if d := a.Decide(req, open); d.Admitted || d.Reason != ReasonOpenQuestion {
 		t.Fatalf("an item cannot finish over an unanswered blocking question; got admitted=%v %s", d.Admitted, d.Reason)
+	}
+	// Clean case: answered, and the same move is admitted. Without it this test
+	// passes on the day nothing may leave verification for any reason.
+	answered := open
+	answered.OpenBlockingQs = nil
+	if d := a.Decide(req, answered); !d.Admitted {
+		t.Fatalf("a stage with nothing outstanding must still complete, got [%s] %s", d.Reason, d.Detail)
 	}
 }
 

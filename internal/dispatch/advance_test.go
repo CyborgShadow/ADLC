@@ -243,8 +243,10 @@ func TestTheReworkLimitDoesNotBlindEveryLane(t *testing.T) {
 	}
 
 	// Clean case: the verification lanes can still see it, because reviewing
-	// work already done spends no further attempt.
-	for _, capability := range []string{config.CapTest, config.CapJudge, config.CapValidate} {
+	// work already done spends no further attempt. Read from the lifecycle
+	// rather than listed by hand, so that changing the shape of the stage
+	// cannot leave this asserting about a lane nothing dispatches to.
+	for _, capability := range authority.VerificationCapabilities() {
 		got, cerr := h.D.Candidates(Filter{Capability: capability})
 		if cerr != nil {
 			t.Fatal(cerr)

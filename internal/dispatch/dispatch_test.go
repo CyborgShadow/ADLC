@@ -180,9 +180,14 @@ func specialists() ([]config.WorkerDecl, map[string]string) {
 		{Type: "backend", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}, Areas: []string{"api"}},
 		{Type: "frontend", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}, Areas: []string{"ui"}},
 		{Type: "generalist", Layer: "worker", Prompt: "implementer", Capabilities: []string{config.CapImplement}},
+		// The roster still declares a tester and a validator, deliberately. Their
+		// tasks left the verification stage, and a roster that dropped them too
+		// could not tell "nothing routes verification work to a tester" from
+		// "there is no tester to route it to" — which is the whole question
+		// TestAVerificationLaneSeesOnlyItsOwnTask asks.
 		{Type: "verifier", Layer: "verification", Prompt: "verifier", Capabilities: []string{config.CapTest}},
 		{Type: "judge", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapJudge}},
-		{Type: "security", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapValidate}, Areas: []string{"auth"}},
+		{Type: "security", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapJudge}, Areas: []string{"auth"}},
 		{Type: "validator", Layer: "verification", Prompt: "validator", Capabilities: []string{config.CapValidate}},
 		{Type: "planner", Layer: "direction", Prompt: "generator", Capabilities: []string{config.CapPlan}},
 	}
@@ -194,8 +199,8 @@ func specialists() ([]config.WorkerDecl, map[string]string) {
 
 // TestTheAreaDecidesTheWorkerNotTheAlphabet pins routing. A specialist roster
 // is decorative if the picker takes whichever worker with the right capability
-// sorts first — a security reviewer and a general reviewer both hold validate,
-// so the area has to decide between them.
+// sorts first — a security judge and a general judge both hold the stage's one
+// verification capability, so the area has to decide between them.
 func TestTheAreaDecidesTheWorkerNotTheAlphabet(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
@@ -256,12 +261,25 @@ func TestALaneOnlySeesItsOwnWork(t *testing.T) {
 	h.item(t, "S1-002", "S1", "api", "in_progress")
 	h.item(t, "S1-003", "S1", "ui", "verifying")
 
-	only, err := h.D.Candidates(Filter{Capability: config.CapTest})
+	only, err := h.D.Candidates(Filter{Capability: config.CapJudge})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(only) != 1 || only[0].Item.ID != "S1-003" {
 		t.Fatalf("a verify lane should see only verification work, got %+v", ids(only))
+	}
+	// And a lane for a capability the stage no longer holds is offered nothing,
+	// rather than being handed verification work under a different name. A
+	// tester picking this item up would re-run, as a claim, the suite the gate
+	// already executes on this very edge as an observation.
+	for _, capability := range []string{config.CapTest, config.CapValidate} {
+		gone, gerr := h.D.Candidates(Filter{Capability: capability})
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		if len(gone) != 0 {
+			t.Errorf("the %s lane was offered %+v; that task is the control plane's now", capability, ids(gone))
+		}
 	}
 	byArea, err := h.D.Candidates(Filter{Areas: []string{"api"}})
 	if err != nil {
@@ -964,19 +982,57 @@ func TestAMeasuredRunUnderTheCapIsStillAdmitted(t *testing.T) {
 
 // --- a verification task clears on the gate's answer -----------------------
 
-// verifyEnvelope is a verification run's report claiming the given verdict and
-// nothing else of interest, so a test about what clears a task is not also a
-// test about criteria, findings or generated items.
-func verifyEnvelope(worker, itemID, verdict string) string {
+// judgeEnvelope is the verification stage's one task reporting.
+//
+// It carries a per-criterion verdict citing a command the envelope says was
+// run, because the judge's self-edge requires exactly that: a criterion passed
+// on inspection alone is not passed. The check id is deliberately not one the
+// gate runs here, so the claim matcher has nothing to compare and these tests
+// stay about the verdict and the gate's own observation rather than about
+// claim matching, which has its own tests.
+//
+// The verdict is a parameter, and the pass/fail pair is not symmetric evidence.
+// A judge now rules on whether the work serves the brief — a question no
+// command answers — so "every criterion held" alongside "this is not what was
+// asked for" is a coherent envelope, and it is the shape the fleet's actual
+// failure arrives in: a coherent, well-tested deliverable nobody wanted.
+func judgeEnvelope(itemID, verdict string) string {
 	env := map[string]any{
 		"envelope_version": "1",
 		"run_id":           "{{run_id}}",
-		"worker_type":      worker,
+		"worker_type":      "judge",
 		"work_item_id":     itemID,
 		"verdict":          verdict,
-		"summary":          "ran the suite and it reported " + verdict,
+		"summary":          "read the work against the brief and reported " + verdict,
+		"commands_run":     []any{map[string]any{"check_id": "AC-1", "cmd": "go version", "exit_code": 0}},
+		"outputs": map[string]any{"criteria": []any{map[string]any{
+			"id": "AC-1", "status": "pass", "command_index": 0, "evidence": "ran it",
+		}}},
+		"usage": map[string]any{"input_tokens": 10, "output_tokens": 5},
+	}
+	b, _ := json.Marshal(env)
+	return string(b)
+}
+
+// judgeRejectEnvelope is the judge stopping a change: verdict reject, with the
+// blocker finding the rejecting edge requires — a location, what was observed,
+// and the smallest change that would clear it. Without all three a rejection is
+// taste, and the edge refuses it.
+func judgeRejectEnvelope(itemID string) string {
+	env := map[string]any{
+		"envelope_version": "1",
+		"run_id":           "{{run_id}}",
+		"worker_type":      "judge",
+		"work_item_id":     itemID,
+		"verdict":          "reject",
+		"summary":          "the work does not serve the brief",
 		"commands_run":     []any{},
-		"usage":            map[string]any{"input_tokens": 10, "output_tokens": 5},
+		"outputs": map[string]any{"findings": []any{map[string]any{
+			"severity": "blocker", "location": "site/cats/index.html:14",
+			"evidence":        "the sources section names no licence",
+			"required_change": "name the licence beside each photograph",
+		}}},
+		"usage": map[string]any{"input_tokens": 10, "output_tokens": 5},
 	}
 	b, _ := json.Marshal(env)
 	return string(b)
@@ -1020,14 +1076,14 @@ func TestAVerificationTaskTheGateRefusedClearsNothing(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
 	h.edgeCheck(config.VerdictOutputEmpty) // the gate will observe RED here
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
+	h.Run.envelope = judgeEnvelope("S1-001", "pass")
 
-	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapJudge})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Dispatched {
-		t.Fatalf("the test task was not dispatched: %s", res.Idle)
+		t.Fatalf("the judge task was not dispatched: %s", res.Idle)
 	}
 	if res.Admitted {
 		t.Fatalf("a claim the gate contradicted was admitted: %+v", res)
@@ -1040,7 +1096,7 @@ func TestAVerificationTaskTheGateRefusedClearsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if passed[config.CapTest] {
+	if passed[config.CapJudge] {
 		t.Fatal("a refused run cleared its verification task: the stage counts a claim the gate itself contradicted")
 	}
 	if len(passed) != 0 {
@@ -1060,14 +1116,14 @@ func TestAVerificationTaskTheGateConfirmsClearsExactlyOnce(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
 	h.edgeCheck(config.VerdictExitZero) // the gate will observe GREEN here
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
+	h.Run.envelope = judgeEnvelope("S1-001", "pass")
 
-	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapJudge})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Dispatched {
-		t.Fatalf("the test task was not dispatched: %s", res.Idle)
+		t.Fatalf("the judge task was not dispatched: %s", res.Idle)
 	}
 	if !res.Admitted {
 		t.Fatalf("a claim the gate confirmed was refused as %s: %s", res.Reason, res.Detail)
@@ -1077,21 +1133,32 @@ func TestAVerificationTaskTheGateConfirmsClearsExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !passed[config.CapTest] {
+	if !passed[config.CapJudge] {
 		t.Fatalf("the confirmed task did not clear; the stage holds %v", passed)
 	}
 	if n := len(verificationEvents(t, h, "S1-001")); n != 1 {
 		t.Fatalf("%d verification.passed recorded for one cleared task, want exactly 1", n)
 	}
 
-	// A cleared task moves nothing on its own: two of the three are still
-	// outstanding, and the item leaves when Refresh sees them all cleared.
+	// Clearing a task and leaving the stage are two acts, and they stay two
+	// acts now the stage holds one task. The run cleared its own task and moved
+	// nothing; the move is Refresh's, derived from the record. Collapsing them
+	// would put the destination back in the hands of whichever run reported,
+	// which is the property the whole lifecycle rests on.
 	it, err := h.Led.Item("S1-001")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if it.State != string(authority.StateVerifying) {
-		t.Errorf("one cleared task moved the item to %s", it.State)
+		t.Errorf("the run that cleared the task also moved the item, to %s", it.State)
+	}
+	// And then it does move, on the pass that computes it. Without this half the
+	// assertion above passes on the day nothing ever leaves verification.
+	if _, err := h.D.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.itemState(t, "S1-001"); got != string(authority.StateReviewed) {
+		t.Fatalf("the stage's only task cleared and the item is still %s", got)
 	}
 }
 
@@ -1119,32 +1186,31 @@ func reviewedMoves(t *testing.T, h *harness, itemID string) int {
 // TestAStageDoesNotLeaveVerificationOnARefusedClaim is what the two tests
 // above are for, asserted where the defect was actually paid out.
 //
-// Two tasks genuinely cleared and the third run's claim refused by the gate:
-// the stage is two of three, so the item stays where it is. Cleared from the
-// claim, it left verification as reviewed with a third of its verification
-// never performed — and the refusal saying so sits in the same chain, two
-// lines above the move.
+// The stage's task claims a pass and the gate contradicts it: the task does not
+// clear, so the stage has nothing cleared and the item stays where it is.
+// Cleared from the claim, it left verification as reviewed with its
+// verification never performed — and the refusal saying so sits in the same
+// chain, two lines above the move.
+//
+// The stage held three tasks when this was written, and the arithmetic was
+// two-of-three. Narrowing it to one made the failure worse rather than safer:
+// with three, two genuine passes still sat on the record beside the false
+// clear, and with one there is nothing at all between the refused claim and a
+// merge.
 func TestAStageDoesNotLeaveVerificationOnARefusedClaim(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
-	for _, cap := range []string{config.CapJudge, config.CapValidate} {
-		if _, err := h.Led.Append("t", ledger.KindVerificationPassed, "S1-001",
-			ledger.VerificationPassed{ItemID: "S1-001", Capability: cap,
-				RunID: "r-" + cap, Round: 0}); err != nil {
-			t.Fatal(err)
-		}
-	}
 
-	h.edgeCheck(config.VerdictOutputEmpty) // the third run's gate observes RED
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
-	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	h.edgeCheck(config.VerdictOutputEmpty) // the run's gate observes RED
+	h.Run.envelope = judgeEnvelope("S1-001", "pass")
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapJudge})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Admitted {
-		t.Fatalf("the third claim was admitted over a RED gate: %+v", res)
+		t.Fatalf("the claim was admitted over a RED gate: %+v", res)
 	}
 
 	if _, err := h.D.Refresh(); err != nil {
@@ -1155,23 +1221,23 @@ func TestAStageDoesNotLeaveVerificationOnARefusedClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	if it.State != string(authority.StateVerifying) {
-		t.Fatalf("the item left verification as %s on two passes and a refusal", it.State)
+		t.Fatalf("the item left verification as %s on a refused claim alone", it.State)
 	}
 	if n := reviewedMoves(t, h, "S1-001"); n != 0 {
-		t.Fatalf("%d transition(s) to reviewed recorded while a task was still outstanding", n)
+		t.Fatalf("%d transition(s) to reviewed recorded while the task was still outstanding", n)
 	}
 
-	// The clean case for the same arithmetic: once the third task genuinely
-	// clears, the stage completes and the item moves. Without it the assertion
-	// above passes on the day nothing ever leaves verification.
+	// The clean case for the same arithmetic: once the task genuinely clears,
+	// the stage completes and the item moves. Without it the assertion above
+	// passes on the day nothing ever leaves verification.
 	h.edgeCheck(config.VerdictExitZero)
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
-	res, err = h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	h.Run.envelope = judgeEnvelope("S1-001", "pass")
+	res, err = h.D.TickScoped(context.Background(), Filter{Capability: config.CapJudge})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Admitted {
-		t.Fatalf("the third task was refused over a GREEN gate as %s: %s", res.Reason, res.Detail)
+		t.Fatalf("the task was refused over a GREEN gate as %s: %s", res.Reason, res.Detail)
 	}
 	if _, err := h.D.Refresh(); err != nil {
 		t.Fatal(err)
@@ -1203,9 +1269,9 @@ func TestJudgeS1023RefusedVerificationRecordsRedAndClearsNothing(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
 	h.edgeCheck(config.VerdictOutputEmpty)
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
+	h.Run.envelope = judgeEnvelope("S1-001", "pass")
 
-	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapJudge})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1275,14 +1341,14 @@ func TestAFailedVerificationTaskIsRecordedOnTheClaim(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
 	h.edgeCheck(config.VerdictOutputEmpty) // the gate will observe RED here
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "fail")
+	h.Run.envelope = judgeEnvelope("S1-001", "fail")
 
-	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapJudge})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Dispatched {
-		t.Fatalf("the test task was not dispatched: %s", res.Idle)
+		t.Fatalf("the judge task was not dispatched: %s", res.Idle)
 	}
 	if res.Admitted {
 		t.Fatalf("the move out of verification was admitted over a RED gate: %+v", res)
@@ -1303,7 +1369,7 @@ func TestAFailedVerificationTaskIsRecordedOnTheClaim(t *testing.T) {
 	if err := json.Unmarshal(evs[0].Payload, &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Capability != config.CapTest {
+	if p.Capability != config.CapJudge {
 		t.Errorf("the failure was recorded against %q, not the task that reported it", p.Capability)
 	}
 	if !strings.Contains(p.Detail, "reported fail") {
@@ -1323,20 +1389,28 @@ func TestAFailedVerificationTaskIsRecordedOnTheClaim(t *testing.T) {
 // green. The comment on that guard in dispatchOne states why the destination
 // cannot tell such a run from a cleared one, and what it costs when nothing
 // else does; this is the assertion that holds the verdict term there.
+//
+// It is a sharper case than it was, not a softer one. When the tester held this
+// edge, a green gate and a claimed failure were in plain contradiction and a
+// reader could dismiss the combination as incoherent. The judge answers a
+// question no command answers, so "every criterion held, the checks are green,
+// and this is not what was asked for" is the ordinary shape of its failure —
+// which means a guard reading the destination alone would clear the stage on
+// precisely the report the stage exists to catch.
 func TestAFailingTaskDoesNotClearItselfOverAGreenGate(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
 	h.edgeCheck(config.VerdictExitZero) // the gate will observe GREEN here
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "fail")
+	h.Run.envelope = judgeEnvelope("S1-001", "fail")
 
-	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapJudge})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Dispatched {
-		t.Fatalf("the test task was not dispatched: %s", res.Idle)
+		t.Fatalf("the judge task was not dispatched: %s", res.Idle)
 	}
 	// Admitted is the premise, not an aspiration: the setback self-edge is a
 	// proposal like any other and a green gate satisfies it. If this ever stops
@@ -1352,7 +1426,7 @@ func TestAFailingTaskDoesNotClearItselfOverAGreenGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if passed[config.CapTest] {
+	if passed[config.CapJudge] {
 		t.Fatal("a task that reported fail cleared itself: the stage counts a failure as a verification")
 	}
 	if n := len(verificationEvents(t, h, "S1-001")); n != 0 {

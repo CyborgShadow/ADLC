@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -405,14 +406,20 @@ func TestAnUnreviewedPlanAdvisesSourceOnlyWorkAndHoldsTheRest(t *testing.T) {
 	}
 }
 
-// Each lane sees its own task in a stage that holds several.
+// A verification lane is offered its own task, and no lane is offered one the
+// stage does not hold.
 //
 // The lane filter was applied before the stage was expanded, against the first
 // of its capabilities — so a judge lane asked for judge work, was compared
 // against test, and skipped every item in verification. It ticked 269 times and
 // dispatched nothing while three items sat waiting for a judge, and every
 // liveness figure stayed green the whole time.
-func TestEachLaneSeesItsOwnTaskInAStageWithSeveral(t *testing.T) {
+//
+// The stage held three tasks then and holds one now, so the roles that left it
+// are asserted here by name rather than left out. An absence is invisible: a
+// lane offered nothing looks the same as a lane nobody declared, and this is
+// the surface where `test` would quietly come back.
+func TestAVerificationLaneSeesOnlyItsOwnTask(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
 	d := h.D
@@ -431,24 +438,33 @@ func TestEachLaneSeesItsOwnTaskInAStageWithSeveral(t *testing.T) {
 			t.Errorf("the %s lane was offered %s work", cap, got[0].Capability)
 		}
 	}
+	// The roles whose tasks left. Both workers are still on the roster, so this
+	// is the routing refusing them rather than the roster lacking anybody.
+	for _, cap := range []string{config.CapTest, config.CapValidate} {
+		gone, err := d.Candidates(Filter{Capability: cap})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(gone) != 0 {
+			t.Errorf("the %s lane was offered verification work: %+v", cap, gone)
+		}
+	}
 
 	// And a task already cleared is not offered again: the lane that did it
 	// would otherwise pick the same item up for the rest of the stage.
-	if _, err := d.Led.Append("cli", ledger.KindVerificationPassed, "S1-001",
-		ledger.VerificationPassed{ItemID: "S1-001", Capability: config.CapTest,
-			RunID: "t-1", Round: 0}); err != nil {
-		t.Fatal(err)
-	}
-	done, err := d.Candidates(Filter{Capability: config.CapTest})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(done) != 0 {
-		t.Fatalf("a cleared task was offered again: %+v", done)
-	}
-	// The others are still outstanding.
-	if left, _ := d.Candidates(Filter{Capability: config.CapJudge}); len(left) != 1 {
-		t.Fatalf("clearing one task hid the others; judge saw %d", len(left))
+	for _, cap := range authority.VerificationCapabilities() {
+		if _, err := d.Led.Append("cli", ledger.KindVerificationPassed, "S1-001",
+			ledger.VerificationPassed{ItemID: "S1-001", Capability: cap,
+				RunID: "r-" + cap, Round: 0}); err != nil {
+			t.Fatal(err)
+		}
+		done, err := d.Candidates(Filter{Capability: cap})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(done) != 0 {
+			t.Fatalf("a cleared %s task was offered again: %+v", cap, done)
+		}
 	}
 }
 
@@ -566,59 +582,42 @@ func TestAMalformedEnvelopeTeachesTheNextRun(t *testing.T) {
 }
 
 // A failing verification task does not eject the item; the stage does, once
-// every task has reported, and it carries all of what they observed.
+// every task has reported, and it carries what they observed back with it.
 //
-// Before this, the first failure sent the item straight back to the builder.
-// Its two siblings were still examining the same commit, so both were refused
-// as stale when they finished — two runs discarded — and the builder was told
-// one of the three things wrong with its work, learning the other two a whole
-// round later. That is two extra verification rounds per failing item, and it
-// was the largest remaining cost in the lifecycle.
-func TestTheStageWaitsForEveryTaskBeforeSendingWorkBack(t *testing.T) {
+// Before this, a failure sent the item straight back to the builder the moment
+// it landed. The stage held three tasks then, so its two siblings were still
+// examining the same commit and both were refused as stale when they finished —
+// two runs discarded, and the builder told one of the three things wrong with
+// its work, learning the other two a whole round later.
+//
+// The stage holds one task now, which removes the sibling race rather than
+// fixing it. What is left is the part that was never about siblings: the eject
+// belongs to the control plane, computed from the record on a settled stage,
+// and not to whichever run reported. Two things still turn on that and are
+// asserted here — a task that has reported is not dispatched again against a
+// tree that has not moved, and the round is bumped so this round's verdicts
+// stop counting against the work that comes back.
+func TestASettledStageSendsTheWorkBackWithWhatItObserved(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
 	d := h.D
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
 
-	report := func(kind ledger.Kind, capability string, payload any) {
-		t.Helper()
-		if _, err := d.Led.Append("cli", kind, "S1-001", payload); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// One task fails while the other two are still running.
-	report(ledger.KindVerificationFailed, config.CapTest, ledger.VerificationFailed{
-		ItemID: "S1-001", Capability: config.CapTest, RunID: "t-1", Round: 0,
-		Detail: "TestLocaleKey does not compile",
-	})
-	if _, err := d.Refresh(); err != nil {
+	if _, err := d.Led.Append("cli", ledger.KindVerificationFailed, "S1-001",
+		ledger.VerificationFailed{
+			ItemID: "S1-001", Capability: config.CapJudge, RunID: "j-1", Round: 0,
+			Detail: "the cache key omits the locale, so the brief's second ask is unmet",
+		}); err != nil {
 		t.Fatal(err)
 	}
-	if got := h.itemState(t, "S1-001"); got != "verifying" {
-		t.Fatalf("one failure ejected the item while two tasks were still running: %s", got)
-	}
-	// And the failed task is not offered again this round: re-dispatching it
-	// against a tree that has not moved is a loop, not a retry.
-	if again, _ := d.Candidates(Filter{Capability: config.CapTest}); len(again) != 0 {
+
+	// The failed task is not offered again this round: re-dispatching it against
+	// a tree that has not moved is a loop, not a retry.
+	if again, _ := d.Candidates(Filter{Capability: config.CapJudge}); len(again) != 0 {
 		t.Errorf("a task that already reported was offered again: %+v", again)
 	}
 
-	report(ledger.KindVerificationPassed, config.CapValidate, ledger.VerificationPassed{
-		ItemID: "S1-001", Capability: config.CapValidate, RunID: "v-1", Round: 0,
-	})
-	if _, err := d.Refresh(); err != nil {
-		t.Fatal(err)
-	}
-	if got := h.itemState(t, "S1-001"); got != "verifying" {
-		t.Fatalf("the item moved before the judge reported: %s", got)
-	}
-
-	report(ledger.KindVerificationFailed, config.CapJudge, ledger.VerificationFailed{
-		ItemID: "S1-001", Capability: config.CapJudge, RunID: "j-1", Round: 0,
-		Detail: "AC-2 cites no executed command",
-	})
 	if _, err := d.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -626,7 +625,7 @@ func TestTheStageWaitsForEveryTaskBeforeSendingWorkBack(t *testing.T) {
 		t.Fatalf("the settled stage did not send the work back: %s", got)
 	}
 
-	// The builder is told everything the stage found, in one place.
+	// The builder is told what the stage found, in one place.
 	it, err := d.Led.Item("S1-001")
 	if err != nil {
 		t.Fatal(err)
@@ -635,15 +634,13 @@ func TestTheStageWaitsForEveryTaskBeforeSendingWorkBack(t *testing.T) {
 		t.Errorf("the round did not advance, so this round's verdicts would still count: %d", it.Attempts)
 	}
 	said := strings.Join(h.Logs, "|")
-	for _, want := range []string{"TestLocaleKey does not compile", "AC-2 cites no executed command"} {
-		if !strings.Contains(said, want) {
-			t.Errorf("the stage did not carry back %q — the builder learns it a round later: %s", want, said)
-		}
+	if want := "the cache key omits the locale"; !strings.Contains(said, want) {
+		t.Errorf("the stage did not carry back %q — the builder learns it a round later: %s", want, said)
 	}
 }
 
-// The clean case, and the one that matters most: three passes still leave the
-// stage forward. Without it the guard above would pass on the day the stage
+// The clean case, and the one that matters most: a stage that passed still
+// leaves forward. Without it the guard above would pass on the day the stage
 // stopped letting anything through at all.
 func TestAStageThatAllPassesStillLeavesForward(t *testing.T) {
 	ws, routing := specialists()
@@ -666,32 +663,51 @@ func TestAStageThatAllPassesStillLeavesForward(t *testing.T) {
 	}
 }
 
-// Adversarial review outranks the rest of the stage. A blocker is a rejection
-// whoever else agreed, and it must not be diluted into an ordinary setback by
-// arriving alongside two passes.
-func TestABlockerRejectsEvenWhenTheOthersPass(t *testing.T) {
+// A blocker rejects the item, and an ordinary setback does not.
+//
+// A rejection is not a heavier setback: it costs the item an attempt off its
+// rework budget and takes the rejected route rather than going straight back to
+// the builder, so collapsing the two either spends a budget nobody meant to
+// spend or loses the only verdict in the stage that stops a change.
+//
+// This is asserted through a real dispatch rather than by seeding events,
+// because that is now the only way an item is rejected out of verification.
+// Adversarial review used to be a second task in the stage, and the stage's
+// settle read its recorded failure and overrode the destination; the judge is
+// the stage's only task and carries the rejection itself, as a verdict, at the
+// point the transition is decided.
+func TestABlockerRejectsWhereAPlainSetbackDoesNot(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
-	d := h.D
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
-	for _, capability := range []string{config.CapTest, config.CapJudge} {
-		if _, err := d.Led.Append("cli", ledger.KindVerificationPassed, "S1-001",
-			ledger.VerificationPassed{ItemID: "S1-001", Capability: capability,
-				RunID: "r-" + capability, Round: 0}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := d.Led.Append("cli", ledger.KindVerificationFailed, "S1-001",
-		ledger.VerificationFailed{ItemID: "S1-001", Capability: config.CapValidate,
-			RunID: "v-1", Round: 0, Detail: "the cache key omits the locale"}); err != nil {
+
+	h.Run.envelope = judgeRejectEnvelope("S1-001")
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapJudge})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Refresh(); err != nil {
-		t.Fatal(err)
+	if !res.Admitted {
+		t.Fatalf("a substantiated rejection was refused as %s: %s", res.Reason, res.Detail)
 	}
 	if got := h.itemState(t, "S1-001"); got != "rejected" {
-		t.Fatalf("a blocker must still reject the item: %s", got)
+		t.Fatalf("a blocker must reject the item: %s", got)
+	}
+
+	// The clean case, on a second item so the two runs do not share a record: a
+	// judge that merely failed has not rejected anything. The stage settles and
+	// the work goes back to the builder, which is a different route and a
+	// different cost.
+	h.item(t, "S1-002", "S1", "ui", "verifying")
+	h.Run.envelope = judgeEnvelope("S1-002", "fail")
+	if _, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapJudge}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.D.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.itemState(t, "S1-002"); got != "in_progress" {
+		t.Fatalf("a setback took the rejection route: %s", got)
 	}
 }
 

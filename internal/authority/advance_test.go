@@ -25,25 +25,20 @@ func TestTheToolDecidesWhereWorkGoes(t *testing.T) {
 	}{
 		{"a builder picks up ready work", StateReady, config.CapImplement, "pass", config.RadiusNone, StateVerifying},
 		{"work and tests land", StateInProgress, config.CapImplement, "pass", config.RadiusNone, StateVerifying},
-		// A verification task reports on ONE of three independent questions, so
-		// neither answer moves the item: the stage settles when all three have
-		// reported, computed from the record. Ejecting on the first failure
-		// refused the two siblings still running and told the builder one of the
-		// three things wrong with its work.
-		{"a test fails", StateVerifying, config.CapTest, "fail", config.RadiusNone, StateVerifying},
-		{"a criterion fails", StateVerifying, config.CapJudge, "fail", config.RadiusNone, StateVerifying},
+		// Neither answer from the stage's own task moves the item. The move out
+		// of verification is computed by the control plane from the record, so
+		// that a run cannot leave the stage on its own say-so — and that stays
+		// true now the stage holds one task, because the thing being prevented
+		// is a run naming its own destination, not a race between siblings.
+		{"the judge clears the only task", StateVerifying, config.CapJudge, "pass", config.RadiusNone, StateVerifying},
+		{"the judge fails without rejecting", StateVerifying, config.CapJudge, "fail", config.RadiusNone, StateVerifying},
 		// The one setback in the stage that DOES move the item, along the edge
-		// declared for it. Adversarial review is the only role whose job is to
-		// stop a change, and while every setback took the self-edge above it
-		// could not: that edge requires a passing verdict, so a rejection
-		// arrived as a malformed proposal and was refused as one.
-		{"review rejects", StateVerifying, config.CapValidate, "reject", config.RadiusNone, StateRejected},
-		// Clean case for the same rule, twice over: a validator that merely
-		// FAILED has not rejected anything, and a tester's reject is not a
-		// rejection either — the rejected edge names the validator as its sole
-		// proposer. Both hold the stage instead of ejecting it.
-		{"review fails without rejecting", StateVerifying, config.CapValidate, "fail", config.RadiusNone, StateVerifying},
-		{"a tester cannot reject", StateVerifying, config.CapTest, "reject", config.RadiusNone, StateVerifying},
+		// declared for it. The judge is the only role left in verification, and
+		// while every setback took the self-edge above it could not: that edge
+		// requires every criterion to have passed, so a rejection arrived as a
+		// malformed proposal and was refused as one. A stage whose only occupant
+		// cannot stop a change cannot stop anything.
+		{"the judge rejects", StateVerifying, config.CapJudge, "reject", config.RadiusNone, StateRejected},
 		{"hygiene pass", StateJanitoring, config.CapCurate, "pass", config.RadiusNone, StateReadyForArbitration},
 		{"the janitor finds something wrong", StateJanitoring, config.CapCurate, "reject", config.RadiusNone, StateInProgress},
 		{"source-only work clears to merge", StateArbitrating, config.CapArbitrate, "pass", config.RadiusNone, StateReadyToMerge},
@@ -69,6 +64,47 @@ func TestTheToolDecidesWhereWorkGoes(t *testing.T) {
 				t.Error("every move carries a reason, because the reason is what the record shows a person")
 			}
 		})
+	}
+}
+
+// TestTheRolesThatLeftVerificationAreRefusedNotMerelyAbsent is the guard that
+// stops `test` and `validate` drifting back into the stage.
+//
+// Removing a capability from VerificationCapabilities is enough to stop the
+// dispatcher offering it, and that is the whole reason this test exists: an
+// absence is invisible. If some later change hands a tester or a validator a
+// verification run anyway — a hand-driven CLI proposal, a lane pinned to a
+// worker, a routing entry nobody reread — the stage has to refuse it and say
+// so, rather than let it clear a task that is no longer its to clear. The two
+// tasks went because the control plane can answer them itself: the gate runs
+// the suite on this very edge, and the criteria that carry commands are
+// executed in the item's own tree. A claim from an agent over either is not
+// evidence, and admitting one would put an agent's word back where an
+// observation already is.
+//
+// The clean case underneath it is the judge, because a test that only asserts
+// refusals passes on the day the stage refuses everything and no item ever
+// leaves verification at all.
+func TestTheRolesThatLeftVerificationAreRefusedNotMerelyAbsent(t *testing.T) {
+	verdicts := []string{"pass", "fail", "reject"}
+	for _, capability := range []string{config.CapTest, config.CapValidate} {
+		for _, verdict := range verdicts {
+			adv := NextState(StateVerifying, capability, verdict, config.RadiusNone, policy())
+			if adv.Inferred {
+				t.Errorf("%s reported %q and the stage moved the item to %s; that task is the control plane's now, and an agent's claim over it is not evidence",
+					capability, verdict, adv.To)
+			}
+			if adv.Stall == "" {
+				t.Errorf("%s reporting %q was refused with no reason; a refusal an agent cannot classify is one it works around rather than fixes",
+					capability, verdict)
+			}
+		}
+	}
+	for _, verdict := range verdicts {
+		if adv := NextState(StateVerifying, config.CapJudge, verdict, config.RadiusNone, policy()); !adv.Inferred {
+			t.Errorf("the judge reported %q and nothing was inferred (%s); the stage would hold every item forever",
+				verdict, adv.Stall)
+		}
 	}
 }
 

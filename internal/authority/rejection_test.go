@@ -15,24 +15,29 @@ import (
 // one severity out of the several that mean the same thing. Between them, every
 // rejection the fleet produced in fourteen hours was thrown away.
 
-// TestAValidatorsRejectionIsAdmittedRatherThanRefused pins the routing defect.
+// TestTheJudgesRejectionIsAdmittedRatherThanRefused pins the routing defect.
 //
-// NextState sent every setback to the verification self-edge, and the
-// validator's form of that edge requires ReqVerdictPass — so a rejection
-// arrived as a malformed proposal and was refused as one. Six adversarial
-// reviews were spent and discarded that way, one of them by a run that had
-// diagnosed this defect in the envelope that was then thrown away.
+// NextState sent every setback to the verification self-edge, and that edge
+// requires the task to have cleared — so a rejection arrived as a malformed
+// proposal and was refused as one. Six adversarial reviews were spent and
+// discarded that way, one of them by a run that had diagnosed this defect in
+// the envelope that was then thrown away.
+//
+// The role that carries a rejection is the judge now. When verification held
+// three tasks the validator was the adversarial one; the stage holds one, and a
+// stage whose only occupant cannot stop a change cannot stop anything — so the
+// defect this test was written for would simply have moved rather than gone.
 //
 // Both halves are asserted, because either alone passes vacuously: the route
 // must be verifying -> rejected, AND the authority must admit it.
-func TestAValidatorsRejectionIsAdmittedRatherThanRefused(t *testing.T) {
-	adv := NextState(StateVerifying, config.CapValidate, "reject", config.RadiusNone, policy())
+func TestTheJudgesRejectionIsAdmittedRatherThanRefused(t *testing.T) {
+	adv := NextState(StateVerifying, config.CapJudge, "reject", config.RadiusNone, policy())
 	if adv.To != StateRejected {
-		t.Fatalf("a validator's reject must reach the edge declared for it, got %s (%s)", adv.To, adv.Stall)
+		t.Fatalf("the judge's reject must reach the edge declared for it, got %s (%s)", adv.To, adv.Stall)
 	}
 
 	rejecting := env(t, func(m map[string]any) {
-		m["worker_type"] = "validator"
+		m["worker_type"] = "judge"
 		m["verdict"] = "reject"
 		m["outputs"] = map[string]any{"findings": []map[string]any{{
 			"severity": "blocker", "location": "site/cats/index.html:14",
@@ -41,7 +46,7 @@ func TestAValidatorsRejectionIsAdmittedRatherThanRefused(t *testing.T) {
 		}}}
 	})
 	d := New(cfg(t)).Decide(Request{
-		Worker: "validator", RunID: "v-1", From: StateVerifying, To: adv.To,
+		Worker: "judge", RunID: "j-1", From: StateVerifying, To: adv.To,
 		Env: rejecting, Gate: greenGate(), Reason: adv.Why, Now: now,
 	}, Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true, ImplementRunID: "p-9"})
 	if !d.Admitted {
@@ -50,22 +55,29 @@ func TestAValidatorsRejectionIsAdmittedRatherThanRefused(t *testing.T) {
 }
 
 // TestAFailingVerificationTaskStillHoldsTheStage is the clean case for the
-// routing above, and it is the constraint the fix had to leave standing. A task
-// that merely failed must not eject the item, because two siblings are still
-// examining the same commit and ejecting refuses them as stale: two runs
-// discarded, and the builder handed one complaint out of three.
+// routing above, and it is the constraint the fix had to leave standing.
+//
+// The two verdicts have to stay distinguishable. A judge that merely FAILED has
+// found work that does not do what was asked and can be built again; one that
+// REJECTED has cited a blocker. Collapsing the first into the second sends
+// ordinary rework down the rejection path and spends an attempt on the item's
+// budget for it, and collapsing the second into the first is the defect above.
+// So the stage is held on a fail, and only on a fail.
 func TestAFailingVerificationTaskStillHoldsTheStage(t *testing.T) {
 	for _, cap := range VerificationCapabilities() {
 		if adv := NextState(StateVerifying, cap, "fail", config.RadiusNone, policy()); adv.To != StateVerifying {
-			t.Errorf("%s reported fail and the item moved to %s; the stage settles when every task has reported", cap, adv.To)
+			t.Errorf("%s reported fail and the item moved to %s; a setback is not a rejection", cap, adv.To)
+		}
+		if adv := NextState(StateVerifying, cap, "pass", config.RadiusNone, policy()); adv.To != StateVerifying {
+			t.Errorf("%s reported pass and the item moved to %s; the move out of the stage is computed from the record, never proposed by the run", cap, adv.To)
 		}
 	}
-	// And only the validator may reject: the rejecting edge names it as its
-	// sole proposer, so routing anybody else there would swap one refusal for
-	// another and fix nothing.
-	for _, cap := range []string{config.CapTest, config.CapJudge} {
-		if adv := NextState(StateVerifying, cap, "reject", config.RadiusNone, policy()); adv.To != StateVerifying {
-			t.Errorf("%s reported reject and the item moved to %s; rejection is adversarial review's", cap, adv.To)
+	// And the roles whose tasks left the stage cannot reject out of it either.
+	// Their claims are refused outright rather than quietly held, which is the
+	// stronger statement: a refusal names what went wrong, an absence does not.
+	for _, cap := range []string{config.CapTest, config.CapValidate} {
+		if adv := NextState(StateVerifying, cap, "reject", config.RadiusNone, policy()); adv.Inferred {
+			t.Errorf("%s reported reject and the item moved to %s; that task is no longer in this stage", cap, adv.To)
 		}
 	}
 }
