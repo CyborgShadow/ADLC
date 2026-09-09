@@ -78,6 +78,13 @@ func (s *Scheduler) FireMerge(ctx context.Context) (MergeResult, error) {
 //
 // The tick is written whether or not anything was dispatched.
 func (s *Scheduler) FireOnce(ctx context.Context, l config.LoopDecl) (TickResult, error) {
+	// Draining stops new work instantly rather than at the end of a cadence.
+	// The lane still ticks, because an idle tick is what proves it alive, and a
+	// fleet that goes silent while draining looks exactly like one that died.
+	if Draining() {
+		s.tick(l, false, "", "draining: dispatching nothing new")
+		return TickResult{Idle: "draining"}, nil
+	}
 	f := Filter{Capability: l.Capability, Areas: l.Areas, Worker: l.Worker}
 
 	// Dispatched together rather than back to back. Sequential dispatch made
@@ -295,5 +302,43 @@ func (s *Scheduler) runReaper(ctx context.Context) {
 			return
 		case <-time.After(reapEvery):
 		}
+	}
+}
+
+// runStopWatch shuts the fleet down cleanly when somebody asks it to.
+//
+// A console process cannot be asked politely to exit on every platform this
+// runs on — taskkill refuses without /F, and /F gives the process no chance to
+// do anything at all. Every restart therefore killed the agents mid-build and
+// the reaper recorded them all as UNKNOWN: six engineer runs went that way in
+// one evening, each one real money spent on work nobody will ever see.
+//
+// So the fleet watches for a file. Seeing it, it stops dispatching immediately
+// and then waits for the runs already in flight, because those are being paid
+// for either way and letting them finish is the entire point.
+// RunStopWatch is exported because the command that serves a dashboard starts
+// it alongside the lanes.
+func (s *Scheduler) RunStopWatch(ctx context.Context, stop func()) {
+	// Whatever the last process was told, this one was not.
+	s.D.ClearStop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+		if !s.D.StopRequested() {
+			continue
+		}
+		Drain()
+		s.D.log("DRAINING — dispatching nothing new. %d run(s) still in flight; waiting for them rather than killing them.",
+			s.D.RunsInFlight())
+		s.D.WaitForQuiet(30*time.Minute, func(n int) {
+			s.D.log("DRAINING — still waiting on %s", plural(n, "run", "runs"))
+		})
+		s.D.log("DRAINED — nothing is in flight. Stopping.")
+		s.D.ClearStop()
+		stop()
+		return
 	}
 }

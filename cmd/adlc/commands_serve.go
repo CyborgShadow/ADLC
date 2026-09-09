@@ -58,6 +58,12 @@ func cmdServe(e *env, args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// A clean way to stop that does not throw away work in flight. See
+	// internal/dispatch/drain.go for why a signal is not enough here.
+	if dispatching && sched != nil {
+		go sched.RunStopWatch(ctx, stop)
+	}
+
 	fmt.Printf("dashboard on http://%s  (loopback only, no authentication — those two go together)\n", ln.Addr())
 	switch {
 	case dispatching:
@@ -123,7 +129,7 @@ func reportAbandoned(e *env) {
 
 func cmdSchedule(e *env, args []string) int {
 	if len(args) == 0 {
-		return fail("schedule needs a subcommand: run | status | once")
+		return fail("schedule needs a subcommand: run | stop | status | once")
 	}
 	sched, err := e.scheduler()
 	if err != nil {
@@ -171,6 +177,35 @@ func cmdSchedule(e *env, args []string) int {
 			return fail("%v", err)
 		}
 		fmt.Println("stopped")
+		return exitOK
+
+	case "stop":
+		fs := sub("schedule stop")
+		wait := fs.Int("wait", 1800, "seconds to wait for runs already in flight")
+		if fs.Parse(args[1:]) != nil {
+			return exitUsage
+		}
+		// Asked, not killed. A control plane killed outright takes its agents
+		// with it and every one of them is recorded UNKNOWN — real money spent
+		// on work nobody will ever see. This stops it dispatching immediately
+		// and lets what is already running finish.
+		if err := sched.D.AskToStop(); err != nil {
+			return fail("%v", err)
+		}
+		n := sched.D.RunsInFlight()
+		fmt.Printf("asked the fleet to stop. %s in flight; waiting for %s rather than killing %s.\n",
+			plural(n, "run is", "runs are"), them(n), them(n))
+		fmt.Println("Nothing new will be dispatched from this moment. Ctrl+C here stops waiting; it does not stop the fleet.")
+		quiet := sched.D.WaitForQuiet(time.Duration(*wait)*time.Second, func(left int) {
+			fmt.Printf("  %s still running\n", plural(left, "run", "runs"))
+		})
+		if !quiet {
+			fmt.Printf("\nStill %s after %ds. The fleet is still draining and will stop when they finish;\n",
+				plural(sched.D.RunsInFlight(), "run", "runs"), *wait)
+			fmt.Println("nothing new is being dispatched in the meantime.")
+			return exitOK
+		}
+		fmt.Println("\nnothing is in flight; the fleet is stopping cleanly")
 		return exitOK
 
 	case "once":
@@ -248,4 +283,20 @@ func (e *env) scheduler() (*dispatch.Scheduler, error) {
 	// only decides WHEN it looks.
 	s.WakeOn(e.led)
 	return s, nil
+}
+
+// plural and them keep the stop command's sentences readable without a
+// dependency on how many runs there happen to be.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+func them(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
 }

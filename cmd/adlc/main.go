@@ -196,7 +196,7 @@ Usage: adlc [global flags] <command> [args]
   ledger   verify|rebuild|events|head  walk the chain; integrity and knowledge are answered separately
   prompt   list|show|check|assemble the versioned prompt library
   dispatch once|loop|plan           select work, invoke an agent, put the result to the authority
-  schedule run|once|status         the scheduled lanes, and their derived liveness
+  schedule run|stop|status|once   the scheduled lanes; stop drains rather than kills
   config   init|check|show          create a config by answering flags, and validate one
   serve                             the operator dashboard on loopback
 
