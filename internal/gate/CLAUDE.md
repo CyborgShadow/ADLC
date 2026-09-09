@@ -9,10 +9,13 @@ own envelope is checking that the worker *claimed* a command ran, never that one
 ## What goes wrong here
 
 **Treating the envelope as evidence.** The control plane runs the commands itself, in the tree the
-work is in. The worker's account survives only as a claim, and `CompareClaims` reports a
-disagreement as a `discrepancy` and a silence about a failing check as an `omission`. Silence about
-a check that passed is not dishonesty; silence about one that failed is the thing the matcher is
-for. A claim explicitly marked `not_run` is ignored entirely — that is what makes honesty free.
+work is in. The worker's account survives only as a claim, and `CompareClaims` reports a claim that
+comes out **better** than what the gate observed as a `discrepancy`, and a silence about a failing
+check as an `omission`. Only that direction: a claim worse than the observation is an agent that
+ran the check, found a problem and fixed it before the gate ran, and refusing that costs a run on
+every item and teaches an agent to record only its last, cleanest attempt. Silence about a check
+that passed is not dishonesty; silence about one that failed is the thing the matcher is for. A
+claim explicitly marked `not_run` is ignored entirely — that is what makes honesty free.
 
 **Reading the exit code of a command that does not use it.** Some commands report their verdict in
 their **output** and exit 0 either way (`gofmt -l` is the canonical one). `CompareClaims` re-judges
@@ -57,3 +60,13 @@ passing one is not, a gate with no declared checks is not green, a run that ran 
 budget says so rather than blaming a check it never started, and a run somebody *cancelled* says
 that instead of naming a budget — while a check that really does outlive its own budget is still
 `RED`.
+scan, an anchored count still refuses output that does not carry it, a met count over a failed
+process is still red, an absent tool is `UNKNOWN` not green, a behavioural check with no artifact
+is `UNKNOWN`, and a gate with no declared checks is not green. Then the matcher: a fabricated exit
+code is a discrepancy, a test tail carrying passes the gate never saw is one too, a claim worse
+than the observation is not, an honest `not_run` never is, a claim is judged in the channel the
+observation was and through the same counter the gate itself read, and silence about a failing
+check is an omission but silence about a passing one is not.
+
+`tree_test.go` pins the scope of the dirty-tree walk: only declared roots are walked, a declared
+root with nothing in it yet is clean rather than an error, an unscoped walk is refused rather than

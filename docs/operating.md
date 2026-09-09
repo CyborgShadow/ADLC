@@ -262,9 +262,9 @@ an open blocking question, or a paused lane.
 is not running, or the lane is paused, or it is wedged in a long dispatch.
 
 **Every run is refused for the same reason.** Read the reason: it names what was missing. A
-`claim_discrepancy` means the agent's account of a check disagreed with what the control plane
-observed. A `gate_failed` means the checks genuinely failed. An `uncommitted_tree` means the run
-did not commit before reporting.
+`claim_discrepancy` means the agent's account of a check came out better than what the control
+plane observed when it ran the command itself. A `gate_failed` means the checks genuinely failed.
+An `uncommitted_tree` means the run did not commit before reporting.
 
 **A run shows as UNKNOWN forever.** Its process died without recording an end. The item is
 untouched and will be picked up again; the run stays in the record as an unknown, which is the

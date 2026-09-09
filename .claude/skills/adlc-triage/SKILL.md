@@ -107,7 +107,7 @@ Read `report fleet` and `dispatch plan` together. The usual causes, most likely 
   segment report flags it: escalate rather than re-dispatch.
 - **Refusals.** `report fleet` ends with REFUSED TRANSITIONS, BY REASON. A cluster on one
   reason is a systematic problem, not bad luck — `claim_discrepancy` in particular means an
-  agent's envelope disagreed with what the gate observed when it ran the commands itself.
+  agent's envelope claimed better than what the gate observed when it ran the commands itself.
 - **No agent command configured.** If `dispatch.command` is empty the fleet validly refuses
   to dispatch anything.
 

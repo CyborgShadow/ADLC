@@ -96,13 +96,14 @@ the rest. An agent cannot name a state that does not exist, or one it is not all
 
 **The gate runs the checks itself.** An envelope is a declaration, never evidence. The control
 plane executes the declared commands in the run's own tree and compares what it observed against
-what the agent claimed:
+what the agent claimed. A claim that comes out better than the observation is refused; one that
+comes out worse is an agent that fixed what it found, and is not:
 
 ```
 REFUSED  S1-001  in_progress -> verifying
   [claim_discrepancy] for test the verdict is the output, not the exit code:
-  the envelope's own output reads RED (zero tests reported a result — a run that
-  discovered nothing is a failure, not a pass), the gate observed GREEN (59 tests ran)
+  the envelope's own output reads GREEN (59 tests ran and passed), the gate
+  observed RED (1 of 59 tests failed)
 ```
 
 **Checking is a state, not a schedule.** An item cannot leave `verifying` until the gate is green,

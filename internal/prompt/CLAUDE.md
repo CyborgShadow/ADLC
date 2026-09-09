@@ -53,7 +53,6 @@ trusts a writer that gives it none of the guarantees `writeFile` does — `git m
 that returns nothing is not an error to fall through on: an empty role body dispatches an agent
 with the preamble and no job, which is what `SetPrompt` refuses in those words, and an empty
 preamble makes `Assemble` drop fleet policy and the seam with it, so the run carries none of the
-mandatory clauses and nothing reports it. So a fresh read is only taken when it is a whole file:
 a blank body, or front matter the loaded copy had and the fresh read has lost — an opened fence not
 yet closed — keeps the copy already loaded. **Both guards apply on both paths.** The preamble is
 never parsed, so a fragment reaching it is served as the entire fleet policy rather than as one
@@ -61,7 +60,6 @@ role's body; guarding only the role file leaves the wider failure open on the na
 that the fence test keys on what the loaded copy had, not on what a file ought to look like: key it
 to the fresh read alone and a preamble carrying no front matter is frozen at its startup copy for
 the life of the process. A truncation landing after the front matter still reads as a short file
-and cannot be told from one; that window is narrowed, not closed, and the gate's clause check is
 what catches a committed tree.
 
 **Reading the map without the lock.** One process holds one library and both the scheduler and the
@@ -72,7 +70,6 @@ write is not a stale read, it is a crash.
 
 `prompt_test.go` pins front matter parsing, two prompts refusing to share an id, the preamble being
 assembled above every role, variable substitution, the digest addressing exactly the bytes that are
-stored, assembly being stable, a missing clause being reported, and a BOM not changing a prompt's
 identity. It also pins the refresh from three sides: a role prompt and the preamble edited on disk
 by something other than `SetPrompt` reaching the next assembly, an unchanged file still assembling
 byte for byte the same, and a vanished file keeping the copy already loaded rather than stopping
@@ -82,3 +79,9 @@ whole merged file still reaches the next assembly, so the guard cannot pass by r
 and a preamble that never had front matter still refreshes, so it cannot pass by freezing one.
 `survey_test.go` pins that a project with no prompts still gets an answer and that
 the survey separates what is there from what is named.
+stored, assembly being stable, a missing clause being reported while a project declaring none has
+nothing to fail, and a BOM not changing a prompt's identity. It also reads the shipped library
+rather than a fixture, to pin that the preamble's `output_tail` rule reaches every role the fleet
+can dispatch — with the clause cut out of the preamble as the firing case, because a clean case
+over prose nobody can delete proves nothing. `survey_test.go` pins that a project with no prompts
+still gets an answer and that the survey separates what is there from what is named.
