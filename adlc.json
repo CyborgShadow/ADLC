@@ -188,7 +188,7 @@
     {
       "type": "validator",
       "layer": "verification",
-      "description": "Adversarial review against the project's invariants, and validation of a plan against the intent that produced it. The only role that may reject.",
+      "description": "Adversarial review against the project's invariants, and validation of a plan against the intent that produced it. Reviews a plan before it is built and a delivered batch after.",
       "prompt": "validator",
       "capabilities": ["validate"]
     },
@@ -321,19 +321,12 @@
       "max_per_tick": 3
     },
     {
+      "_comment": "No `test` lane any more. The tester keeps its capability and its place on the roster, but verification is one task now: the gate executes the declared suite itself on this same edge, as an observation, so a tester run added a claim over evidence the control plane already held. A lane firing on a capability no state dispatches spends a tick to find nothing, every ninety seconds, for ever.",
       "name": "judge",
       "enabled": true,
       "every_seconds": 90,
       "offset_seconds": 60,
       "capability": "judge",
-      "max_per_tick": 3
-    },
-    {
-      "name": "test",
-      "enabled": true,
-      "every_seconds": 90,
-      "offset_seconds": 75,
-      "capability": "test",
       "max_per_tick": 3
     },
     {
@@ -396,12 +389,12 @@
   },
 
   "budget": {
-    "_comment": "Empty on purpose. With no price entry a run reports UNPRICED — cost unknown, not zero — instead of printing $0.00 over real spend. Fill in from your provider's current pricing before running unattended.",
+    "_comment": "Caps in micro-dollars; 1000000 is one dollar. These are set from what this fleet actually cost, not from a guess: over one 14.8-hour run the median run was $5.47 and the most expensive $16.38, at a burn of about $0.62 per agent-minute. A deliverable a single agent would finish in half an hour is therefore about $19 of work, so a segment cap of $40 is roughly twice that — the point at which a fleet is no longer worth pointing at the job and should stop and ask rather than carry on. It stopped for nobody last time and spent $1,242 that we can measure and an unknown amount that we cannot. price_micros_per_mtok stays empty deliberately: internal/config/pricing.go ships a default table, so an unlisted model is priced at list rates and reported as `default` rather than reported as free. Fill it in from a real invoice to turn `default` into `configured`.",
     "price_micros_per_mtok": {},
     "default_model": "claude-opus-5",
-    "per_run_micros": 0,
-    "per_day_micros": 0,
-    "per_segment_micros": 0
+    "per_run_micros": 20000000,
+    "per_day_micros": 200000000,
+    "per_segment_micros": 40000000
   },
 
   "lease": {

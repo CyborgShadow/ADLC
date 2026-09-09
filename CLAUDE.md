@@ -24,9 +24,13 @@ failure is the reason — not the rule.
    the only thing that decides where work goes. That removes a whole class of failure and is what
    makes a past decision re-derivable — a decision that depends on what an agent happened to write
    cannot be replayed at all.
-4. **The gate runs the checks itself.** An envelope is a declaration, never evidence.
-   `internal/gate` executes the declared commands in the run's own tree; the agent's account
-   survives only as a claim to compare, and a disagreement is its own recorded refusal.
+4. **The gate runs the checks itself, and so does the acceptance runner.** An envelope is a
+   declaration, never evidence. `internal/gate` executes the declared commands in the run's own
+   tree, and `internal/dispatch/acceptance.go` executes every acceptance criterion that carries a
+   command, in that same tree, by the same verdict rules. The agent's account survives only as a
+   claim to compare, and a disagreement is its own recorded refusal. Verification an agent
+   *reports* is the thing this rule exists to prevent — so an agent is asked only what no command
+   can answer.
 5. **A verdict has three values and absence never renders as a pass.** `GREEN`, `RED`, `UNKNOWN`.
    A missing tool is `UNKNOWN`, a hang is `RED`, a ledger this build is too old to read is
    `UNKNOWN` and not `TAMPERED`. A run that discovered zero units of work is a failure. Declared
@@ -37,6 +41,16 @@ failure is the reason — not the rule.
    closed.
 7. **Render from the record, never edit the render.** Every figure on every surface is a
    projection of the chain. Projections are derived and disposable; the chain is not.
+8. **Work is admitted for the deliverable that was asked for.** Generation is where an agent
+   decides what work exists, so it is where scope is widened. An item whose file scope falls
+   outside everything the segment touches is refused against the brief, and two open items may
+   never claim the same file. A reviewed five-item plan once became forty-four, and the thirty-nine
+   nobody agreed to took 77% of the money.
+9. **A dispatch that produced nothing is `unknown`, and a fleet that keeps producing nothing
+   stops.** A run that never started has said nothing about the work; calling it `fail` invents
+   evidence. Failed dispatches return in seconds, so a broken invocation makes a fleet faster, not
+   slower — lanes back off on a no-envelope streak and the fleet drains itself past the declared
+   limit.
 
 ## Where to go
 

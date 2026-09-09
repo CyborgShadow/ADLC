@@ -102,7 +102,17 @@ func cmdConfigCheck(args []string) int {
 			if c == config.CapConverse {
 				continue
 			}
-			if !drained[c] {
+			// A capability the lifecycle never asks for cannot leave work
+			// sitting, because no item ever reaches a state that wants it. Only
+			// a capability some state DOES dispatch, with no lane to dispatch
+			// it, strands anything.
+			//
+			// Warning on both read the same and meant opposite things: one is a
+			// misconfiguration that stops a fleet, the other is a role kept on
+			// the roster after the lifecycle moved past it. A warning that fires
+			// on a deliberate choice every single run is one people learn to
+			// scroll past, and then it costs the one time it was real.
+			if !drained[c] && authority.DispatchesCapability(c) {
 				warn = append(warn, fmt.Sprintf(
 					"%q work has a role (%s) but no enabled lane, so nothing will ever dispatch it", c, w.Type))
 			}

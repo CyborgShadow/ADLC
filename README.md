@@ -50,10 +50,12 @@ failure modes:
 Then delivery, with each stage done by somebody who did not do the one before it:
 
 - **Builders** implement one item each, in isolation, and write tests for what they wrote.
-- **A tester** executes those tests. A suite that matched nothing is a failure, not a pass.
-- **A judge** rules on whether the work serves what you asked for and fits the deliverable. The
-  criteria a command settles are run by the control plane itself, not by an agent.
-- **A validator** reviews adversarially and is the only role that can reject.
+- **The control plane checks it itself** — the declared suite, and every acceptance criterion that
+  carries a command, run in the item's own tree. No agent is asked for an answer a command gives,
+  and a suite that matched nothing is a failure rather than a pass.
+- **A judge** rules on whether the work serves what you asked for and fits the deliverable. That is
+  the one question no command answers, and it is the one an agent is dispatched for.
+- **A validator** reviews adversarially, over the delivered batch rather than each item.
 - **A janitor** does the hygiene pass; **an arbiter** judges the change against the whole system.
 - **Disciplines** — frontend, backend, api, database, query, sre, architect — take the items their
   area routes to, each because it brings judgement the generalist prompt does not warn about.
@@ -103,10 +105,10 @@ REFUSED  S1-001  in_progress -> verifying
   discovered nothing is a failure, not a pass), the gate observed GREEN (59 tests ran)
 ```
 
-**Checking is a state, not a schedule.** An item cannot leave `verifying` without a tester, a judge
-and a validator, and none of them can be the run that did the work. A verification layer that
-quietly stops running is then a queue that visibly stops draining, rather than an absence nobody
-notices.
+**Checking is a state, not a schedule.** An item cannot leave `verifying` until the gate is green,
+every criterion carrying a command has been executed by the control plane, and a judge — never the
+run that did the work — has ruled that it serves the brief. A verification layer that quietly stops
+running is then a queue that visibly stops draining, rather than an absence nobody notices.
 
 **Absence never renders as a pass.** Verdicts have three values. A missing tool is `UNKNOWN`, a
 hang is `RED`, a ledger this binary is too old to read is `UNKNOWN` and not `TAMPERED`. Every

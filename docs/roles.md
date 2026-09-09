@@ -19,9 +19,9 @@ run can still say exactly which bytes it was given.
 | `database` | implement | database, migration | Owns the stored shape and the migrations that change it |
 | `query` | implement | query | Owns the access path: the statements issued, the plans they take, the transactions they run in |
 | `sre` | implement | sre, infrastructure | Writes the infrastructure, the deploy path and the signals. Applying is the operator's step |
-| `tester` | test | *generalist* | Executes the tests. A suite that matched nothing is a failure |
+| `tester` | test | *generalist* | Retired from the lifecycle: the gate executes the declared suite itself. Kept on the roster; no state dispatches it |
 | `judge` | judge | *generalist* | Rules on whether the work serves the brief and fits the deliverable |
-| `validator` | validate | *generalist* | Adversarial review; the only role that can reject |
+| `validator` | validate | *generalist* | Adversarial review, over a plan before it is built and a delivered batch after |
 | `architect` | validate | architecture | Reviews boundaries, dependency direction, and decisions that are expensive to undo |
 | `security` | validate | security | Reviews for what an attacker would do |
 | `performance` | validate | performance | Reviews for scale and load. Findings need a number |
@@ -44,7 +44,7 @@ under an area nobody claimed reaches the generalist instead of whichever special
 sort first.
 
 The *generalist* rows are roles that declare no areas of their own. Several of them are still the
-routed owner of an area — `testing` routes to `tester`, `verification` to `judge`, `review` to
+routed owner of an area — `verification` routes to `judge`, `review` to
 `validator`, `core` to `engineer` — which is what an item filed under that area is tagged with. A
 declared area narrows what a role will be picked for; a routing entry says who owns work tagged
 that way. `console` never appears in routing because it advances no work item.
@@ -82,12 +82,13 @@ validator      checks the breakdown against the intent — would these items del
   ↓            (on a reject it goes back for decomposition; nothing is built until it passes)
 builder        implements one item, writes tests for what it wrote, stops
   ↓
-tester         executes the tests
-  ↓            (a failure goes back to the builder with the failing output)
-judge          rules on intent and fit; a criterion a command settles was run by the tool
-  ↓
-validator      adversarial review; may pass it on, or reject it with blockers
-  ↓
+control plane  runs the declared suite AND every criterion carrying a command, in the
+  ↓            item's own tree. No agent, no lane wait. Work that fails its own
+  ↓            criteria goes straight back rather than on to somebody who would
+  ↓            discover by hand what a command already established
+judge          rules on intent and fit — does this serve the brief, and does it fit the
+  ↓            deliverable. The one question no command answers. May reject with blockers
+  ↓            (a failure goes back to the builder with what was observed)
 janitor        hygiene pass over what landed
   ↓
 arbiter        judges the change against the system rather than against the item

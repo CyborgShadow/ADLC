@@ -368,6 +368,14 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 			if f.Worker != "" && f.Worker != worker {
 				continue
 			}
+			if d.yieldsToDelivery(worker) {
+				// Not a refusal and not an error: the work is real and will be
+				// offered again on the next pass. It simply does not take a slot
+				// while the fleet is busy enough to want it for building.
+				d.log("YIELDING %s — %s is low-cadence and the fleet is busy; hygiene and lessons wait for delivery to have room",
+					it.ID, worker)
+				continue
+			}
 			out = append(out, Candidate{
 				Kind: KindItem, Item: it, From: st, Capability: capability,
 				Worker: worker, Priority: prio,

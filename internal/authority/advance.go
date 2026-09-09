@@ -318,3 +318,28 @@ func StageOf(s State) Stage {
 	}
 	return Stages()[0]
 }
+
+// DispatchesCapability reports whether any lifecycle state asks for this
+// capability — either because an item in some state needs it, or because a
+// segment on the roadmap does.
+//
+// It exists so that "no lane drains this" can tell the two cases apart. A
+// capability the lifecycle never asks for strands nothing, however few lanes
+// hold it: no item will ever reach a state that wants it. A capability some
+// state DOES dispatch, with no lane behind it, stops a fleet dead. Reporting
+// both as work sitting made the first fire on every run of `config check` for a
+// role deliberately retired from the lifecycle, and an alarm that goes off on a
+// choice somebody made on purpose is one that gets ignored when it is real.
+func DispatchesCapability(capability string) bool {
+	for _, s := range AllStates() {
+		if c, _ := CapabilityFor(s); c == capability {
+			return true
+		}
+	}
+	for _, s := range SegmentStages() {
+		if c, _ := SegmentCapabilityFor(s); c == capability {
+			return true
+		}
+	}
+	return IsVerification(capability)
+}

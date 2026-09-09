@@ -57,15 +57,48 @@ lane that stops firing stops producing ticks and becomes a derived alarm.
 
 ## Verification is a state, not a schedule
 
-An item cannot leave `verifying` without a tester, a judge and a validator, and none of them can
-be the run that did the work. Checking is the next step of an item already in flight rather than a
+An item cannot leave `verifying` until its verification task clears, and it cannot be cleared by the
+run that did the work. Checking is the next step of an item already in flight rather than a
 competing job, and the dispatcher drains from the finished end — so checking never queues behind
 building.
 
-A lane that both writes and judges its own work will always find it acceptable. The split is also
-why the two are separate stages: executing the tests and deciding whether the passing tests
-establish the criteria are different questions, and one answer routinely gets mistaken for the
-other.
+A lane that both writes and judges its own work will always find it acceptable. That principle
+requires the judgement not to be the builder's; it does not require it to be another agent, and for
+two of the three tasks this stage used to hold it was better not to be.
+
+## Most verification is an observation, so no agent should be asked for it
+
+The stage held three tasks — a tester, a judge and a validator — and two of them put an agent
+between the control plane and a question it could answer itself.
+
+The **tester** re-ran a suite the gate already executes on the same edge. The gate's answer is
+evidence; the tester's was a claim about it, and this project refuses claims everywhere else. The
+**judge** was handed the acceptance criteria as prose and believed about what it ran: ten to fifteen
+minutes of agent time per item to execute commands that were already written down. A criterion
+carrying a command is now run by the control plane in the item's own tree, in seconds, by the same
+executor and the same verdict rules the declared checks use. Measured over one deliverable: 221
+criteria, 11 of them written as commands — so the machinery existed, was never connected to
+anything, and would have crashed on the first pattern rule anybody wrote if it had been.
+
+What is left for an agent is the question no command answers, and it is the one this fleet actually
+got wrong: **does this work serve what was asked for, and does it fit the deliverable it is part
+of?** A well-tested change that satisfies every criterion and answers a question nobody asked is the
+expensive failure, and no check catches it. So the judge stayed, and was pointed at that instead.
+
+Adversarial review moved to the segment, where its own declaration always said it belonged — it
+"looks wider than one unit of work", and running it per item made it re-read the whole system once
+per change.
+
+Two problems disappeared rather than being fixed. Three tasks held separate leases on one item, so
+whichever finished last proposed from a state the others had already left and was refused stale,
+after paying for a full gate run. And a failing task invalidated its siblings' earned passes,
+because a pass is keyed on the round and a setback bumps the round — so one narrow rejection re-ran
+everything. With one task there is no sibling to race and no round to invalidate.
+
+The cost is stated rather than hidden: one agent now looks at an item where three did. The defect
+that reaches the trunk because of it will be one no command could catch and one reader missed. The
+defect that used to reach the trunk was an entire deliverable nobody wanted, and three agents looked
+carefully at every part of it.
 
 ## A breakdown is reviewed before it is built
 
@@ -264,6 +297,38 @@ Checks, workers and routing stay in the file. A check is a command line, and a f
 arbitrary argv into something the control plane will execute is a remote shell wearing a hat —
 "it is only bound to loopback" is the kind of reasoning that ages badly. Workers and routing are
 structure, and belong in a commit somebody reviewed next to the prompt files they name.
+
+## A dispatch that never started is not a verdict about the work
+
+An agent process that errors and writes no envelope has said nothing about the item. Recording that
+as `fail` is the same mistake as recording a killed run as one: it invents evidence, and it puts a
+broken change on the record where there was only a broken invocation.
+
+So it is `unknown`, the refusal is recorded under its own reason so the fleet report can show it,
+and the agent's own output is kept — without which nobody can say afterwards what broke.
+
+A fleet also has to notice. A failed dispatch releases its slot in about three seconds, against five
+to twelve minutes for a run that did something, so a broken invocation does not slow a fleet down —
+it speeds it up, and the lanes fire on cadence at a hundred per cent failure. That is not
+hypothetical: it produced 212 runs in one hour, 81 of them against a single item, and half of one
+night's entire run count in its last two hours. Lanes now back off while a no-envelope streak is
+running, and past a declared streak the fleet drains itself and stops.
+
+## Generation judges relevance, by shape
+
+Generation is the one place an agent decides what work *exists*, which makes it the one place an
+agent can widen its own scope. The admission rules are about shape rather than taste, and one of
+those shapes is whether the work belongs to this deliverable at all.
+
+A title can echo any brief; a file scope either lands where the deliverable's work lands or it does
+not. So an item whose declared paths fall entirely outside anything the segment touches is refused,
+and the refusal quotes the brief back. A reviewed five-item plan once became forty-four items with
+nobody having agreed to thirty-nine of them, and 77% of the money went to the fleet improving itself
+rather than to the thing that was asked for.
+
+The related rule is that two open items may not declare the same file. Two builders on one file are
+serialised however wide the fleet is, so depth in a plan is wall clock and breadth is not — which
+makes an overlapping scope a planning defect that looks like ordinary work.
 
 ## Package layout
 

@@ -164,3 +164,38 @@ func (s *Scheduler) fireParallel(ctx context.Context, f Filter, n int) (TickResu
 	wg.Wait()
 	return last, got, first
 }
+
+// busy reports how many slots are currently held, and how many exist.
+func (g *slots) busy() (held, total int) { return len(g.ch), cap(g.ch) }
+
+// yieldsToDelivery reports whether a low-cadence worker should stand down on
+// this pass because the fleet is busy enough that its slot is better spent
+// building.
+//
+// This is what `low_cadence` means. Until now it meant nothing at all: the
+// field was declared on a worker, rendered on the roles page, and read by
+// exactly two lines of reporting that used it to soften a "NEVER RUN" warning.
+// It looked like a throttle and throttled nothing, which is worse than not
+// existing, because an operator who sets it believes the fleet is holding a
+// role back.
+//
+// The rule is deliberately about SATURATION rather than about time. The lanes
+// already carry cadences, so a second timer would be a second answer to a
+// question the config already answers. What the cadence cannot express is the
+// thing that actually went wrong: hygiene, arbitration and lessons competed
+// with delivery for the same eight slots on equal terms, and the fleet
+// cheerfully spent a night improving itself while the deliverable sat. A
+// low-cadence role now runs when there is room and waits when there is not.
+//
+// Half, not full. Standing down only at the ceiling would let stewardship take
+// the last slot every time and starve the builder that was about to ask for it;
+// standing down at half leaves delivery a working margin it does not have to
+// race for.
+func (d *Dispatcher) yieldsToDelivery(worker string) bool {
+	w := d.Cfg.Worker(worker)
+	if w == nil || !w.LowCadence {
+		return false
+	}
+	held, total := d.limit().busy()
+	return total > 1 && held*2 >= total
+}
