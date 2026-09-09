@@ -445,3 +445,39 @@ func TestConcurrentRefreshMovesAnItemOnce(t *testing.T) {
 		t.Fatalf("the item left verification %d times; a transition that did not happen is on the chain forever", moves)
 	}
 }
+
+// A run on an item continues that item's work.
+//
+// Every workspace used to branch from HEAD. A judge, a tester and a validator
+// each got a clean checkout of the trunk and were asked to verify work that was
+// not in it, and a builder retrying after a rejection started again from
+// nothing. The agents noticed before I did: the trunk carries commits titled
+// "Graft S1-002's declared file scope from <sha> for the hygiene pass", which is
+// a role hand-copying work into a workspace that should have contained it.
+func TestAWorkspaceIsBasedOnTheItemsExistingWork(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+
+	// No branch yet: the first run on an item has nothing to continue, and must
+	// still get a workspace rather than failing.
+	if b, err := d.branchFor("S1-001"); err != nil || b != "" {
+		t.Fatalf("an item with no runs offered branch %q (%v)", b, err)
+	}
+
+	// Once a run has recorded a branch, later runs continue from it.
+	if _, err := d.Led.Append("cli", ledger.KindRunStarted, "e-1", ledger.RunStarted{
+		RunID: "e-1", WorkerType: "frontend", ItemID: "S1-001", Branch: "adlc/e-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.branchFor("S1-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "adlc/e-1" {
+		t.Fatalf("a later run would start from %q rather than the item's own work", got)
+	}
+}

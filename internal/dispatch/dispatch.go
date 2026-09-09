@@ -482,7 +482,18 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		return TickResult{}, false, nil
 	}
 
-	ws, err := d.prepareWorkspace(runID)
+	// A run on an item continues that item's work rather than starting again
+	// from the trunk. For a verification task this is the difference between
+	// reviewing the change and reviewing main; for a builder retrying after a
+	// rejection it is the difference between fixing what it wrote and writing
+	// it again.
+	base := ""
+	if c.Kind == KindItem && c.Item.ID != "" {
+		if b, berr := d.branchFor(c.Item.ID); berr == nil {
+			base = b
+		}
+	}
+	ws, err := d.prepareWorkspace(runID, base)
 	if err != nil {
 		return TickResult{}, false, fmt.Errorf("isolate %s: %w", runID, err)
 	}

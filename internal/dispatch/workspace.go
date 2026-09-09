@@ -37,7 +37,7 @@ func (w *Workspace) Cleanup() {
 // playbooks. "none" runs in the shared checkout and is correct only for a
 // single-lane fleet; it is offered because pretending otherwise would push
 // people into faking a worktree they do not need.
-func (d *Dispatcher) prepareWorkspace(runID string) (*Workspace, error) {
+func (d *Dispatcher) prepareWorkspace(runID, base string) (*Workspace, error) {
 	mode := d.Cfg.Dispatch.Isolation
 	if mode == "" {
 		mode = "worktree"
@@ -71,7 +71,19 @@ func (d *Dispatcher) prepareWorkspace(runID string) (*Workspace, error) {
 
 	case "worktree":
 		branch := "adlc/" + runID
-		if out, err := git(d.Repo, "worktree", "add", "-b", branch, dir, "HEAD"); err != nil {
+		// Based on the work this item already has, not on the trunk.
+		//
+		// Every workspace used to start at HEAD. A judge, a tester and a
+		// validator each got a clean checkout of main and were asked to verify
+		// work that was not in it, and a builder retrying after a rejection
+		// started again from nothing. The agents noticed before this did: the
+		// trunk carries commits titled "Graft S1-002's declared file scope
+		// from <sha> for the hygiene pass", which is a role hand-copying the
+		// work into a workspace that should have contained it.
+		if base == "" {
+			base = "HEAD"
+		}
+		if out, err := git(d.Repo, "worktree", "add", "-b", branch, dir, base); err != nil {
 			return nil, fmt.Errorf("git worktree add: %v (%s)", err, out)
 		}
 		return &Workspace{
