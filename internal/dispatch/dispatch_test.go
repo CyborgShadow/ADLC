@@ -1006,12 +1006,10 @@ func verificationEvents(t *testing.T, h *harness, itemID string) []ledger.Event 
 
 // TestAVerificationTaskTheGateRefusedClearsNothing is the firing case.
 //
-// The task was cleared from the envelope's verdict alone, before the gate had
-// run the checks and before the authority had decided anything. A tester
-// claiming a pass over a tree whose checks the gate then observed RED was
-// refused — recorded, with the reason, in the same chain — and the stage
-// counted its task as cleared regardless. A refusal is evidence the claim was
-// wrong; a task cleared by one is not verified at all.
+// The task was once cleared from the envelope's verdict alone, before the gate
+// had run the checks and before the authority had decided anything; the comment
+// on the guard in dispatchOne records what that cost. This is the assertion
+// that holds it there.
 func TestAVerificationTaskTheGateRefusedClearsNothing(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)

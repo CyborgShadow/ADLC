@@ -783,10 +783,9 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		return res, true, err
 	}
 
-	// A verification task clears on the admitted self-edge and moves nothing.
-	// The stage is left when every task has cleared, which Refresh computes from
-	// the record rather than taking from whichever run finished last — so three
-	// runs racing to report cannot advance an item between them.
+	// A verification task clears on the admitted self-edge and moves nothing:
+	// the stage is left only when every task has cleared, and Refresh derives
+	// that from the record for the reason given there.
 	//
 	// It is recorded here, after the decision, because it was once recorded from
 	// env.Verdict alone: before the gate ran and before the authority decided
