@@ -201,6 +201,22 @@ func (s *Scheduler) runLane(ctx context.Context, l config.LoopDecl) {
 		if cadence <= 0 {
 			cadence = time.Minute
 		}
+		// Back off while dispatch is producing nothing at all.
+		//
+		// The declared cadence is right for a fleet that works. When agent
+		// invocation broke fleet-wide, the same cadence fired 212 runs in one
+		// hour into an agent that was not starting, because each attempt failed
+		// in three seconds and left nothing the scheduler read. The streak is
+		// what it reads now: see breaker.go for why only a total absence of an
+		// envelope counts, and why the fleet stops itself past five.
+		if streak := s.D.NoEnvelopeStreak(); streak > 0 {
+			slowed := backoff(cadence, streak)
+			if slowed != cadence {
+				s.D.log("LOOP %s backing off to %s — %d dispatch(es) in a row produced no envelope, so firing on cadence spends a lease and a worktree per attempt to learn the same thing",
+					l.Name, slowed, streak)
+			}
+			cadence = slowed
+		}
 		if !s.waitTurn(ctx, wake, cadence, time.Since(started)) {
 			s.D.log("LOOP %s stopped", l.Name)
 			return
