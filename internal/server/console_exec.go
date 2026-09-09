@@ -232,9 +232,9 @@ func (s *Server) doNote(a ledger.ConsoleAction, by string) (string, string) {
 func (s *Server) doSignOff(a ledger.ConsoleAction, by string) (string, string) {
 	id := console.Arg(a, "segment")
 	to := authority.SegmentState(console.Arg(a, "to"))
-	if to != authority.SegRoadmap && to != authority.SegSignedOff {
+	if to != authority.SegRoadmap && to != authority.SegSignedOff && to != authority.SegApproachAgreed {
 		return ledger.ActionRefused,
-			"only accepting onto the roadmap and signing off are sign-off steps; everything else on the roadmap is an agent's"
+			"only accepting onto the roadmap, signing off the intent and agreeing the approach are yours; everything else on the roadmap is an agent's"
 	}
 	seg, err := s.Led.Segment(id)
 	if err != nil {
@@ -244,6 +244,11 @@ func (s *Server) doSignOff(a ledger.ConsoleAction, by string) (string, string) {
 	want := authority.SegTheory
 	if to == authority.SegSignedOff {
 		want = authority.SegRoadmap
+	}
+	if to == authority.SegApproachAgreed {
+		// The approach gate: a person has read what the researcher proposes to
+		// commit to, before a planner turns it into work.
+		want = authority.SegResearched
 	}
 	if from != want {
 		return ledger.ActionRefused, fmt.Sprintf("%s is %s, not %s", id, from, want)

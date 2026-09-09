@@ -38,8 +38,8 @@ func (s *Server) signoff(w http.ResponseWriter, r *http.Request) {
 	// Only the two steps a person owns. Anything else on the roadmap is an
 	// agent's, and a hand-operated shortcut past a stage is a stage that stops
 	// being run at all.
-	if to != authority.SegRoadmap && to != authority.SegSignedOff {
-		redirect(w, r, "/roadmap", "only accepting onto the roadmap and signing off are yours to do here", true)
+	if to != authority.SegRoadmap && to != authority.SegSignedOff && to != authority.SegApproachAgreed {
+		redirect(w, r, "/roadmap", "only accepting onto the roadmap, signing off the intent and agreeing the approach are yours to do here", true)
 		return
 	}
 	seg, err := s.Led.Segment(id)
@@ -51,6 +51,11 @@ func (s *Server) signoff(w http.ResponseWriter, r *http.Request) {
 	want := map[authority.SegmentState]authority.SegmentState{
 		authority.SegRoadmap:   authority.SegTheory,
 		authority.SegSignedOff: authority.SegRoadmap,
+		// The approach gate. Signing off the intent and agreeing the approach are
+		// separate decisions, and the second is the one that commits the money —
+		// a researcher's recommendation can be sound, reviewed and enormously
+		// more expensive than the brief warranted, which is what happened.
+		authority.SegApproachAgreed: authority.SegResearched,
 	}[to]
 	if from != want {
 		redirect(w, r, "/roadmap", id+" is "+seg.State+", not "+string(want)+

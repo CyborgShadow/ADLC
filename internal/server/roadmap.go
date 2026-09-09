@@ -254,7 +254,14 @@ func (r *roadmapRow) explain() {
 	case authority.SegResearching:
 		r.Class, r.Next = "live", "A researcher is working out the approach."
 	case authority.SegResearched:
-		r.Class, r.Next = "live", "The approach is written. A planner will decompose it into work."
+		r.Class, r.Next = "warn", "The approach is written and waiting for you. Read what it commits to before a planner turns it into work."
+		r.NeedsYou, r.SignTo = true, string(authority.SegApproachAgreed)
+		r.SignVerb, r.DeclineVerb = "Agree the approach", "Send it back"
+		r.AskLabel = "Is this approach worth what it will cost?"
+		r.AskWhy = "Signing off the intent said the goal was worth pursuing. This asks whether the route the researcher chose is worth taking — read its options, what it says it will touch, and what it rules out. A sound approach can still be far more than the brief asked for, and the last time nobody was asked, a page for two children earned a 3,381-line checker."
+		r.WhyHint = "what makes this route right — or what it is doing that the brief did not ask for"
+	case authority.SegApproachAgreed:
+		r.Class, r.Next = "live", "Approach agreed. A planner will decompose it into work."
 	case authority.SegPlanning:
 		r.Class, r.Next = "live", "A planner is decomposing the approach."
 	case authority.SegPlanned:

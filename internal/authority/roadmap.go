@@ -30,8 +30,23 @@ const (
 	SegSignedOff SegmentState = "signed_off"
 	// SegResearching means a researcher is turning the intent into an approach.
 	SegResearching SegmentState = "researching"
-	// SegResearched means the approach is written down.
+	// SegResearched means the approach is written down, and it is the second
+	// place a person has to say yes.
+	//
+	// Signing off the intent is not signing off the approach, and the money is
+	// committed by the approach. A researcher on a brief for a small static page
+	// once recommended building a 3,381-line checker first, wrote "this approach
+	// deliberately overturns the brief's second half" in its own notes, and was
+	// reviewed only by another agent — which correctly found the reasoning
+	// sound, because it was. Nobody was asked whether it was worth it. The
+	// deliverable it was for is 189 lines and never shipped.
+	//
+	// The cost of asking is one click on a page that already exists. The cost of
+	// not asking was a night and a week of credits.
 	SegResearched SegmentState = "researched"
+	// SegApproachAgreed means a person read the approach and accepted what it
+	// commits to. Only now is a planner dispatched.
+	SegApproachAgreed SegmentState = "approach_agreed"
 	// SegPlanning means a planner is decomposing the approach into work items.
 	SegPlanning SegmentState = "planning"
 	// SegPlanned means work items exist and nobody has checked that they add up.
@@ -51,7 +66,7 @@ const (
 // SegmentStages is the roadmap in reading order.
 func SegmentStages() []SegmentState {
 	return []SegmentState{
-		SegTheory, SegRoadmap, SegSignedOff, SegResearching, SegResearched,
+		SegTheory, SegRoadmap, SegSignedOff, SegResearching, SegResearched, SegApproachAgreed,
 		SegPlanning, SegPlanned, SegValidating, SegReady, SegBuilding, SegDelivered,
 	}
 }
@@ -78,7 +93,10 @@ func (s SegmentState) OpenForWork() bool {
 }
 
 // NeedsPerson reports whether the deliverable is waiting on a human decision.
-func (s SegmentState) NeedsPerson() bool { return s == SegRoadmap }
+// Two gates, not one: the intent at SegRoadmap, and the approach at
+// SegResearched. They are different decisions and the second is the expensive
+// one — see the note on SegResearched for what it cost to have only the first.
+func (s SegmentState) NeedsPerson() bool { return s == SegRoadmap || s == SegResearched }
 
 // SegmentCapabilityFor says which capability moves a deliverable out of a
 // state. An empty capability means it waits on a person, or on its own items.
@@ -86,7 +104,7 @@ func SegmentCapabilityFor(s SegmentState) (capability string, priority int) {
 	switch s {
 	case SegSignedOff, SegResearching:
 		return config.CapResearch, 20
-	case SegResearched, SegPlanning:
+	case SegApproachAgreed, SegPlanning:
 		return config.CapPlan, 21
 	case SegPlanned, SegValidating:
 		return config.CapValidate, 19
@@ -99,7 +117,7 @@ func SegmentPickedUp(s SegmentState) (SegmentState, bool) {
 	switch s {
 	case SegSignedOff:
 		return SegResearching, true
-	case SegResearched:
+	case SegApproachAgreed:
 		return SegPlanning, true
 	case SegPlanned:
 		return SegValidating, true
@@ -130,7 +148,7 @@ func NextSegmentState(from SegmentState, capability, verdict string, itemsCreate
 		if pass {
 			return segOK(SegResearched, "the intent has been turned into a written approach")
 		}
-	case SegResearched, SegPlanning:
+	case SegApproachAgreed, SegPlanning:
 		if capability != config.CapPlan {
 			return SegmentAdvance{}
 		}
@@ -148,7 +166,12 @@ func NextSegmentState(from SegmentState, capability, verdict string, itemsCreate
 		if pass {
 			return segOK(SegReady, "the plan was checked against the intent and accepted; work may now be dispatched")
 		}
-		return segOK(SegResearched, "the plan does not add up to the intent and goes back for decomposition")
+		// Back to SegApproachAgreed, not SegResearched. A rejected plan is a
+		// bad decomposition of an approach a person already accepted, so the
+		// planner re-runs without asking them again — sending it to the
+		// approach gate would stop the fleet for a decision nobody has changed
+		// their mind about, on every failed round of a repair.
+		return segOK(SegApproachAgreed, "the plan does not add up to the intent and goes back for decomposition")
 	}
 	return SegmentAdvance{}
 }

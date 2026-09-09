@@ -123,7 +123,11 @@ func write(t *testing.T, path, body string) {
 // re-testing the gate on every case.
 func (h *harness) segment(t *testing.T, id, title, brief string, target int) {
 	t.Helper()
-	state := "researched"
+	// approach_agreed, not researched: a deliverable at `researched` is waiting
+	// on the second human gate, where somebody reads what the approach commits
+	// to before a planner turns it into work. That gate has its own tests; a
+	// test about decomposition seeds past it exactly as it seeds past sign-off.
+	state := "approach_agreed"
 	if brief == "" {
 		// No brief means no agent decomposition to research or validate; the
 		// items were written by hand and open for work immediately.
@@ -372,7 +376,7 @@ func TestASegmentUnderItsTargetAsksForWork(t *testing.T) {
 	// Firing case: the same full backlog, but the plan was rejected and the
 	// deliverable is back at researched. It needs a planner, and refusing one
 	// is the deadlock.
-	h.moveSegment(t, "S1", string(authority.SegResearched))
+	h.moveSegment(t, "S1", string(authority.SegApproachAgreed))
 	cands3, err := h.D.Candidates(Filter{Capability: config.CapPlan})
 	if err != nil {
 		t.Fatal(err)

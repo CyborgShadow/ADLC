@@ -246,7 +246,7 @@ func TestNothingIsBuiltUntilThePlanIsCheckedAgainstTheIntent(t *testing.T) {
 	if adv := NextSegmentState(SegSignedOff, config.CapResearch, "pass", 0); adv.To != SegResearched {
 		t.Fatalf("a signed-off intent should become a written approach, got %s", adv.To)
 	}
-	if adv := NextSegmentState(SegResearched, config.CapPlan, "pass", 3); adv.To != SegPlanned {
+	if adv := NextSegmentState(SegApproachAgreed, config.CapPlan, "pass", 3); adv.To != SegPlanned {
 		t.Fatalf("an approach with items should be planned, got %s", adv.To)
 	}
 	if SegPlanned.OpenForWork() {
@@ -258,7 +258,7 @@ func TestNothingIsBuiltUntilThePlanIsCheckedAgainstTheIntent(t *testing.T) {
 	if !SegReady.OpenForWork() {
 		t.Fatal("an accepted plan must be dispatchable")
 	}
-	if adv := NextSegmentState(SegPlanned, config.CapValidate, "reject", 0); adv.To != SegResearched {
+	if adv := NextSegmentState(SegPlanned, config.CapValidate, "reject", 0); adv.To != SegApproachAgreed {
 		t.Fatalf("a rejected plan goes back for decomposition, got %s", adv.To)
 	}
 }
@@ -279,7 +279,7 @@ func TestNoAgentSignsOffAnIntent(t *testing.T) {
 }
 
 func TestAPlannerThatProducedNothingDoesNotAdvanceTheDeliverable(t *testing.T) {
-	if adv := NextSegmentState(SegResearched, config.CapPlan, "pass", 0); adv.Inferred {
+	if adv := NextSegmentState(SegApproachAgreed, config.CapPlan, "pass", 0); adv.Inferred {
 		t.Fatal("a planning run that created no items has not planned anything")
 	}
 }
@@ -367,5 +367,48 @@ func TestOnlyAVerificationTaskClearsVerification(t *testing.T) {
 		if adv.Inferred {
 			t.Errorf("%s moved an item out of verification", cap)
 		}
+	}
+}
+
+// The approach is a second decision, and it is the expensive one.
+//
+// Signing off the intent says the goal is worth pursuing. It says nothing about
+// the route, and the route is what commits the money: a researcher on a brief
+// for a small static page recommended building a 3,381-line checker first, said
+// in its own notes that this overturned half the brief, and was reviewed only by
+// another agent — which found the reasoning sound, because it was. Nobody was
+// asked whether it was worth it.
+//
+// So `researched` waits for a person, exactly as `roadmap` does, and no
+// capability moves a deliverable out of it.
+func TestTheApproachWaitsForAPersonAndNoAgentPassesIt(t *testing.T) {
+	if !SegResearched.NeedsPerson() {
+		t.Error("a written approach must stop for somebody; the gate that only asked about the intent is the one that let a checker get built for a page")
+	}
+	if c, _ := SegmentCapabilityFor(SegResearched); c != "" {
+		t.Errorf("a capability (%q) moves a deliverable off the approach gate, so an agent walks through it", c)
+	}
+	for _, cap := range []string{config.CapPlan, config.CapResearch, config.CapValidate} {
+		if adv := NextSegmentState(SegResearched, cap, "pass", 3); adv.Inferred {
+			t.Errorf("%s moved the deliverable off the approach gate to %s; only a person may", cap, adv.To)
+		}
+	}
+}
+
+// The clean case. Once a person has agreed the approach, planning proceeds
+// without asking them again — including on every failed round of a repair,
+// which is why a rejected plan returns to approach_agreed and not to the gate.
+func TestOnceTheApproachIsAgreedPlanningNeedsNobody(t *testing.T) {
+	if SegApproachAgreed.NeedsPerson() {
+		t.Error("an agreed approach must not ask again; a gate that re-fires on every planning round is one somebody clicks through without reading")
+	}
+	if c, _ := SegmentCapabilityFor(SegApproachAgreed); c != config.CapPlan {
+		t.Errorf("an agreed approach dispatches %q, want a planner", c)
+	}
+	if adv := NextSegmentState(SegApproachAgreed, config.CapPlan, "pass", 3); adv.To != SegPlanned {
+		t.Errorf("a decomposed approach goes to %s, want planned", adv.To)
+	}
+	if adv := NextSegmentState(SegPlanned, config.CapValidate, "reject", 0); adv.To != SegApproachAgreed {
+		t.Errorf("a rejected plan goes to %s; it must return to the agreed approach rather than to the gate, or every repair round stops for a decision nobody has changed", adv.To)
 	}
 }

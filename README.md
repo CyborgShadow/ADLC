@@ -25,15 +25,15 @@ you.
 You describe a deliverable in plain language. From there the tool runs the loop:
 
 ```
-                  you sign it off
-                        │
-theory ─▶ roadmap ─▶ signed off ─▶ researched ─▶ planned ─▶ plan validated
-                                                                  │
-       ┌──────────────────────────────────────────────────────────┘
+        you sign off the intent     you agree the approach
+                    │                        │
+theory ─▶ roadmap ─▶ signed off ─▶ researched ─▶ approach agreed ─▶ planned ─▶ plan validated
+                                                                                    │
+       ┌────────────────────────────────────────────────────────────────────────────┘
        ▼
-   in progress ─▶ tested ─▶ judged ─▶ validated ─▶ janitored ─▶ arbitrated
-                                                                  │
-       ┌──────────────────────────────────────────────────────────┘
+   in progress ─▶ [gate + criteria, run by the tool] ─▶ judged ─▶ janitored ─▶ arbitrated
+                                                                                    │
+       ┌────────────────────────────────────────────────────────────────────────────┘
        ▼
    approved ─▶ applied ─▶ confirmed ─▶ merged ─▶ lessons ─▶ done
        ▲

@@ -72,9 +72,12 @@ is arithmetic on recorded state, not a message somebody has to deliver.
 ```
 you            write a deliverable: a title, a brief, how many items to keep in flight
   ↓
-you            sign it off — the one planning gate no machine passes on its own
+you            sign off the INTENT — is this goal worth pursuing at all?
   ↓
 researcher     turns the intent into an approach: what exists, the options, which one and why
+  ↓
+you            agree the APPROACH — is this route worth what it will cost? A sound approach
+  ↓            can still be far more than the brief asked for
   ↓
 planner        breaks the approach into items with acceptance criteria
   ↓

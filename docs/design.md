@@ -109,12 +109,28 @@ asked for — and nobody finds out until the deliverable is finished and wrong.
 
 A deliverable filled in by hand skips this: there is no agent breakdown to review.
 
-## An idea is signed off before anything is spent on it
+## An idea is signed off before anything is spent on it, and so is the approach
 
 Research, decomposition and plan validation all cost runs, so the pipeline stops before them and
-waits for a person to say the intent is worth pursuing. It is the only planning gate no machine
-passes on its own, and it is deliberately the cheapest possible thing to ask of somebody: one
-click, before any money is spent, rather than a review of work already done.
+waits for a person to say the intent is worth pursuing. It is deliberately the cheapest possible
+thing to ask of somebody: one click, before any money is spent, rather than a review of work
+already done.
+
+**That gate is not enough on its own, because it asks about the goal and the money is committed by
+the route.** A researcher given a brief for a small static page for two children compared three
+options, argued carefully, and recommended building a 3,381-line site checker before the page. It
+wrote in its own notes that this "deliberately overturns the brief's second half". A validator
+reviewed the resulting plan and found it sound — which it was, on its own terms. Nobody was asked
+whether it was *worth* it. The page the checker was for is 189 lines and never shipped.
+
+So the pipeline stops twice. `roadmap` asks whether the goal is worth pursuing; `researched` asks
+whether the approach is worth its cost, with the researcher's own options, touched files and
+out-of-scope list on the screen. Both are one click and both are a person's alone.
+
+A rejected plan returns to `approach_agreed` rather than to the gate, because a bad decomposition
+of an accepted approach is not a change of mind about the approach — and a gate that re-fires on
+every repair round is one somebody clicks through without reading, which is the same as not having
+it.
 
 ## The change is judged against the item, then against the system
 
