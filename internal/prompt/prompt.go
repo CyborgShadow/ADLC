@@ -156,6 +156,29 @@ func (l *Library) reloadPrompt(id string) {
 	if err != nil {
 		return
 	}
+	// A file caught mid-write reads cleanly, so a nil error is not enough. This
+	// package's own writeFile goes to temp file, fsync and rename precisely
+	// because a half-written prompt is the hazard; a `git merge` rewriting the
+	// prompt directory in the tree a serving library re-reads gives the reader
+	// no such guarantee, and re-reading at dispatch would otherwise turn a
+	// once-per-restart exposure into a once-per-dispatch one.
+	//
+	// An empty body is the truncate-then-write window. Taking it dispatches an
+	// agent with the preamble and no job — the failure SetPrompt refuses in
+	// those words — and silently reverts the version the run is recorded under.
+	if strings.TrimSpace(fresh.Body) == "" {
+		return
+	}
+	// Front matter the loaded copy had and the fresh read has lost is an opened
+	// fence that is not closed yet: readPrompt hands the whole fragment back as
+	// the body, and that fragment would be dispatched as the role's instructions.
+	if len(p.Front) > 0 && len(fresh.Front) == 0 {
+		return
+	}
+	// A truncation landing after the front matter still reads as a whole, short
+	// prompt and cannot be told from one, so this narrows the window rather than
+	// closing it. The gate's clause check is what catches a committed tree.
+	//
 	// Keyed by the id the library knows it under, not by the id the file now
 	// declares: a file whose front matter changed id underneath us would
 	// otherwise orphan the entry every worker resolves through.
@@ -179,7 +202,17 @@ func (l *Library) reloadPreamble() {
 	if err != nil {
 		return
 	}
-	l.Preamble = string(config.StripBOM(b))
+	// An empty read is a file caught mid-write, not an emptied preamble:
+	// SetPreamble refuses to write one, so nothing legitimate produces this
+	// state. Taking it would leave Preamble empty, and Assemble then drops the
+	// preamble and the visible seam with it — dispatching a run that carries no
+	// fleet policy and none of the mandatory clauses it must not delete from its
+	// own instructions, with no error on any surface.
+	text := string(config.StripBOM(b))
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	l.Preamble = text
 }
 
 func (l *Library) get(id string) (Prompt, error) {

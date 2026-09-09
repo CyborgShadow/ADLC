@@ -352,3 +352,99 @@ func TestAnUnreadablePromptKeepsTheLoadedCopy(t *testing.T) {
 		t.Errorf("the loaded copy was not kept: %q", asm.Text)
 	}
 }
+
+// A role prompt caught mid-write must not reach a dispatch. Re-reading at
+// dispatch means the library now trusts a writer that gives it none of the
+// guarantees writeFile does: a `git merge` rewriting the prompt directory
+// truncates the file before it fills it, and a truncated read that succeeds is
+// not an error to fall through on. Taking it dispatches an agent with the
+// preamble and no job — what SetPrompt refuses in those words — and reverts the
+// version the run is recorded under.
+func TestAPromptCaughtMidWriteKeepsTheLoadedCopy(t *testing.T) {
+	lib := library(t, map[string]string{"_preamble.md": preamble, "builder.md": builder})
+	path := filepath.Join(lib.Dir, "builder.md")
+
+	// The truncate-then-write window: the file exists and reads as nothing.
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asm, err := lib.Assemble("builder", map[string]string{"work_item_id": "S1-032", "workdir": "w"})
+	if err != nil {
+		t.Fatalf("a truncated file should not stop a dispatch: %v", err)
+	}
+	if !strings.Contains(asm.Text, "# Builder") {
+		t.Errorf("a run was dispatched with the preamble and no job: %q", asm.Text)
+	}
+	if asm.Version != "v2" {
+		t.Errorf("the version the run is recorded under reverted to %q", asm.Version)
+	}
+
+	// A fence opened and not yet closed: readPrompt cannot parse front matter
+	// out of it and hands the whole fragment back as the body.
+	if err := os.WriteFile(path, []byte("---\nid: bui"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := lib.Get("builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(p.Body, "# Builder") {
+		t.Errorf("half a file was served as the role's instructions: %q", p.Body)
+	}
+
+	// The clean case. The guard must not refuse every fresh read, or the
+	// staleness it sits inside comes straight back and no test says so.
+	merged := "---\nid: builder\nversion: v3\n---\n# Builder\n\nMERGED INSTRUCTION for {{work_item_id}}.\n"
+	if err := os.WriteFile(path, []byte(merged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asm, err = lib.Assemble("builder", map[string]string{"work_item_id": "S1-032"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(asm.Text, "MERGED INSTRUCTION for S1-032.") || asm.Version != "v3" {
+		t.Errorf("a whole merged prompt was refused as if it were mid-write: %q %q", asm.Version, asm.Text)
+	}
+}
+
+// The preamble caught mid-write is the same window with a wider blast radius:
+// an empty read taken means Assemble drops the preamble and the seam with it,
+// and the dispatched text then carries none of the mandatory clauses a run must
+// not delete from its own instructions — with nothing on any surface saying so.
+func TestAPreambleCaughtMidWriteKeepsTheLoadedCopy(t *testing.T) {
+	lib := library(t, map[string]string{"_preamble.md": preamble, "builder.md": builder})
+	path := filepath.Join(lib.Dir, "_preamble.md")
+
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asm, err := lib.Assemble("builder", map[string]string{"work_item_id": "S1-032", "workdir": "w"})
+	if err != nil {
+		t.Fatalf("a truncated preamble should not stop a dispatch: %v", err)
+	}
+	if !strings.Contains(asm.Text, "You never write the ledger.") {
+		t.Errorf("a run was dispatched with no fleet policy and no mandatory clause: %q", asm.Text)
+	}
+	if !strings.Contains(asm.Text, "\n---\n") {
+		t.Errorf("the seam between fleet policy and the role went with it: %q", asm.Text)
+	}
+	if lib.PreambleText() == "" || lib.PreambleSHA() != digest(preamble) {
+		t.Error("the loaded preamble was replaced by the truncated read")
+	}
+	if got := lib.CheckClauses([]string{"You never write the ledger."}); len(got) != 0 {
+		t.Errorf("the clause check lost the clause the loaded copy still carries: %+v", got)
+	}
+
+	// The clean case: a whole merged preamble still reaches the next assembly.
+	merged := "---\nid: _preamble\n---\nMERGED POLICY. You never write the ledger.\n"
+	if err := os.WriteFile(path, []byte(merged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asm, err = lib.Assemble("builder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(asm.Text, "MERGED POLICY") {
+		t.Errorf("a whole merged preamble was refused as if it were mid-write: %q", asm.Text)
+	}
+}

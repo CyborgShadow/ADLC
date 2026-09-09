@@ -47,6 +47,18 @@ stale prompt for no prompt at all. A file that appears in the directory after `L
 up: nothing dispatches through it until the config that names it is reloaded, which is a restart
 either way.
 
+**Taking a fresh read that succeeded but is half a file.** Re-reading at dispatch means the library
+trusts a writer that gives it none of the guarantees `writeFile` does — `git merge` rewrites
+`agents/` in the tree a serving library is reading, and truncates a file before it fills it. A read
+that returns nothing is not an error to fall through on: an empty role body dispatches an agent
+with the preamble and no job, which is what `SetPrompt` refuses in those words, and an empty
+preamble makes `Assemble` drop fleet policy and the seam with it, so the run carries none of the
+mandatory clauses and nothing reports it. So a fresh read is only taken when it is a whole prompt:
+a blank body, or front matter the loaded copy had and the fresh read has lost — an opened fence not
+yet closed — keeps the copy already loaded. A truncation landing after the front matter still reads
+as a short prompt and cannot be told from one; that window is narrowed, not closed, and the gate's
+clause check is what catches a committed tree.
+
 **Reading the map without the lock.** One process holds one library and both the scheduler and the
 dashboard are given it — `adlc schedule run --serve` runs them side by side. A Go map read during a
 write is not a stale read, it is a crash.
@@ -59,5 +71,8 @@ stored, assembly being stable, a missing clause being reported, and a BOM not ch
 identity. It also pins the refresh from three sides: a role prompt and the preamble edited on disk
 by something other than `SetPrompt` reaching the next assembly, an unchanged file still assembling
 byte for byte the same, and a vanished file keeping the copy already loaded rather than stopping
-the dispatch. `survey_test.go` pins that a project with no prompts still gets an answer and that
+the dispatch. Two more pin the mid-write guard from both sides: a truncated or half-fenced role
+prompt and a truncated preamble each keeping the loaded copy, clauses and seam intact, and a whole
+merged file still reaching the next assembly so the guard cannot pass by refusing everything.
+`survey_test.go` pins that a project with no prompts still gets an answer and that
 the survey separates what is there from what is named.
