@@ -171,9 +171,45 @@ border-radius:4px;padding:10px 12px;font-size:12.5px;line-height:1.55;margin-top
 .said ul{margin:6px 0 0;padding-left:20px;font-size:13px}
 `
 
-// depsCSS lists the dependencies an item is actually waiting on.
+// depsCSS renders a dependency chain as a small work-breakdown tree.
+//
+// It was a run-on line of item ids. Four levels of chain read as prose is not
+// something anybody can hold: what a person wants is the shape — what is
+// waiting on what, and which one at the bottom actually has to happen first.
+// Closed by default, because most rows are not blocked and a page of open trees
+// is its own kind of noise.
 const depsCSS = `
-.deps{display:flex;flex-direction:column;gap:3px;margin-top:5px}
-.deps a{display:inline-flex;gap:6px;align-items:baseline}
-.deps a:hover{text-decoration:none}
+.deps{margin-top:5px}
+.deps>summary{cursor:pointer;color:var(--dim);font-size:12.5px;list-style:none;
+display:inline-flex;gap:6px;align-items:center}
+.deps>summary::-webkit-details-marker{display:none}
+.deps>summary::before{content:"\25B8";color:var(--accent);font-size:10px;
+transition:transform .12s;display:inline-block}
+.deps[open]>summary::before{transform:rotate(90deg)}
+.deps>summary:hover{color:var(--ink)}
+.deptree{margin:7px 0 3px;border-left:1px solid var(--line);padding:2px 0 2px 0}
+.dep{display:flex;gap:8px;align-items:baseline;padding:3px 0 3px 10px;position:relative;
+font-size:12.5px;line-height:1.4}
+.dep::before{content:"";position:absolute;left:0;top:11px;width:8px;height:1px;background:var(--line)}
+.dep .id{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.dep .ttl{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46ch}
+.dep.first{background:linear-gradient(90deg,rgba(89,169,196,.10),transparent 60%);border-radius:3px}
+.dep.first .ttl{color:var(--ink)}
+.dep .startshere{color:var(--live);font-size:11px;white-space:nowrap}
+`
+
+// depTreeHTML is the pop-out itself, used by every page that shows a blocked
+// item so there is one rendering of a dependency rather than three.
+const depTreeHTML = `
+{{define "deps"}}{{if .Waiting}}<details class="deps">
+  <summary>{{.Says}}</summary>
+  <div class="deptree">
+    {{range .Waiting}}<div class="dep{{if .Root}} first{{end}}" style="margin-left:{{.Indent}}px">
+      <span class="pill {{.Class}}">{{.State}}</span>
+      <a class="id" href="/item/{{.ID}}">{{.ID}}</a>
+      <span class="ttl">{{.Title}}</span>
+      {{if .Root}}<span class="startshere">starts here</span>{{end}}
+    </div>{{end}}
+  </div>
+</details>{{end}}{{end}}
 `

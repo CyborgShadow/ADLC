@@ -6,6 +6,8 @@ import (
 	"html/template"
 	"strings"
 	"time"
+
+	"github.com/CyborgShadow/ADLC/internal/authority"
 )
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
@@ -58,6 +60,13 @@ var funcs = template.FuncMap{
 		}
 		return "mute"
 	},
+	// stageOf renders the phase a person reads from the machine state. The
+	// column that should have shown it was rendering the blast radius under a
+	// heading that said "stage", so every row read "none" — which is a real
+	// value for a radius and no value at all for a stage.
+	"stageOf": func(s string) string {
+		return authority.StageOf(authority.State(s)).Label
+	},
 	"plural": func(n int, one, many string) string {
 		if n == 1 {
 			return fmt.Sprintf("%d %s", n, one)
@@ -83,7 +92,7 @@ var tmpl = template.Must(template.New("page").Funcs(funcs).Parse(strings.Join([]
 	homePageHTML, advancedPageHTML, endHTML,
 	// After endHTML: this one is its own template, not part of the page body,
 	// and a define nested inside another define is a parse error.
-	consoleDockHTML, fieldsHTML, liveHTML, actionHTML,
+	consoleDockHTML, fieldsHTML, liveHTML, actionHTML, depTreeHTML,
 }, "")))
 
 const pageHTML = `
@@ -332,9 +341,7 @@ const progressHTML = `
     <td class="mono small">{{if .SegmentID}}<a href="/segment/{{.SegmentID}}">{{.SegmentID}}</a>{{end}}</td>
     <td class="dim small">{{.Area}}</td>
     <td><span class="pill {{.Class}}">{{.State}}</span></td>
-    <td class="dim">{{.Says}}
-      {{if .Waiting}}<div class="deps">{{range .Waiting}}<a href="/item/{{.ID}}"><span class="pill {{.Class}}">{{.State}}</span> {{.ID}}</a>
-        <span class="dim small">{{.Says}}</span>{{end}}</div>{{end}}</td>
+    <td class="dim">{{template "deps" .}}</td>
   </tr>{{else}}<tr><td colspan="5" class="dim">Nothing is in this stage.</td></tr>{{end}}
 </table></div>
 {{end}}
@@ -481,12 +488,13 @@ const segmentHTML = `
 
 <h2>Work items</h2>
 <div class="wrap"><table>
-  <tr><th>item</th><th>state</th><th>stage</th><th>area</th><th>title</th></tr>
+  <tr><th>item</th><th>state</th><th>stage</th><th>blast radius</th><th>area</th><th>title</th></tr>
   {{range .Items}}<tr>
     <td class="mono"><a href="/item/{{.ID}}">{{.ID}}</a></td>
     <td><span class="pill {{stateClass .State}}">{{.State}}</span></td>
+    <td class="dim small">{{stageOf .State}}</td>
     <td class="dim small">{{.Radius}}</td><td class="dim">{{.Area}}</td><td>{{.Title}}</td>
-  </tr>{{else}}<tr><td colspan="5" class="dim">Not decomposed yet.</td></tr>{{end}}
+  </tr>{{else}}<tr><td colspan="6" class="dim">Not decomposed yet.</td></tr>{{end}}
 </table></div>
 
 <h2>Roadmap history</h2>

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -86,12 +87,20 @@ func (s *Server) roadmap(*http.Request) (string, any, error) {
 		bySeg[it.SegmentID] = append(bySeg[it.SegmentID], it)
 	}
 
+	// Every item, so a dependency in another deliverable is still named rather
+	// than reported as "something".
+	byItem := map[string]ledger.Item{}
+	byID := map[string]authority.State{}
+	for _, it := range all {
+		byID[it.ID] = authority.State(it.State)
+		byItem[it.ID] = it
+	}
 	var rows []roadmapRow
 	for _, sg := range segs {
 		items := bySeg[sg.ID]
 		r := roadmapRow{Segment: sg, Progress: authority.Progress(items), Stage: sg.State}
 		r.explain()
-		r.fill(items)
+		r.fill(items, byItem, byID)
 		rows = append(rows, r)
 	}
 	return "Roadmap", struct {
@@ -102,7 +111,7 @@ func (s *Server) roadmap(*http.Request) (string, any, error) {
 
 // fill sorts a deliverable's items into the three groups and pulls out the
 // stuck ones.
-func (r *roadmapRow) fill(items []ledger.Item) {
+func (r *roadmapRow) fill(items []ledger.Item, byItem map[string]ledger.Item, state map[string]authority.State) {
 	todo := bucket{Key: "todo", Label: "Still to do",
 		Why: "written down, nobody has started"}
 	doing := bucket{Key: "doing", Label: "Being worked on",
@@ -120,6 +129,11 @@ func (r *roadmapRow) fill(items []ledger.Item) {
 			Stage: authority.StageOf(st).Label,
 			Says:  humanState(st),
 			Class: itemClass(st),
+		}
+		if st == authority.StateQueued {
+			// It knows which items and what state each is in. Saying "something"
+			// sends somebody hunting through the list for what the page has.
+			line.Says, line.Waiting = blockedOn(it, byItem, state)
 		}
 		switch {
 		case st == authority.StateBlocked:
@@ -271,49 +285,102 @@ func (r roadmapRow) Undescribed() bool {
 	return strings.TrimSpace(r.Brief) == "" && strings.TrimSpace(r.Rationale) == ""
 }
 
-// blockedOn names the dependencies an item is actually waiting for, and where
-// each of them stands.
+// blockedOn names what an item is waiting for, all the way down.
 //
 // "waiting on something it depends on" was all a row said, on a page whose
-// whole job is to explain where work is. The system knows exactly which items
-// they are and exactly what state each is in — it is one map lookup — and it
-// threw both away to print a sentence that sends somebody hunting through
-// twelve rows to work out what it already knew.
+// whole job is to explain where work is. Naming the immediate dependency was
+// better and still not enough: S1-012 waits on S1-009, which waits on S1-007,
+// which waits on S1-006, which waits on S1-002 — four levels, and only the
+// bottom one is actually holding anything up. Showing the first link tells you
+// where to click next, four times.
 //
-// A dependency that is done is not named: what a person needs is the reason it
-// cannot start, not a roll call. If every dependency IS done the item is not
-// waiting on one at all, and that is said too, because an item stuck in queued
-// with nothing outstanding is a bug rather than a queue.
-func blockedOn(it ledger.Item, state map[string]authority.State) (string, []depLine) {
+// So the whole chain is returned, depth-tagged, and the summary names the item
+// at the bottom: that is the one whose completion releases the rest.
+func blockedOn(it ledger.Item, items map[string]ledger.Item, state map[string]authority.State) (string, []depLine) {
 	if len(it.DependsOn) == 0 {
 		return "queued with nothing to wait for — this should have become ready, and its not doing so is a defect worth reporting", nil
 	}
-	var open []depLine
+	seen := map[string]bool{it.ID: true}
+	chain := walkDeps(it, items, state, seen, 0)
+	if len(chain) == 0 {
+		return "every dependency is done — this should have become ready, and its not doing so is a defect worth reporting", nil
+	}
+	// The deepest thing that is not waiting on anything else is what actually
+	// has to happen first.
+	root := chain[0]
+	for _, d := range chain {
+		if d.Root {
+			root = d
+			break
+		}
+	}
+	levels := 1
+	for _, d := range chain {
+		if d.Depth+1 > levels {
+			levels = d.Depth + 1
+		}
+	}
+	says := fmt.Sprintf("waiting on %s", root.ID)
+	if levels > 1 {
+		says = fmt.Sprintf("waiting on %s, %d levels down", root.ID, levels)
+	}
+	return says, chain
+}
+
+// depWalkMax stops a chain that has become pathological rather than rendering
+// it. A tree this deep is a planning defect, and saying so beats printing it.
+const depWalkMax = 12
+
+// walkDeps returns the unfinished dependencies below an item, depth first.
+func walkDeps(it ledger.Item, items map[string]ledger.Item, state map[string]authority.State, seen map[string]bool, depth int) []depLine {
+	if depth >= depWalkMax {
+		return []depLine{{ID: "…", State: "too deep", Class: "bad", Depth: depth,
+			Says: "the dependency chain is deeper than anything a person can hold, which is a planning defect rather than a queue"}}
+	}
+	var out []depLine
 	for _, dep := range it.DependsOn {
 		st, known := state[dep]
 		switch {
 		case !known:
-			open = append(open, depLine{ID: dep, State: "not on the record",
-				Class: "bad", Says: "this dependency does not exist, so the item can never start"})
-		case st != authority.StateDone:
-			open = append(open, depLine{ID: dep, State: string(st),
-				Class: itemClass(st), Says: humanState(st)})
+			out = append(out, depLine{ID: dep, State: "not on the record", Class: "bad",
+				Depth: depth, Root: true,
+				Says: "this dependency does not exist, so the item can never start"})
+			continue
+		case st == authority.StateDone:
+			continue
+		case seen[dep]:
+			// A cycle can never resolve itself. Naming it beats recursing into
+			// it, and beats the item simply never moving with no reason given.
+			out = append(out, depLine{ID: dep, State: string(st), Class: "bad",
+				Depth: depth, Root: true,
+				Says: "already above this in the chain — these items depend on each other and neither can ever start"})
+			continue
 		}
+		seen[dep] = true
+		line := depLine{ID: dep, State: string(st), Class: itemClass(st),
+			Says: humanState(st), Title: items[dep].Title, Depth: depth}
+		below := walkDeps(items[dep], items, state, seen, depth+1)
+		line.Root = len(below) == 0
+		out = append(out, line)
+		out = append(out, below...)
 	}
-	if len(open) == 0 {
-		return "every dependency is done — this should have become ready, and its not doing so is a defect worth reporting", nil
-	}
-	names := make([]string, 0, len(open))
-	for _, d := range open {
-		names = append(names, d.ID)
-	}
-	return "waiting on " + strings.Join(names, ", "), open
+	return out
 }
 
-// depLine is one outstanding dependency, as a row renders it.
+// depLine is one item in a dependency chain, as a row renders it.
 type depLine struct {
 	ID    string
 	State string
 	Class string
 	Says  string
+	// Title is what the item is, so the tree reads without a second lookup.
+	Title string
+	// Depth indents it under whatever depends on it.
+	Depth int
+	// Root marks something waiting on nothing else: the work that actually has
+	// to happen before any of the rest can.
+	Root bool
 }
+
+// Indent is the width the template uses, so the arithmetic is not in the HTML.
+func (d depLine) Indent() int { return d.Depth * 18 }

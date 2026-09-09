@@ -557,9 +557,11 @@ func (s *Server) progress(r *http.Request) (string, any, error) {
 	for _, it := range all {
 		v.Totals[authority.StageOf(authority.State(it.State)).Key]++
 	}
+	byItem := map[string]ledger.Item{}
 	byID := map[string]authority.State{}
 	for _, it := range all {
 		byID[it.ID] = authority.State(it.State)
+		byItem[it.ID] = it
 	}
 	if v.Stage != "" {
 		for _, st := range authority.Stages() {
@@ -576,7 +578,7 @@ func (s *Server) progress(r *http.Request) (string, any, error) {
 				Says: humanState(state), Class: itemClass(state)}
 			if state == authority.StateQueued {
 				// Name them. The page knows which and knows their states.
-				line.Says, line.Waiting = blockedOn(it, byID)
+				line.Says, line.Waiting = blockedOn(it, byItem, byID)
 			}
 			v.Drill = append(v.Drill, line)
 		}

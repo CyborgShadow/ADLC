@@ -67,7 +67,8 @@ nothing under it is dispatched until it passes.</div>
         {{range .Items}}<li>
           <a href="/item/{{.ID}}">{{.Title}}</a>
           <span class="id">{{.ID}}{{if .Area}} · {{.Area}}{{end}}</span>
-          <span class="st">{{.Says}}{{if .Note}} — {{.Note}}{{end}}</span>
+          <span class="st">{{if not .Waiting}}{{.Says}}{{end}}{{if .Note}} — {{.Note}}{{end}}</span>
+          {{template "deps" .}}
         </li>{{end}}
       </ul>{{else}}<div class="none">nothing here</div>{{end}}
     </div>{{end}}
