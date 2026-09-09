@@ -43,9 +43,16 @@ func (c *criteriaList) UnmarshalJSON(b []byte) error {
 	if b[0] != '{' {
 		return fmt.Errorf("outputs.criteria is neither a list nor an object keyed by criterion id")
 	}
-	var m map[string]Criterion
+	// Decoded a value at a time so that a value which is not a criterion can be
+	// refused by naming the shape it should have had. Returning json.Unmarshal's
+	// own error instead named a Go type the worker cannot see — "cannot unmarshal
+	// string into Go struct field .AC-1 of type envelope.Criterion" is the text
+	// S1-029 and S1-038 were refused with — and it says neither which entry was
+	// wrong nor which fields it wanted, so the next run guesses at the shape and
+	// spends another attempt discovering the same thing.
+	var m map[string]json.RawMessage
 	if err := json.Unmarshal(b, &m); err != nil {
-		return err
+		return fmt.Errorf("outputs.criteria is neither a list nor an object keyed by criterion id")
 	}
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -53,7 +60,13 @@ func (c *criteriaList) UnmarshalJSON(b []byte) error {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		one := m[k]
+		var one Criterion
+		if err := json.Unmarshal(m[k], &one); err != nil {
+			return fmt.Errorf("outputs.criteria[%q] is not a criterion: each value needs id, "+
+				"status (pass, fail or untested), command_index and evidence — a criterion "+
+				"written as a bare string cannot cite the command that proved it, and a verdict "+
+				"nothing was run for is the one this system refuses", k)
+		}
 		if strings.TrimSpace(one.ID) == "" {
 			one.ID = k
 		}

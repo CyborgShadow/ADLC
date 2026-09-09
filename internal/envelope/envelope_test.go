@@ -302,3 +302,70 @@ func TestAFindingSurvivesBeingWrittenOutAndReadBack(t *testing.T) {
 		t.Errorf("the finding did not survive the round trip: %+v", back.Findings)
 	}
 }
+
+// Prose in place of a criterion is refused by shape, not by Go type.
+//
+// The decoder was decoding straight into map[string]Criterion and returning its
+// own error, so a worker that wrote a sentence where an object goes was told
+// "cannot unmarshal string into Go struct field .AC-1 of type
+// envelope.Criterion" — a Go type it cannot see, naming neither the entry that
+// was wrong nor the fields it wanted. Two runs were refused with exactly that
+// text and the next one had to guess.
+func TestACriterionWrittenAsProseIsRefusedByShapeNotByGoType(t *testing.T) {
+	withOutputs := func(body string) string {
+		return strings.Replace(minimal, `"outputs": {}`, `"outputs": `+body, 1)
+	}
+
+	// Firing case: the tolerated object shape, with prose where a criterion goes.
+	_, err := Parse([]byte(withOutputs(`{"criteria": {"AC-1": "I ran the suite"}}`)))
+	if err == nil {
+		t.Fatal("prose is not a criterion — it cites no command, so it must be refused")
+	}
+	if _, ok := err.(ErrMalformed); !ok {
+		t.Errorf("should be ErrMalformed so it is refusable rather than fatal, got %T", err)
+	}
+	msg := err.Error()
+	for _, want := range []string{"outputs.criteria", "AC-1", "id", "status", "command_index"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal must name %q so the next run can fix the shape, got %q", want, msg)
+		}
+	}
+	for _, leak := range []string{"cannot unmarshal", "envelope.Criterion"} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("the refusal leaks the decoder's own %q, which names a Go type the worker cannot see: %q", leak, msg)
+		}
+	}
+
+	// Clean case: the message must not become a new refusal. The declared array
+	// shape, the tolerated object shape, the key standing in as the id when the
+	// value carries none, and all three status words still parse.
+	arr, err := Parse([]byte(withOutputs(`{"criteria": [
+		{"id":"AC-1","status":"pass","command_index":0,"evidence":"e"},
+		{"id":"AC-2","status":"fail","command_index":0,"evidence":"e"},
+		{"id":"AC-3","status":"untested","command_index":0,"evidence":"e"}]}`)))
+	if err != nil {
+		t.Fatalf("the declared array shape must still parse: %v", err)
+	}
+	obj, err := Parse([]byte(withOutputs(`{"criteria": {
+		"AC-1": {"status":"pass","command_index":0,"evidence":"e"},
+		"AC-2": {"id":"AC-2","status":"fail","command_index":0,"evidence":"e"},
+		"AC-3": {"status":"untested","command_index":0,"evidence":"e"}}}`)))
+	if err != nil {
+		t.Fatalf("the tolerated object-keyed-by-id shape must still parse: %v", err)
+	}
+	ids := func(e *Envelope) []string {
+		var out []string
+		for _, c := range e.Criteria() {
+			out = append(out, c.ID+"="+c.Status)
+		}
+		return out
+	}
+	want := []string{"AC-1=pass", "AC-2=fail", "AC-3=untested"}
+	if got := ids(arr); !slices.Equal(got, want) {
+		t.Errorf("array shape read as %v, want %v", got, want)
+	}
+	// AC-1 and AC-3 carry no id of their own: the key is what supplies it.
+	if got := ids(obj); !slices.Equal(got, want) {
+		t.Errorf("object shape read as %v, want %v — the key is the id when the value carries none", got, want)
+	}
+}
