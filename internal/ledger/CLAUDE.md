@@ -31,6 +31,15 @@ already exists, so the column never reaches a ledger created by an earlier build
 additive `ALTER TABLE` to `migrations`. Migrations here never drop, rename or retype: the chain is
 the record and a migration that can lose data eventually does.
 
+**Adding a migration without thinking about the read-only handle.** `Open` runs the whole list on
+every open, and every dispatched agent is handed the real ledger through `ReadOnlyDSN`. An already
+applied `ALTER TABLE` fails with "duplicate column" even read-only, so this stays invisible until a
+migration genuinely has to run: then SQLite says "attempt to write a readonly database (8)" and the
+open fails outright — no read at all, out of a command the agent was told it may run. That error is
+refused in words instead. Skipping the migration and carrying on is worse, not better: `eventColumns`
+names every column, so the same unclassifiable failure just moves to "no such column" at the first
+read.
+
 **Making the verifier accuse when it is merely out of date.** Broken hashes are `TAMPERED`. An
 event kind, item state or schema version this build does not recognise is `UNKNOWN`, and the
 recovery is to upgrade the binary. A tamper detector that cries tamper at its own obsolescence gets
@@ -72,3 +81,8 @@ expectation with it and nothing goes red — including the one change this packa
 constant in `TestALedgerFromBeforeRevisionsReadsUnknownNotTampered` is the only thing that fails
 when the preimage moves. If you have to change it, you are also changing every chain any earlier
 binary ever wrote from readable to `TAMPERED`.
+
+`build_test.go` also pins the read-only handle against a file older than the binary: the refusal is classifiable
+rather than an errno, it consults the file rather than its schema stamp — a stamp is not evidence
+that the columns it implies are there — and a current ledger still opens read-only, which is what
+stops that guard becoming a refusal of everything.

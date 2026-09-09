@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -361,6 +362,14 @@ type Event struct {
 // Revision is which build appended this event, or RevisionUnknown.
 func (e Event) Revision() string { return RevisionOf(e.BuildRev) }
 
+// ErrReadOnlyMigration is what Open refuses with when the file is older than
+// this build and the handle it was given cannot bring it forward. It is a
+// sentinel rather than only a sentence, so that a caller can tell "this record
+// needs a read-write open once" apart from a damaged chain without matching on
+// prose. Which of those two it is, is exactly the distinction an agent holding
+// a read-only handle has no other way to draw.
+var ErrReadOnlyMigration = errors.New("ledger is older than this build and this handle cannot migrate it")
+
 // Open opens or creates a ledger.
 //
 // A path prefixed "file:" is used as a DSN as given, which is how a caller asks
@@ -407,9 +416,33 @@ func Open(path string) (*Ledger, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	// A read-only handle cannot run a migration, and must not die inside one.
+	//
+	// Every dispatched agent is given the real ledger through ReadOnlyDSN, so
+	// this loop runs on that handle constantly. A migration that is already
+	// applied fails with "duplicate column" even read-only, which is why this
+	// went unnoticed: only a file genuinely older than the binary reaches the
+	// write. Then SQLite answers "attempt to write a readonly database (8)" and
+	// the open fails outright — not a degraded read, no read at all, out of a
+	// command the agent was told it may run and with an error nobody can
+	// classify. Refuse in words instead, naming the statement that could not
+	// run and the one thing that fixes it.
+	//
+	// Refuse rather than skip and carry on: eventColumns names build_rev on
+	// both read paths, so a skipped migration moves the same unclassifiable
+	// failure to "no such column" at the first read. And refuse on any
+	// migration the handle could not run rather than on the stored schema
+	// version being behind — this fleet's own ledger was stamped v2 by a stray
+	// write while no merged code defined a 2, so a stamp is not evidence that
+	// the columns it implies are there. What the file needs is what was just
+	// attempted, not what it claims about itself.
 	for _, m := range migrations {
 		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()
+			if strings.Contains(err.Error(), "readonly database") {
+				return nil, fmt.Errorf("%w: ledger %s needs a migration this handle may not run (%s). Open it once read-write with this build, then retry. The record is not damaged and this is not an accusation: the file is older than the binary holding it, which is v%d",
+					ErrReadOnlyMigration, path, m, SchemaVersion)
+			}
 			return nil, fmt.Errorf("migrate (%s): %w", m, err)
 		}
 	}

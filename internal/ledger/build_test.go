@@ -2,8 +2,10 @@ package ledger
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"testing"
 	"time"
 )
@@ -279,5 +281,168 @@ func TestANewerLedgerIsNeverRestampedBackwards(t *testing.T) {
 	}
 	if rep.Verdict != VerdictUnknown {
 		t.Fatalf("a newer schema should still read UNKNOWN after a reopen, got %s", rep.Verdict)
+	}
+}
+
+// TestAReadOnlyHandleOnAnOlderLedgerRefusesReadablyRatherThanDying is the
+// firing case for the refusal added beside the build_rev migration.
+//
+// Every dispatched agent is handed the real ledger through ReadOnlyDSN, and
+// Open runs the migration list on every open. A migration already applied fails
+// with "duplicate column" even read-only, so only a file genuinely older than
+// the binary reaches the write — and there SQLite answered "attempt to write a
+// readonly database (8)" and the open failed outright. No read at all, out of a
+// command an agent is told it may run, with an error nobody can classify. That
+// is the one thing this package must never do about a healthy record: a file
+// older than the binary is UNKNOWN and a sentence, never an errno.
+//
+// The v1 shape is produced by taking the column back off a real ledger rather
+// than hand-building the file, because everything else on disk — the projection
+// tables, the append-only triggers — has to be present for the failure to land
+// where it really lands, in the migration loop rather than in schemaSQL.
+func TestAReadOnlyHandleOnAnOlderLedgerRefusesReadablyRatherThanDying(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "older.db")
+	l, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Append("pm", KindNoteRecorded, "", NoteRecorded{Text: "written by the older build"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.db.Exec(`ALTER TABLE adlc_event DROP COLUMN build_rev`); err != nil {
+		t.Fatalf("could not make the pre-v2 shape: %v", err)
+	}
+	if _, err := l.db.Exec(`UPDATE adlc_meta SET value='1' WHERE key='schema_version'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The firing case: this build, that file, the handle an agent is given.
+	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro&_pragma=busy_timeout(5000)"
+	ro, err := Open(dsn)
+	if err == nil {
+		ro.Close()
+		t.Fatal("a read-only handle cannot have migrated an older ledger; either it wrote, or it opened a file it cannot read")
+	}
+	if !errors.Is(err, ErrReadOnlyMigration) {
+		t.Fatalf("the refusal must be classifiable, got %v", err)
+	}
+	msg := err.Error()
+	// A refusal an agent cannot act on is one it works around. It has to say
+	// what is wrong (the migration it still needs), what to do (open it read-write once),
+	// and what is NOT wrong — an unexplained failure over the audit record
+	// reads as an accusation, and this one is not.
+	for _, want := range []string{"build_rev", "read-write", "not damaged", "not an accusation"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal should say %q so a reader can act on it: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "readonly database") || strings.Contains(msg, "(8)") {
+		t.Errorf("the SQLite errno is not an answer anybody can classify: %s", msg)
+	}
+
+	// Clean case 1: the same file, opened the way the refusal says to. It
+	// migrates, reads, and the pre-v2 row is UNKNOWN rather than TAMPERED.
+	rw, err := Open(path)
+	if err != nil {
+		t.Fatalf("the recovery the refusal names must work: %v", err)
+	}
+	defer rw.Close()
+	evs, err := rw.Events(1, 0)
+	if err != nil || len(evs) != 1 {
+		t.Fatalf("read-write open should read the older chain: %d event(s), %v", len(evs), err)
+	}
+	if evs[0].Revision() != RevisionUnknown {
+		t.Errorf("a row from before the column must read %q, got %q", RevisionUnknown, evs[0].Revision())
+	}
+	rep, err := rw.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Verdict != VerdictIntact {
+		t.Fatalf("an older ledger brought forward is intact, got %s: %v", rep.Verdict, rep.Findings)
+	}
+
+	// Clean case 2, and the one that stops this guard becoming a refusal of
+	// everything: that same ledger, now current, still opens read-only and
+	// still reads. Migrations that write nothing when there is nothing to do
+	// must not be mistaken for a file that is behind.
+	rw.Close()
+	current, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("a current ledger must still open read-only — that handle is how every agent reads the record: %v", err)
+	}
+	defer current.Close()
+	if evs, rerr := current.Events(1, 0); rerr != nil || len(evs) != 1 {
+		t.Fatalf("the read-only handle cannot read a current ledger: %d event(s), %v", len(evs), rerr)
+	}
+}
+
+// TestTheRefusalConsultsTheFileRatherThanItsSchemaStamp pins the reason the
+// refusal above does not gate on StoredSchemaVersion.
+//
+// A stamp is not evidence that the columns it implies are there. This fleet's
+// own ledger is proof: it was stamped v2 by a stray write from an agent's test
+// run while no merged code defined a 2. A refusal that only fired when the
+// stamp was behind would wave that file through and the read would die one
+// layer down, on `no such column: build_rev` — the same error nobody can
+// classify, moved somewhere harder to find. What a file needs is the migration
+// that was just attempted, not what it says about itself.
+func TestTheRefusalConsultsTheFileRatherThanItsSchemaStamp(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stamped-but-short.db")
+	l, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Append("pm", KindNoteRecorded, "", NoteRecorded{Text: "row"}); err != nil {
+		t.Fatal(err)
+	}
+	// The column gone, the stamp left claiming this build's own layout.
+	if _, err := l.db.Exec(`ALTER TABLE adlc_event DROP COLUMN build_rev`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := l.StoredSchemaVersion(); err != nil || got != SchemaVersion {
+		t.Fatalf("the fixture must claim to be current, got v%d (%v)", got, err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro&_pragma=busy_timeout(5000)"
+	ro, err := Open(dsn)
+	if err == nil {
+		defer ro.Close()
+		_, rerr := ro.Events(1, 0)
+		t.Fatalf("a file missing a column it claims to have must be refused at the open, not at the first read (%v)", rerr)
+	}
+	if !errors.Is(err, ErrReadOnlyMigration) {
+		t.Fatalf("the refusal must be classifiable whatever the stamp says, got %v", err)
+	}
+}
+
+// TestOnlyAMigrationTheHandleMayNotRunIsReportedAsOne is the clean case for the
+// discrimination the refusal above rests on.
+//
+// Saying "open it read-write with this build" about a migration that failed for
+// some other reason — a locked file, a statement this build got wrong — sends
+// the reader to a recovery that cannot work and hides the real fault. So only
+// the one error a read-only handle actually produces earns that sentence, and
+// everything else still surfaces as itself.
+func TestOnlyAMigrationTheHandleMayNotRunIsReportedAsOne(t *testing.T) {
+	restore := migrations
+	defer func() { migrations = restore }()
+	migrations = append(append([]string{}, restore...), `ALTER TABLE adlc_event ADD COLUMN`)
+
+	_, err := Open(filepath.Join(t.TempDir(), "broken.db"))
+	if err == nil {
+		t.Fatal("a malformed migration must not open silently")
+	}
+	if errors.Is(err, ErrReadOnlyMigration) {
+		t.Errorf("a migration that failed for its own reasons must not be reported as one a handle may not run: %v", err)
+	}
+	if !strings.Contains(err.Error(), "migrate (") {
+		t.Errorf("the failing statement should still surface as itself: %v", err)
 	}
 }
