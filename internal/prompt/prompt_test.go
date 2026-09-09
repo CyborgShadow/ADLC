@@ -195,3 +195,71 @@ func TestABomDoesNotChangeAPromptsIdentity(t *testing.T) {
 		t.Fatal("a byte-order mark must not change a prompt's digest, or the pin breaks on a Windows edit")
 	}
 }
+
+// thisProjectsLibrary loads the real prompt library this repository dispatches
+// from, rather than a fixture. The paths in adlc.json are relative to the repo
+// root because that is where the CLI runs, so a test two packages down has to
+// rejoin them itself.
+func thisProjectsLibrary(t *testing.T) *Library {
+	t.Helper()
+	cfg, err := config.Load("../../adlc.json")
+	if err != nil {
+		t.Skipf("this project's config is not readable from here: %v", err)
+	}
+	pol := cfg.Prompts
+	if pol.Dir == "" {
+		t.Fatal("this project declares no prompt directory, so there is no library to check")
+	}
+	pol.Dir = filepath.Join("../..", pol.Dir)
+	if pol.PreambleFile != "" {
+		pol.PreambleFile = filepath.Join("../..", pol.PreambleFile)
+	}
+	lib, err := Load(pol)
+	if err != nil {
+		t.Fatalf("this project's own prompt library does not load: %v", err)
+	}
+	return lib
+}
+
+// The planner is told that `go run` cannot express an exit code.
+//
+// `go run` returns 1 for any non-zero exit of the program it ran and reports
+// the real code only as text on stderr, so a planner that writes
+// `exit_in: [3]` against a `go run` command produces a criterion that passes on
+// a code nobody checked. The warning is only useful beside the rule vocabulary
+// that makes the trap reachable, so both halves are pinned here: remove either
+// and the prompt stops carrying a complete instruction.
+func TestThePlannerIsWarnedThatGoRunCannotExpressAnExitCode(t *testing.T) {
+	lib := thisProjectsLibrary(t)
+	a, err := lib.Assemble("planner", nil)
+	if err != nil {
+		t.Fatalf("assemble planner: %v", err)
+	}
+	if !strings.Contains(a.Text, "exit_in") {
+		t.Fatal("the planner prompt no longer names the exit_in rule, so the go run warning has nothing to attach to")
+	}
+	if !strings.Contains(a.Text, "go build -o") {
+		t.Fatal("the planner prompt does not say to build a binary, so a criterion pinning an exit code other than 0 or 1 will pass on a code nobody checked")
+	}
+}
+
+// And the warning lives in the planner's own file, not the shared preamble.
+//
+// The clean case for the guard above: `strings.Contains` over an assembled
+// prompt would be satisfied just as well by a clause copied into the preamble,
+// which every role then carries. That is the duplication the seam exists to
+// prevent, and it would make the guard above pass for a reason that has nothing
+// to do with the planner.
+func TestTheGoRunWarningIsNotFleetWidePolicy(t *testing.T) {
+	lib := thisProjectsLibrary(t)
+	if strings.Contains(lib.PreambleText(), "go build -o") {
+		t.Fatal("the go run warning is in the shared preamble, so every role restates a rule only the planner acts on")
+	}
+	other, err := lib.Assemble("tester", nil)
+	if err != nil {
+		t.Fatalf("assemble tester: %v", err)
+	}
+	if strings.Contains(other.Text, "go build -o") {
+		t.Fatal("a role that writes no acceptance criteria carries the planner's exit-code warning, so the guard above proves nothing about the planner")
+	}
+}
