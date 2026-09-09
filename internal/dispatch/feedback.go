@@ -276,8 +276,26 @@ func listOf(v []string) string {
 // round.
 const maxPlanRejections = 3
 
+// loopQuestionID names the question for one threshold of rejections.
+//
+// The threshold is in the id on purpose. An answer has to unblock the thing it
+// was asked about — the first version asked once, was answered, and went on
+// refusing to dispatch because the rejection count only ever climbs. A person
+// answered the question and the fleet stayed stopped, which is the definition
+// of stuck and is worse than never asking.
+//
+// Encoding the threshold means answering buys another round of attempts, and if
+// those also fail a NEW question is asked at the next threshold rather than the
+// old answer silently covering it.
+func loopQuestionID(segmentID string, threshold int) string {
+	return fmt.Sprintf("Q-%s-plan-loop-%d", segmentID, threshold)
+}
+
 // planIsLooping reports how many times this deliverable's breakdown has been
-// rejected, and whether that is now too many.
+// rejected, and whether the fleet should stop and ask about it.
+//
+// It stops only while the question for the current threshold is unanswered. A
+// stop nobody can clear is not a safeguard, it is a stall with a good excuse.
 func (d *Dispatcher) planIsLooping(segmentID string) (int, bool) {
 	if segmentID == "" {
 		return 0, false
@@ -292,23 +310,33 @@ func (d *Dispatcher) planIsLooping(segmentID string) (int, bool) {
 			n++
 		}
 	}
-	return n, n >= maxPlanRejections
+	if n < maxPlanRejections {
+		return n, false
+	}
+	threshold := (n / maxPlanRejections) * maxPlanRejections
+	q, qerr := d.Led.Question(loopQuestionID(segmentID, threshold))
+	if qerr == nil && q.Answered {
+		// Asked and answered at this threshold. Carry on until the next one.
+		return n, false
+	}
+	return n, true
 }
 
-// stopTheLoop parks a deliverable and asks a person, once.
+// stopTheLoop parks a deliverable and asks a person, once per threshold.
 //
 // A blocking question rather than a silent hold: an item that stops with no
 // stated reason is indistinguishable from one nobody has got to yet, and that
 // is the failure this whole tool exists to make impossible.
 func (d *Dispatcher) stopTheLoop(seg ledger.Segment, rejections int) {
-	id := "Q-" + seg.ID + "-plan-loop"
+	threshold := (rejections / maxPlanRejections) * maxPlanRejections
+	id := loopQuestionID(seg.ID, threshold)
 	if q, err := d.Led.Question(id); err == nil && q.ID != "" {
 		return // already asked; asking again every tick is not asking harder
 	}
 	text := fmt.Sprintf(
 		"The breakdown of %s (%s) has now been rejected %d times, and each round costs a planning run and a validation run. The two agents are not converging. What should happen: is the plan wrong, is the validator's bar wrong for a deliverable this size, or is the brief asking for something that cannot be decomposed the way this pipeline expects?",
 		seg.ID, seg.Title, rejections)
-	lean := "Look at the most recent rejection before deciding. If the objections are getting smaller each round, one more attempt is reasonable; if the same objection keeps coming back in different words, the brief or the validator's expectation is what needs changing, not the plan."
+	lean := "Look at the most recent rejection before deciding. If the objections are getting smaller each round, one more attempt is reasonable; if the same objection keeps coming back in different words, the brief or the validator's expectation is what needs changing, not the plan. Answering this releases the deliverable for another round of attempts."
 	if _, err := d.Led.Append(d.actor(), ledger.KindQuestionRaised, id, ledger.QuestionRaised{
 		ID: id, Blocking: true, Text: text, Lean: lean, RaisedBy: seg.ID,
 		Evidence: fmt.Sprintf("%d rejected plan reviews on this deliverable.", rejections),
@@ -316,7 +344,7 @@ func (d *Dispatcher) stopTheLoop(seg ledger.Segment, rejections int) {
 		d.log("could not raise the plan-loop question for %s: %v", seg.ID, err)
 		return
 	}
-	d.log("STOPPED %s — its breakdown has been rejected %d times and the fleet is not converging. Raised %s and dispatched nothing further on it. Answer that and it moves again.",
+	d.log("STOPPED %s — its breakdown has been rejected %d times and the fleet is not converging. Raised %s. Answering it releases the deliverable for another round.",
 		seg.ID, rejections, id)
 }
 

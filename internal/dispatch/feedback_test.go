@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -110,7 +111,7 @@ func TestAPlanThatKeepsBeingRejectedStopsAndAsks(t *testing.T) {
 	// And it asks a person rather than stopping silently: an item that stops
 	// with no stated reason looks exactly like one nobody has got to yet.
 	d.stopTheLoop(ledger.Segment{ID: "S1", Title: "seg"}, n)
-	q, err := d.Led.Question("Q-S1-plan-loop")
+	q, err := d.Led.Question(loopQuestionID("S1", 3))
 	if err != nil {
 		t.Fatalf("nothing was asked: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestAPlanThatKeepsBeingRejectedStopsAndAsks(t *testing.T) {
 	qs, _ := d.Led.Questions("", false)
 	seen := 0
 	for _, x := range qs {
-		if x.ID == "Q-S1-plan-loop" {
+		if x.ID == loopQuestionID("S1", 3) {
 			seen++
 		}
 	}
@@ -169,5 +170,44 @@ func TestRigourScalesToTheBlastRadius(t *testing.T) {
 	seg := d.howMuchRigour(Candidate{Kind: KindSegment, Segment: ledger.Segment{ID: "S2"}})
 	if seg == "" {
 		t.Fatal("a deliverable was given no sense of what its work can break")
+	}
+}
+
+// Answering the question releases the deliverable.
+//
+// The first version asked once and went on refusing to dispatch, because the
+// rejection count only ever climbs. A person answered and the fleet stayed
+// stopped — which is the definition of stuck, and worse than never asking.
+func TestAnsweringThePlanLoopQuestionUnblocksTheDeliverable(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	d := h.D
+	for i := 0; i < maxPlanRejections; i++ {
+		id := fmt.Sprintf("v-%d", i)
+		if _, err := d.Led.Append("cli", ledger.KindRunStarted, id, ledger.RunStarted{
+			RunID: id, WorkerType: "validator", SegmentID: "S1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Led.Append("cli", ledger.KindRunFinished, id, ledger.RunFinished{
+			RunID: id, Verdict: "reject",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, looping := d.planIsLooping("S1")
+	if !looping {
+		t.Fatal("the fleet did not stop after the threshold")
+	}
+	d.stopTheLoop(ledger.Segment{ID: "S1", Title: "seg"}, n)
+
+	// A person answers it.
+	id := loopQuestionID("S1", maxPlanRejections)
+	if _, err := d.Led.Append("brandon", ledger.KindQuestionAnswered, id, ledger.QuestionAnswered{
+		ID: id, Answer: "try once more, the objections are getting smaller", AnsweredBy: "brandon",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, stillLooping := d.planIsLooping("S1"); stillLooping {
+		t.Fatal("answering the question did not release the deliverable; the stop is a dead end")
 	}
 }

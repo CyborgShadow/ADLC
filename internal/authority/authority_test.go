@@ -78,9 +78,9 @@ func TestAnEdgeThatDoesNotExistIsRefusedAsSuch(t *testing.T) {
 func TestAStaleReadIsNamedAsOne(t *testing.T) {
 	a := New(cfg(t))
 	d := a.Decide(Request{
-		Worker: "performer", From: StateInProgress, To: StateReadyForTesting,
+		Worker: "performer", From: StateInProgress, To: StateVerifying,
 		Env: env(t, nil), Gate: greenGate(), Now: now,
-	}, Facts{RunStarted: true, Item: item("judging"), CommitReachable: true})
+	}, Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true})
 	if d.Reason != ReasonStaleFromState {
 		t.Fatalf("want stale_from_state, got %s: %s", d.Reason, d.Detail)
 	}
@@ -94,14 +94,14 @@ func TestOnlyAValidatorMayCloseReview(t *testing.T) {
 	a := New(c)
 	e := env(t, func(m map[string]any) { m["worker_type"] = "performer" })
 
-	d := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateValidating, To: StateReviewed,
-		Env: e, Gate: greenGate(), Now: now}, Facts{RunStarted: true, Item: item("validating"), CommitReachable: true})
+	d := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateVerifying, To: StateVerifying,
+		Env: e, Gate: greenGate(), Now: now}, Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true})
 	if d.Admitted || d.Reason != ReasonWrongProposer {
 		t.Fatalf("a performer must not be able to finish its own work; got admitted=%v %s", d.Admitted, d.Reason)
 	}
 	// Clean case: the validator may.
-	d2 := a.Decide(Request{RunID: "r-1", Worker: "validator", From: StateValidating, To: StateReviewed,
-		Env: e, Gate: greenGate(), Now: now}, Facts{RunStarted: true, Item: item("validating"), CommitReachable: true})
+	d2 := a.Decide(Request{RunID: "r-1", Worker: "validator", From: StateVerifying, To: StateVerifying,
+		Env: e, Gate: greenGate(), Now: now}, Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true})
 	if !d2.Admitted {
 		t.Fatalf("the validator should be able to close review, got [%s] %s", d2.Reason, d2.Detail)
 	}
@@ -117,15 +117,15 @@ func TestAJudgeCannotBeTheRunThatDidTheWork(t *testing.T) {
 			{"id": "AC-1", "status": "pass", "command_index": 0, "evidence": "ran it"},
 		}}
 	})
-	f := Facts{RunStarted: true, Item: item("judging"), CommitReachable: true, ImplementRunID: "same-run"}
+	f := Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true, ImplementRunID: "same-run"}
 
-	d := a.Decide(Request{Worker: "judge", RunID: "same-run", From: StateJudging, To: StateReadyForValidation,
+	d := a.Decide(Request{Worker: "judge", RunID: "same-run", From: StateVerifying, To: StateVerifying,
 		Env: e, Gate: greenGate(), Now: now}, f)
 	if d.Admitted || d.Reason != ReasonSelfCertified {
 		t.Fatalf("a run judging its own work must be refused, got admitted=%v %s", d.Admitted, d.Reason)
 	}
 	// Clean case: a different run passes the same evidence.
-	d2 := a.Decide(Request{Worker: "judge", RunID: "other-run", From: StateJudging, To: StateReadyForValidation,
+	d2 := a.Decide(Request{Worker: "judge", RunID: "other-run", From: StateVerifying, To: StateVerifying,
 		Env: e, Gate: greenGate(), Now: now}, f)
 	if !d2.Admitted {
 		t.Fatalf("an independent judge should be admitted, got [%s] %s", d2.Reason, d2.Detail)
@@ -140,8 +140,8 @@ func TestACriterionPassedOnInspectionAloneIsRefused(t *testing.T) {
 			{"id": "AC-1", "status": "pass", "command_index": 7, "evidence": "looks right"},
 		}}
 	})
-	d := a.Decide(Request{Worker: "judge", RunID: "v-1", From: StateJudging, To: StateReadyForValidation,
-		Env: e, Gate: greenGate(), Now: now}, Facts{RunStarted: true, Item: item("judging"), CommitReachable: true})
+	d := a.Decide(Request{Worker: "judge", RunID: "v-1", From: StateVerifying, To: StateVerifying,
+		Env: e, Gate: greenGate(), Now: now}, Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true})
 	if d.Admitted {
 		t.Fatal("a criterion citing a command that is not in commands_run must not pass")
 	}
@@ -155,7 +155,7 @@ func TestAnUncommittedTreeIsRefused(t *testing.T) {
 	g := greenGate()
 	g.Dirty = true
 	g.DirtyPaths = []string{"internal/thing.go"}
-	d := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateInProgress, To: StateReadyForTesting,
+	d := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateInProgress, To: StateVerifying,
 		Env: env(t, nil), Gate: g, Now: now}, Facts{RunStarted: true, Item: item("in_progress"), CommitReachable: true})
 	if d.Reason != ReasonUncommittedTree {
 		t.Fatalf("want uncommitted_tree, got %s", d.Reason)
@@ -167,7 +167,7 @@ func TestAGateThatCouldNotRunIsNotAPass(t *testing.T) {
 	g := &gate.Result{Status: gate.StatusUnknown, Checks: []gate.Observation{{
 		CheckID: "test", Verdict: gate.StatusUnknown, Why: "tool absent — check not run, NOT passed",
 	}}}
-	d := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateInProgress, To: StateReadyForTesting,
+	d := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateInProgress, To: StateVerifying,
 		Env: env(t, nil), Gate: g, Now: now}, Facts{RunStarted: true, Item: item("in_progress"), CommitReachable: true})
 	if d.Admitted || d.Reason != ReasonGateUnknown {
 		t.Fatalf("UNKNOWN must not satisfy a gate; got admitted=%v %s", d.Admitted, d.Reason)
@@ -176,7 +176,7 @@ func TestAGateThatCouldNotRunIsNotAPass(t *testing.T) {
 
 func TestAnUnreachableCommitIsRefused(t *testing.T) {
 	a := New(cfg(t))
-	d := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateInProgress, To: StateReadyForTesting,
+	d := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateInProgress, To: StateVerifying,
 		Env: env(t, nil), Gate: greenGate(), Now: now},
 		Facts{RunStarted: true, Item: item("in_progress"), CommitReachable: false})
 	if d.Reason != ReasonCommitUnreachable {
@@ -327,11 +327,11 @@ func TestReworkStopsAtTheAttemptLimit(t *testing.T) {
 func TestAnEdgeAHumanDrivesNeedsAStatedReason(t *testing.T) {
 	a := New(cfg(t))
 	it := item("done")
-	d := a.Decide(Request{AsPM: true, From: StateDone, To: StateReadyForValidation, Now: now}, Facts{RunStarted: true, Item: it})
+	d := a.Decide(Request{AsPM: true, From: StateDone, To: StateVerifying, Now: now}, Facts{RunStarted: true, Item: it})
 	if d.Admitted || d.Reason != ReasonNoReason {
 		t.Fatalf("reopening a finished item needs an owner and a reason; got admitted=%v %s", d.Admitted, d.Reason)
 	}
-	d2 := a.Decide(Request{AsPM: true, From: StateDone, To: StateReadyForValidation, Now: now,
+	d2 := a.Decide(Request{AsPM: true, From: StateDone, To: StateVerifying, Now: now,
 		Reason: "the retro found three blockers a backfill had skipped"}, Facts{RunStarted: true, Item: it})
 	if !d2.Admitted {
 		t.Fatalf("with a reason it should be admitted, got [%s] %s", d2.Reason, d2.Detail)
@@ -362,9 +362,9 @@ func TestABlockingQuestionMustCarryALean(t *testing.T) {
 func TestAnOpenBlockingQuestionHoldsTheItem(t *testing.T) {
 	a := New(cfg(t))
 	e := env(t, func(m map[string]any) { m["worker_type"] = "validator" })
-	f := Facts{RunStarted: true, Item: item("validating"), CommitReachable: true,
+	f := Facts{RunStarted: true, Item: item("verifying"), CommitReachable: true,
 		OpenBlockingQs: []ledger.Question{{ID: "Q-1", Blocking: true, Text: "which way?"}}}
-	d := a.Decide(Request{RunID: "r-1", Worker: "validator", From: StateValidating, To: StateReviewed,
+	d := a.Decide(Request{RunID: "r-1", Worker: "validator", From: StateVerifying, To: StateVerifying,
 		Env: e, Gate: greenGate(), Now: now}, f)
 	if d.Admitted || d.Reason != ReasonOpenQuestion {
 		t.Fatalf("an item cannot finish over an unanswered blocking question; got admitted=%v %s", d.Admitted, d.Reason)
@@ -400,14 +400,14 @@ func parseMap(t *testing.T, m map[string]any) *envelope.Envelope {
 func TestAProposalFromAnUnregisteredRunIsRefused(t *testing.T) {
 	a := New(cfg(t))
 	f := Facts{Item: item("in_progress"), CommitReachable: true} // RunStarted false
-	d := a.Decide(Request{Worker: "performer", RunID: "p-ghost", From: StateInProgress, To: StateReadyForTesting,
+	d := a.Decide(Request{Worker: "performer", RunID: "p-ghost", From: StateInProgress, To: StateVerifying,
 		Env: env(t, nil), Gate: greenGate(), Now: now}, f)
 	if d.Admitted || d.Reason != ReasonRunNotStarted {
 		t.Fatalf("want run_not_started, got admitted=%v %s", d.Admitted, d.Reason)
 	}
 
 	// A worker proposal with no run id at all is the same defect, named.
-	d2 := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateInProgress, To: StateReadyForTesting,
+	d2 := a.Decide(Request{RunID: "r-1", Worker: "performer", From: StateInProgress, To: StateVerifying,
 		Env: env(t, nil), Gate: greenGate(), Now: now}, f)
 	if d2.Reason != ReasonRunNotStarted {
 		t.Fatalf("an unattributable proposal must be refused, got %s", d2.Reason)

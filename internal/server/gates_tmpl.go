@@ -7,7 +7,7 @@ package server
 // the same thing, and the dashboard was not saying so.
 //
 // A question is an agent stopping. It hit a decision it was not equipped to
-// make â a design fork, an ambiguity in the spec â and the rule says raise it
+// make — a design fork, an ambiguity in the spec — and the rule says raise it
 // rather than guess, because a guess parked in a comment is a decision nobody
 // reviewed. Any agent can raise one, about anything, at any point. Answering it
 // unblocks analysis.
@@ -43,7 +43,7 @@ const questionsPageHTML = `
 {{if eq .Page "questions"}}{{with .Body}}
 <div class="gates">
   <div class="here">
-    <h3>Questions â an agent could not decide</h3>
+    <h3>Questions — an agent could not decide</h3>
     <p>A run stopped because it hit a call it was not equipped to make: a design fork, a policy
       question, an ambiguity in the spec. The rule is to ask rather than guess, because a guess
       parked in a comment is a decision nobody ever reviewed.</p>
@@ -52,7 +52,7 @@ const questionsPageHTML = `
   </div>
   <div>
     <h3>Not this page: <a href="/approvals">Approvals</a></h3>
-    <p>An approval is not a question. Nothing there is unclear â the work is done and about to touch
+    <p>An approval is not a question. Nothing there is unclear — the work is done and about to touch
       something real, and policy says a named person clears that specific plan first.</p>
     <p class="dim small">Answering a question unblocks thinking. Approving authorises consequence.</p>
   </div>
@@ -74,9 +74,9 @@ const questionsPageHTML = `
 
   {{if or .ItemID .SegmentID}}<div class="qctx">
     {{if .ItemID}}<div><span class="k">Work</span>
-      <a href="/item/{{.ItemID}}">{{.ItemID}}</a>{{if .ItemTitle}} â {{.ItemTitle}}{{end}}</div>{{end}}
+      <a href="/item/{{.ItemID}}">{{.ItemID}}</a>{{if .ItemTitle}} — {{.ItemTitle}}{{end}}</div>{{end}}
     {{if .SegmentID}}<div><span class="k">For</span>
-      <a href="/segment/{{.SegmentID}}">{{.SegmentID}}</a>{{if .SegmentTitle}} â {{.SegmentTitle}}{{end}}</div>{{end}}
+      <a href="/segment/{{.SegmentID}}">{{.SegmentID}}</a>{{if .SegmentTitle}} — {{.SegmentTitle}}{{end}}</div>{{end}}
     <div><span class="k">Until answered</span> {{.Blocked}}</div>
   </div>{{end}}
 
@@ -85,7 +85,7 @@ const questionsPageHTML = `
     <div class="dim small">This is its recommendation, not a finding. Accepting it is your decision and
       the record will say you made it.</div></div>
   {{else}}<div class="lean dim">No recommendation offered. A question with no lean and no evidence hands
-    back the analysis the run was dispatched to do â worth saying so when you answer it.</div>{{end}}
+    back the analysis the run was dispatched to do — worth saying so when you answer it.</div>{{end}}
 
   {{if .Evidence}}<details class="qev"><summary>What it had already established</summary>
     <div class="dim small">{{.Evidence}}</div></details>{{end}}
@@ -94,16 +94,16 @@ const questionsPageHTML = `
     <input type="hidden" name="id" value="{{.ID}}">
     <textarea name="answer" placeholder="{{if .HasLean}}Only needed if you are deciding something other than their recommendation.{{else}}Your decision, recorded word for word.{{end}}"></textarea>
     <div class="qwhy">
-      <input type="text" name="why" placeholder="Why â the reasoning sets the severity of everything decomposed from this" required>
+      <input type="text" name="why" placeholder="Why — the reasoning sets the severity of everything decomposed from this" required>
     </div>
     <div class="inline">
       <input type="text" name="who" placeholder="your name" required>
       {{if .HasLean}}<button type="submit" name="choice" value="accept">Go with their recommendation</button>
-      <button type="submit" name="choice" value="reject" class="sec">No â do what I have written</button>
+      <button type="submit" name="choice" value="reject" class="sec">No — do what I have written</button>
       {{else}}<button type="submit" name="choice" value="own">Answer and unblock</button>{{end}}
     </div>
     <p class="dim small">Whichever you press, your words go on the record verbatim and the run that
-    stopped is dispatchable again. Nothing here decides the work itself â it decides what the next
+    stopped is dispatchable again. Nothing here decides the work itself — it decides what the next
     run is told.</p>
   </form>
 </div>
@@ -118,7 +118,7 @@ const approvalsPageHTML = `
 {{if eq .Page "approvals"}}{{with .Body}}
 <div class="gates">
   <div class="here">
-    <h3>Approvals â a change reaches something real</h3>
+    <h3>Approvals — a change reaches something real</h3>
     <p>The work is finished and its declared blast radius is above what this project applies
       unattended, so the control plane stopped it. You are clearing <b>one specific plan</b>, named by
       the digest of the dry run below.</p>
@@ -142,7 +142,7 @@ const approvalsPageHTML = `
   {{if .Item.Resources}}<div class="dim small">touches: <span class="mono">{{join .Item.Resources}}</span></div>{{end}}
   {{if .Decided}}
     <div style="margin-top:7px"><span class="pill {{if eq .Verdict "approve"}}ok{{else}}bad{{end}}">{{.Verdict}}d</span>
-      by {{if .Approver}}{{.Approver}}{{else}}<span class="dim">nobody named</span>{{end}} {{ago .DecidedMS}}{{if .Note}} â {{.Note}}{{end}}</div>
+      by {{if .Approver}}{{.Approver}}{{else}}<span class="dim">nobody named</span>{{end}} {{ago .DecidedMS}}{{if .Note}} — {{.Note}}{{end}}</div>
     <div class="dim small" style="margin-top:4px">This decision covers plan {{short .PlanDigest}} only.
       If the item is replanned it comes back here.</div>
   {{else}}

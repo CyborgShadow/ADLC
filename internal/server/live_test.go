@@ -10,6 +10,7 @@ import (
 
 	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/dispatch"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // A subscriber that arrives late still gets everything written before it
@@ -340,4 +341,42 @@ func TestOutputFromAnUnopenedRunIsStillShown(t *testing.T) {
 	if !strings.Contains(chunk, "something happened") {
 		t.Fatalf("got %q", chunk)
 	}
+}
+
+// Waiting on a person is not a stall.
+//
+// An unanswered blocking question is the fleet working exactly as designed. It
+// is already reported as something waiting on you, and calling it stuck as well
+// would teach somebody to ignore the word on the one occasion it means what it
+// says — that nothing in the system will ever touch this again.
+func TestWaitingOnAPersonIsNotReportedAsAStall(t *testing.T) {
+	s := newServer(t)
+	if _, err := s.Led.Append("cli", ledger.KindQuestionRaised, "Q-stall-probe", ledger.QuestionRaised{
+		ID: "Q-stall-probe", Blocking: true, Text: "which way?", RaisedBy: "r-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.shell(httptest.NewRequest(http.MethodGet, "/", nil), "home", "T", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Attn.Stalled != 0 {
+		t.Errorf("an open blocking question was reported as a stall (%d)", d.Attn.Stalled)
+	}
+	if d.Attn.Questions == 0 {
+		t.Error("the question is not reported as waiting on anybody either, so it is invisible")
+	}
+	body := renderTo(t, d)
+	if strings.Contains(body, "The fleet is stuck") {
+		t.Error("the page called a human wait a stall")
+	}
+}
+
+func renderTo(t *testing.T, d *pageData) string {
+	t.Helper()
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "page", d); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	return b.String()
 }

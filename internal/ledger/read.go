@@ -758,3 +758,34 @@ func (l *Ledger) Lessons(worker, area string, limit int) ([]Lesson, error) {
 	}
 	return out, rows.Err()
 }
+
+// VerificationsFor returns the capabilities that have cleared an item on this
+// attempt.
+//
+// Scoped to the round on purpose: a pass earned against code that was later
+// rejected must not clear the stage for the code that replaced it, and an
+// append-only chain cannot forget the old pass. It can only decline to count it.
+func (l *Ledger) VerificationsFor(itemID string, round int) (map[string]bool, error) {
+	rows, err := l.db.Query(
+		`SELECT payload FROM adlc_event WHERE kind=? AND subject=? ORDER BY seq`,
+		string(KindVerificationPassed), itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var p VerificationPassed
+		if json.Unmarshal(payload, &p) != nil {
+			continue
+		}
+		if p.Round == round && p.Capability != "" {
+			out[p.Capability] = true
+		}
+	}
+	return out, rows.Err()
+}

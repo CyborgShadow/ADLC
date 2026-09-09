@@ -314,10 +314,18 @@ func (s *Server) shell(r *http.Request, page, title string, body any) (*pageData
 	// needs you, the fleet is working" for half an hour over four items that
 	// nothing in the system was ever going to touch again.
 	//
+	// Waiting on a PERSON is not that. An unanswered blocking question or an
+	// undecided approval is the fleet working exactly as designed, and it is
+	// already reported as something waiting on you. Calling it stuck as well
+	// would teach somebody to ignore the word on the one occasion it means what
+	// it says.
+	//
 	// The question is asked through the dispatcher's own selection rule rather
 	// than a second copy of it here, because a stall detector that disagrees
 	// with the thing it is watching is worse than none.
-	if s.Sched != nil && s.Sched.D != nil && attn.OpenWork > 0 && !s.anythingRunning() {
+	waitingOnAPerson := attn.Questions > 0 || attn.Approvals > 0
+	if s.Sched != nil && s.Sched.D != nil && attn.OpenWork > 0 &&
+		!waitingOnAPerson && !s.anythingRunning() {
 		if cands, cerr := s.Sched.D.Candidates(dispatch.Filter{}); cerr == nil && len(cands) == 0 {
 			attn.Stalled = attn.OpenWork
 		}

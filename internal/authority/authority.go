@@ -89,7 +89,7 @@ func (a *Authority) Decide(req Request, f Facts) Decision {
 	if req.Now.IsZero() {
 		req.Now = time.Now()
 	}
-	edge := Find(req.From, req.To)
+	edge := a.edgeFor(req)
 	if edge == nil {
 		return Decision{Reason: ReasonNoSuchEdge, Detail: fmt.Sprintf(
 			"there is no %s -> %s edge in the transition table; run `adlc transition table` for the edges that exist", req.From, req.To)}
@@ -551,4 +551,47 @@ func labelFor(id string, i int) string {
 		return id
 	}
 	return fmt.Sprintf("#%d", i+1)
+}
+
+// edgeFor picks the edge this request would actually travel.
+//
+// Several edges may share a (from, to) pair when one stage holds several
+// independent tasks: in verification a tester, a judge and a validator each
+// clear their own task and each carries its own requirements. Matching on the
+// pair alone returned whichever happened to be declared first, so a judge was
+// refused as the wrong proposer for an edge that was never its edge — and its
+// own requirements were never reached at all.
+//
+// The first matching edge is still returned when nothing fits, so the refusal
+// says wrong_proposer against a real edge rather than claiming the move does
+// not exist.
+func (a *Authority) edgeFor(req Request) *Edge {
+	var first *Edge
+	for _, e := range Table() {
+		if e.From != req.From || e.To != req.To {
+			continue
+		}
+		ec := e
+		if first == nil {
+			first = &ec
+		}
+		if req.AsPM {
+			if ec.Allows(ProposerPM) {
+				return &ec
+			}
+			continue
+		}
+		if req.Worker == "" {
+			if ec.Allows(ProposerControl) {
+				return &ec
+			}
+			continue
+		}
+		for _, p := range ec.Proposers {
+			if a.cfg.Can(req.Worker, string(p)) {
+				return &ec
+			}
+		}
+	}
+	return first
 }

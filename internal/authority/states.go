@@ -5,7 +5,11 @@
 // accepted cannot answer the question it will actually be asked.
 package authority
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/CyborgShadow/ADLC/internal/config"
+)
 
 // State is a work item's position in the delivery lifecycle.
 type State string
@@ -23,7 +27,11 @@ const (
 	StateQueued State = "queued" // dependencies unmet
 	StateReady  State = "ready"  // ready for work
 
-	StateInProgress      State = "in_progress"       // work and tests being built
+	StateInProgress State = "in_progress" // work and tests being built
+	// The six states below are LEGACY. Verification used to be six states in
+	// series; it is one stage now, and nothing enters these. They are kept so a
+	// ledger written before the change still parses, and Refresh moves any item
+	// found in one into StateVerifying rather than leaving it stranded.
 	StateReadyForTesting State = "ready_for_testing" // implementation landed
 	StateTesting         State = "testing"           // tests being executed
 
@@ -58,8 +66,7 @@ const (
 func AllStates() []State {
 	return []State{
 		StateQueued, StateReady,
-		StateInProgress, StateReadyForTesting, StateTesting,
-		StateReadyForReview, StateJudging, StateReadyForValidation, StateValidating,
+		StateInProgress, StateVerifying,
 		StateReviewed, StateJanitoring, StateReadyForArbitration, StateArbitrating,
 		StateAwaitingApproval, StateApplying, StateConfirming,
 		StateReadyToMerge, StateMerging, StateMerged,
@@ -211,28 +218,36 @@ func Table() []Edge {
 		// --- build
 		e(StateReady, StateInProgress, "a builder picked it up",
 			pmOrControl, ReqDepsSatisfied, ReqQuestionsAnswered),
-		e(StateInProgress, StateReadyForTesting, "work and tests landed, and the control plane's own run of the checks was green",
+		e(StateInProgress, StateVerifying, "work and tests landed, and the control plane's own run of the checks was green",
 			[]Proposer{ProposerImplement}, ReqGateGreen, ReqCommittedTree, ReqClaimsMatch, ReqCommitReachable),
 
-		// --- test
-		e(StateReadyForTesting, StateTesting, "a tester picked it up", pmOrControl),
-		e(StateTesting, StateReadyForReview, "the tests were executed and passed",
+		// --- verification: one stage, three tasks, run together
+		//
+		// A pass here clears one task and moves nothing. The edge OUT is the
+		// control plane's, because "every task has cleared" is arithmetic on the
+		// record and letting the last run to finish propose it would make the
+		// item's state depend on a race between three runs that all passed.
+		// A verification task that PASSES is still a proposal the authority
+		// decides — it simply does not move the item.
+		//
+		// These self-edges exist because the guards live on edges. When a pass
+		// stopped proposing a transition, ReqIndependentVerifier and
+		// ReqAllCriteriaPass stopped running with it, and a judge could have
+		// cleared its own work by reporting a pass with no cited command. The
+		// stage collapsing into one state must not quietly collapse the checks
+		// on the way through it.
+		e(StateVerifying, StateVerifying, "the tests were executed and passed; this task is cleared and the item waits on the rest of the stage",
 			[]Proposer{ProposerTest}, ReqIndependentVerifier, ReqGateGreen, ReqClaimsMatch, ReqCommittedTree),
-		e(StateTesting, StateInProgress, "a test failed, with the failing output captured",
-			[]Proposer{ProposerTest}, ReqIndependentVerifier, ReqSomeCriterionFails),
-
-		// --- judge
-		e(StateReadyForReview, StateJudging, "a judge picked it up", pmOrControl),
-		e(StateJudging, StateReadyForValidation, "every acceptance criterion passed, each citing an executed command",
+		e(StateVerifying, StateVerifying, "every acceptance criterion passed, each citing an executed command; this task is cleared",
 			[]Proposer{ProposerJudge}, ReqIndependentVerifier, ReqAllCriteriaPass, ReqGateGreen, ReqClaimsMatch),
-		e(StateJudging, StateInProgress, "a criterion failed",
-			[]Proposer{ProposerJudge}, ReqIndependentVerifier, ReqSomeCriterionFails),
+		e(StateVerifying, StateVerifying, "adversarial review found no blocker; this task is cleared",
+			[]Proposer{ProposerValidate}, ReqIndependentVerifier, ReqVerdictPass, ReqNoBlockerFindings, ReqCommitReachable, ReqQuestionsAnswered),
 
-		// --- validate
-		e(StateReadyForValidation, StateValidating, "a validator picked it up", pmOrControl),
-		e(StateValidating, StateReviewed, "adversarial review passed",
-			[]Proposer{ProposerValidate}, ReqVerdictPass, ReqNoBlockerFindings, ReqCommitReachable, ReqQuestionsAnswered),
-		e(StateValidating, StateRejected, "at least one blocker, citing a location and the smallest change that would clear it",
+		e(StateVerifying, StateReviewed, "every task in the stage passed: the tests were executed, every acceptance criterion held, and adversarial review found no blocker",
+			[]Proposer{ProposerControl}, ReqCommitReachable, ReqQuestionsAnswered),
+		e(StateVerifying, StateInProgress, "a verification task failed, and the work goes back with what it observed",
+			[]Proposer{ProposerTest, ProposerJudge}, ReqIndependentVerifier, ReqSomeCriterionFails),
+		e(StateVerifying, StateRejected, "at least one blocker, citing a location and the smallest change that would clear it",
 			[]Proposer{ProposerValidate}, ReqBlockerFinding),
 
 		// --- janitor and arbiter watch the system rather than the item
@@ -289,7 +304,7 @@ func Table() []Edge {
 		e(StateRejected, StateCancelled, "withdrawn", pm, ReqStatedReason),
 		e(StateQueued, StateCancelled, "withdrawn before it started", pm, ReqStatedReason),
 		e(StateQueued, StateSuperseded, "replaced before it started", pm, ReqStatedReason),
-		e(StateDone, StateReadyForValidation, "a finished item is reopened for review, by decision, with a reason",
+		e(StateDone, StateVerifying, "a finished item is reopened for review, by decision, with a reason",
 			pm, ReqStatedReason),
 	}
 
@@ -313,14 +328,43 @@ func Table() []Edge {
 }
 
 // Find returns the edge for a transition, if one exists.
-func Find(from, to State) *Edge {
+// Find returns the edge for a proposed move.
+//
+// Several edges may share a (from, to) pair when one stage holds several
+// independent tasks: a tester, a judge and a validator each clear their own
+// task in verification, and each carries its own requirements. Matching on the
+// pair alone returned whichever was declared first, so every guard except that
+// one stopped running — a judge was refused as the wrong proposer for an edge
+// that was never its edge, and its own requirements were never reached.
+//
+// So the proposer is part of the lookup when one is offered. Find with an empty
+// proposer still returns the first match, which is what the table printer and
+// the reachability guard want.
+func Find(from, to State) *Edge { return FindFor(from, to, "") }
+
+// FindFor returns the edge this proposer would travel, or the first edge for
+// the pair when no proposer is named.
+func FindFor(from, to State, p Proposer) *Edge {
+	var first *Edge
 	for _, e := range Table() {
-		if e.From == from && e.To == to {
-			ec := e
+		if e.From != from || e.To != to {
+			continue
+		}
+		ec := e
+		if first == nil {
+			first = &ec
+		}
+		if p == "" {
+			return first
+		}
+		if ec.Allows(p) {
 			return &ec
 		}
 	}
-	return nil
+	// No edge this proposer may travel. Returning the first still lets the
+	// caller report wrong_proposer against a real edge rather than claiming the
+	// move does not exist at all.
+	return first
 }
 
 // Allows reports whether a proposer may propose this edge.
@@ -374,3 +418,61 @@ const (
 	ReasonMergeGateFailed   Reason = "merge_gate_failed"
 	ReasonTrunkMoved        Reason = "trunk_moved"
 )
+
+// StateVerifying is the one stage whose tasks run together.
+//
+// Testing, judging against the acceptance criteria and adversarial review all
+// examine the same commit and never depended on each other. As three states in
+// series they cost three cold starts and three waits to answer three
+// independent questions, and an item spent forty minutes in a stage whose work
+// takes fifteen.
+//
+// The state stays singular, which is what keeps NextState a pure function of
+// it. What is plural is the set of verdicts the stage requires: a pass clears
+// one task and moves nothing, and the item leaves when every task has cleared —
+// computed by the control plane from the record, never proposed by whichever
+// run happened to finish last.
+const StateVerifying State = "verifying"
+
+// VerificationCapabilities are the tasks that must all pass before an item
+// leaves verification.
+//
+// Declared here rather than in the config because it is the shape of the
+// lifecycle rather than a policy knob: a project that wants a different set
+// wants a different lifecycle, and should say so by editing this and the table
+// together.
+func VerificationCapabilities() []string {
+	return []string{config.CapTest, config.CapJudge, config.CapValidate}
+}
+
+// IsVerification reports whether a capability clears a verification task.
+func IsVerification(capability string) bool {
+	for _, c := range VerificationCapabilities() {
+		if c == capability {
+			return true
+		}
+	}
+	return false
+}
+
+// VerificationComplete reports whether every task in the stage has cleared.
+func VerificationComplete(passed map[string]bool) bool {
+	for _, c := range VerificationCapabilities() {
+		if !passed[c] {
+			return false
+		}
+	}
+	return true
+}
+
+// VerificationOutstanding names the tasks that have not cleared yet, in a
+// stable order, so a dispatcher offers them deterministically.
+func VerificationOutstanding(passed map[string]bool) []string {
+	var out []string
+	for _, c := range VerificationCapabilities() {
+		if !passed[c] {
+			out = append(out, c)
+		}
+	}
+	return out
+}

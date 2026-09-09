@@ -48,43 +48,38 @@ func NextState(from State, capability, verdict string, radius config.Radius, pol
 			return stall(from, capability, "only a builder moves work out of "+string(from))
 		}
 		if pass {
-			return ok(StateReadyForTesting,
+			return ok(StateVerifying,
 				"work and tests landed, and the control plane's own run of the checks was green")
 		}
 		return stall(from, capability, "the run did not finish; the item stays where it is and is re-dispatched")
 
-	case StateReadyForTesting, StateTesting:
-		if capability != config.CapTest {
-			return stall(from, capability, "tests are executed by a tester, not by the role that wrote them")
+	case StateReadyForTesting, StateTesting, StateVerifying:
+		// One stage, three independent questions, asked at once.
+		//
+		// Testing, judging against the acceptance criteria and adversarial
+		// review all examine the same commit. Running them in series cost three
+		// cold starts and three waits to learn three things that never depended
+		// on each other. The stage is still singular — this is one state, and
+		// NextState is still a pure function of it — but a pass here does not
+		// move the item. It clears one of the tasks. The item leaves when every
+		// one of them has cleared, and that is computed by Refresh from the
+		// record rather than proposed by whichever run happened to finish last.
+		if !IsVerification(capability) {
+			return stall(from, capability,
+				"verification is the tester's, the judge's and the validator's; nothing else clears this stage")
 		}
 		if pass {
-			return ok(StateReadyForReview, "the tests were executed and passed")
+			// A self-edge: decided like any other proposal, so every guard on it
+			// still runs, and then the item does not move. It leaves the stage
+			// when Refresh sees that every task has cleared.
+			return ok(StateVerifying,
+				"this task passed; the item leaves verification when every task in the stage has")
 		}
 		if setback {
-			return ok(StateInProgress, "a test failed, so the work goes back with the failing output")
-		}
-
-	case StateReadyForReview, StateJudging:
-		if capability != config.CapJudge {
-			return stall(from, capability, "judging against the acceptance criteria is the judge's")
-		}
-		if pass {
-			return ok(StateReadyForValidation,
-				"every acceptance criterion passed, each citing a command that was executed")
-		}
-		if setback {
-			return ok(StateInProgress, "a criterion failed, so the work goes back")
-		}
-
-	case StateReadyForValidation, StateValidating:
-		if capability != config.CapValidate {
-			return stall(from, capability, "only an adversarial reviewer decides what happens after judging")
-		}
-		if pass {
-			return ok(StateReviewed, "adversarial review passed")
-		}
-		if setback {
-			return ok(StateRejected, "review found at least one blocker")
+			if capability == config.CapValidate {
+				return ok(StateRejected, "adversarial review found at least one blocker")
+			}
+			return ok(StateInProgress, "a verification task failed, so the work goes back with what it observed")
 		}
 
 	case StateReviewed, StateJanitoring:
@@ -194,12 +189,11 @@ func CapabilityFor(s State) (capability string, priority int) {
 		return config.CapArbitrate, 3
 	case StateReviewed, StateJanitoring:
 		return config.CapCurate, 4
-	case StateReadyForValidation, StateValidating:
-		return config.CapValidate, 5
-	case StateReadyForReview, StateJudging:
-		return config.CapJudge, 6
-	case StateReadyForTesting, StateTesting:
-		return config.CapTest, 7
+	case StateVerifying:
+		// A stage with several outstanding tasks has no single capability.
+		// CapabilitiesFor answers for it; this one reports the first still
+		// outstanding so callers that can only think in one still work.
+		return config.CapTest, 5
 	case StateInProgress:
 		return config.CapImplement, 8
 	case StateReady:
@@ -269,7 +263,7 @@ func StageOf(s State) Stage {
 		key = "planning"
 	case StateInProgress:
 		key = "in_progress"
-	case StateReadyForTesting, StateTesting:
+	case StateVerifying, StateReadyForTesting, StateTesting:
 		key = "testing"
 	case StateReadyForReview, StateJudging, StateReadyForValidation, StateValidating:
 		key = "review"

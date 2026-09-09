@@ -142,11 +142,20 @@ type Candidate struct {
 	Why       string
 }
 
-// Key is what a candidate leases: the item id, or the segment for generation,
-// so that two planners cannot both fill one backlog.
+// Key is the claim a candidate takes before it runs.
+//
+// One item, one worker — except in a stage whose tasks are meant to run
+// together. Testing, judging and adversarial review examine the same commit and
+// do not conflict, so keying all three on the item id alone would serialise
+// exactly the work that was collapsed into one stage to be parallel. The
+// capability is appended by the control plane from values it declares, never
+// from anything an agent composed.
 func (c Candidate) Key() string {
 	if c.Kind == KindSegment {
 		return "plan-" + c.Segment.ID
+	}
+	if c.From == authority.StateVerifying {
+		return c.Item.ID + "#" + c.Capability
 	}
 	return c.Item.ID
 }
@@ -249,23 +258,40 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 				continue
 			}
 		}
-		worker, ok := d.Cfg.OwnerFor(it.Area, capability)
-		if !ok {
-			// An item that needs a capability nobody declares is unreachable, and an
-			// unreachable item looks exactly like one nobody has got round to. Say so
-			// rather than skip it silently.
-			d.log("UNREACHABLE %s is in %s and needs %q work in area %q, which no declared worker can take",
-				it.ID, st, capability, it.Area)
-			continue
+		// A stage with several tasks offers one candidate per task still
+		// outstanding, so they run together rather than one after another.
+		// Every other state has exactly one, and the loop below is the same
+		// either way.
+		wanted := []string{capability}
+		if st == authority.StateVerifying {
+			passed, verr := d.Led.VerificationsFor(it.ID, it.Attempts)
+			if verr != nil {
+				return nil, verr
+			}
+			wanted = authority.VerificationOutstanding(passed)
 		}
-		if f.Worker != "" && f.Worker != worker {
-			continue
+		for _, capability := range wanted {
+			if f.Capability != "" && f.Capability != capability {
+				continue
+			}
+			worker, ok := d.Cfg.OwnerFor(it.Area, capability)
+			if !ok {
+				// An item that needs a capability nobody declares is unreachable, and an
+				// unreachable item looks exactly like one nobody has got round to. Say so
+				// rather than skip it silently.
+				d.log("UNREACHABLE %s is in %s and needs %q work in area %q, which no declared worker can take",
+					it.ID, st, capability, it.Area)
+				continue
+			}
+			if f.Worker != "" && f.Worker != worker {
+				continue
+			}
+			out = append(out, Candidate{
+				Kind: KindItem, Item: it, From: st, Capability: capability,
+				Worker: worker, Priority: prio,
+				Why: fmt.Sprintf("%s is in %s and needs %s work", it.ID, st, capability),
+			})
 		}
-		out = append(out, Candidate{
-			Kind: KindItem, Item: it, From: st, Capability: capability,
-			Worker: worker, Priority: prio,
-			Why: fmt.Sprintf("%s is in %s and needs %s work", it.ID, st, capability),
-		})
 	}
 
 	for _, s := range segs {
@@ -614,6 +640,21 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 
 	// The tool decides where the item goes. The agent reported a verdict; it was
 	// never asked to name a state, so it cannot name a wrong one.
+	// A verification task that passed clears its own task and moves nothing.
+	// The stage is left when every task has cleared, and that is computed from
+	// the record by Refresh rather than proposed by whichever run finished last
+	// — so three runs racing to report cannot advance an item between them.
+	if c.From == authority.StateVerifying && env.Verdict == "pass" &&
+		authority.IsVerification(c.Capability) {
+		if _, err := d.Led.Append(d.Actor, ledger.KindVerificationPassed, c.Item.ID,
+			ledger.VerificationPassed{
+				ItemID: c.Item.ID, Capability: c.Capability, RunID: runID,
+				Worker: c.Worker, Round: c.Item.Attempts,
+			}); err != nil {
+			return res, true, err
+		}
+		d.log("VERIFIED %s  %s cleared by %s", c.Item.ID, c.Capability, c.Worker)
+	}
 	adv := authority.NextState(c.From, c.Capability, env.Verdict,
 		config.Radius(c.Item.Radius), d.Cfg.Blast)
 	if !adv.Inferred {
@@ -1004,6 +1045,35 @@ func (d *Dispatcher) Refresh() (int, error) {
 	}
 	moved := 0
 	for _, it := range items {
+		// A stage whose tasks all cleared is a computed fact, not a proposal.
+		// Readiness is derived here for the same reason dependency readiness is:
+		// leaving it to whichever run finished last would make the item's state
+		// depend on a race between three runs that all passed.
+		if authority.State(it.State) == authority.StateVerifying {
+			passed, verr := d.Led.VerificationsFor(it.ID, it.Attempts)
+			if verr != nil {
+				return moved, verr
+			}
+			if !authority.VerificationComplete(passed) {
+				continue
+			}
+			if _, err := d.Led.Append(d.Actor, ledger.KindTransitionAdmitted, it.ID, ledger.TransitionOutcome{
+				ItemID: it.ID, From: it.State, To: string(authority.StateReviewed),
+				Reason: "verification_complete",
+				Detail: "every task in the stage passed: " + strings.Join(authority.VerificationCapabilities(), ", "),
+			}); err != nil {
+				return moved, err
+			}
+			if _, err := d.Led.Append(d.Actor, ledger.KindItemTransitioned, it.ID, ledger.ItemTransitioned{
+				ItemID: it.ID, From: it.State, To: string(authority.StateReviewed),
+				Reason: "verification_complete",
+			}); err != nil {
+				return moved, err
+			}
+			d.log("VERIFIED %s — every task in the stage passed; it leaves verification", it.ID)
+			moved++
+			continue
+		}
 		if authority.State(it.State) != authority.StateQueued {
 			continue
 		}

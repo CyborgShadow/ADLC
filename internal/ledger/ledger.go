@@ -50,6 +50,7 @@ const (
 	KindRunActorCorrected  Kind = "run.actor_corrected"
 	KindRunAbandoned       Kind = "run.abandoned"
 	KindLessonRecorded     Kind = "lesson.recorded"
+	KindVerificationPassed Kind = "verification.passed"
 	KindTransitionAdmitted Kind = "transition.admitted"
 	KindTransitionRefused  Kind = "transition.refused"
 	KindGateObserved       Kind = "gate.observed"
@@ -81,7 +82,7 @@ var KnownKinds = map[Kind]bool{
 	KindPromptPinned: true, KindWorkerRegistered: true, KindNoteRecorded: true,
 	KindItemProposed: true, KindLoopTicked: true, KindSegmentAdvanced: true,
 	KindConsoleAsked: true, KindConsoleReplied: true, KindConsoleActed: true,
-	KindRunAbandoned: true, KindLessonRecorded: true,
+	KindRunAbandoned: true, KindLessonRecorded: true, KindVerificationPassed: true,
 }
 
 // ---------------------------------------------------------------- payloads
@@ -948,4 +949,25 @@ type LessonRecorded struct {
 	// Lesson is one rule somebody could follow. Prose that cannot be acted on
 	// costs every future prompt and changes nothing.
 	Lesson string `json:"lesson"`
+}
+
+// VerificationPassed records one capability clearing an item in verification.
+//
+// A stage is singular but the tasks inside it are not. Testing, judging against
+// the acceptance criteria and adversarial review all examine the SAME commit,
+// and running them one after another cost three cold starts and three waits to
+// answer three independent questions. They run together now, and the item
+// leaves the stage when every one of them has passed.
+//
+// Round scopes a pass to the attempt it was earned on. The chain is append-only,
+// so a pass cannot be deleted when work goes back for rework — and a pass
+// carried over from the code that was rejected would clear the stage for the
+// code that replaced it. Rework bumps the attempt; passes from the previous
+// attempt stop counting, without anything being erased.
+type VerificationPassed struct {
+	ItemID     string `json:"item_id"`
+	Capability string `json:"capability"`
+	RunID      string `json:"run_id"`
+	Worker     string `json:"worker"`
+	Round      int    `json:"round"`
 }

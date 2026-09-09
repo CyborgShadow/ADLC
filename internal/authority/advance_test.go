@@ -23,14 +23,11 @@ func TestTheToolDecidesWhereWorkGoes(t *testing.T) {
 		radius     config.Radius
 		want       State
 	}{
-		{"a builder picks up ready work", StateReady, config.CapImplement, "pass", config.RadiusNone, StateReadyForTesting},
-		{"work and tests land", StateInProgress, config.CapImplement, "pass", config.RadiusNone, StateReadyForTesting},
-		{"tests pass", StateTesting, config.CapTest, "pass", config.RadiusNone, StateReadyForReview},
-		{"a test fails", StateTesting, config.CapTest, "fail", config.RadiusNone, StateInProgress},
-		{"criteria judged green", StateJudging, config.CapJudge, "pass", config.RadiusNone, StateReadyForValidation},
-		{"a criterion fails", StateJudging, config.CapJudge, "fail", config.RadiusNone, StateInProgress},
-		{"review passes", StateValidating, config.CapValidate, "pass", config.RadiusNone, StateReviewed},
-		{"review rejects", StateValidating, config.CapValidate, "reject", config.RadiusNone, StateRejected},
+		{"a builder picks up ready work", StateReady, config.CapImplement, "pass", config.RadiusNone, StateVerifying},
+		{"work and tests land", StateInProgress, config.CapImplement, "pass", config.RadiusNone, StateVerifying},
+		{"a test fails", StateVerifying, config.CapTest, "fail", config.RadiusNone, StateInProgress},
+		{"a criterion fails", StateVerifying, config.CapJudge, "fail", config.RadiusNone, StateInProgress},
+		{"review rejects", StateVerifying, config.CapValidate, "reject", config.RadiusNone, StateRejected},
 		{"hygiene pass", StateJanitoring, config.CapCurate, "pass", config.RadiusNone, StateReadyForArbitration},
 		{"the janitor finds something wrong", StateJanitoring, config.CapCurate, "reject", config.RadiusNone, StateInProgress},
 		{"source-only work clears to merge", StateArbitrating, config.CapArbitrate, "pass", config.RadiusNone, StateReadyToMerge},
@@ -41,7 +38,7 @@ func TestTheToolDecidesWhereWorkGoes(t *testing.T) {
 		{"the applied artifact confirms", StateConfirming, config.CapValidate, "pass", config.RadiusHost, StateReadyToMerge},
 		{"the applied artifact does not", StateConfirming, config.CapValidate, "reject", config.RadiusHost, StateRejected},
 		{"lessons recorded", StateMerged, config.CapImprove, "pass", config.RadiusNone, StateDone},
-		{"blocked from anywhere live", StateJudging, config.CapJudge, "blocked", config.RadiusNone, StateBlocked},
+		{"blocked from anywhere live", StateVerifying, config.CapJudge, "blocked", config.RadiusNone, StateBlocked},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -263,5 +260,60 @@ func TestProgressCountsFinishedWorkNotBusyWork(t *testing.T) {
 	}
 	if p.ByStage["review"] != 1 || p.ByStage["testing"] != 1 || p.ByStage["planning"] != 1 {
 		t.Fatalf("stage rollup wrong: %+v", p.ByStage)
+	}
+}
+
+// A verification task that passes clears its own task and leaves the item where
+// it is.
+//
+// The stage is singular; the verdicts it requires are not. It is still decided
+// as a proposal — a self-edge, so every guard on it runs — because when a pass
+// stopped proposing a transition the guards on that edge stopped running with
+// it, and a judge could have cleared its own work by reporting a pass with no
+// cited command.
+func TestAPassingVerificationTaskDoesNotMoveTheItem(t *testing.T) {
+	for _, cap := range VerificationCapabilities() {
+		adv := NextState(StateVerifying, cap, "pass", config.RadiusNone, policy())
+		if !adv.Inferred {
+			t.Errorf("%s produced no decision at all: %s", cap, adv.Stall)
+			continue
+		}
+		if adv.To != StateVerifying {
+			t.Errorf("%s moved the item to %s; a single task must not advance the stage", cap, adv.To)
+		}
+	}
+}
+
+// control plane that works that out.
+func TestVerificationCompletesOnlyWhenEveryTaskHasCleared(t *testing.T) {
+	passed := map[string]bool{}
+	for i, cap := range VerificationCapabilities() {
+		if VerificationComplete(passed) {
+			t.Fatalf("the stage completed after %d of %d tasks", i, len(VerificationCapabilities()))
+		}
+		if n := len(VerificationOutstanding(passed)); n != len(VerificationCapabilities())-i {
+			t.Errorf("%d tasks outstanding, want %d", n, len(VerificationCapabilities())-i)
+		}
+		passed[cap] = true
+	}
+	if !VerificationComplete(passed) {
+		t.Fatal("every task cleared and the stage did not complete")
+	}
+	if n := VerificationOutstanding(passed); len(n) != 0 {
+		t.Errorf("%v still outstanding after everything passed", n)
+	}
+}
+
+// Nothing outside the stage's own tasks clears it. A capability that is not a
+// verification task must not be able to satisfy one by reporting a pass.
+func TestOnlyAVerificationTaskClearsVerification(t *testing.T) {
+	for _, cap := range []string{config.CapImplement, config.CapCurate, config.CapArbitrate, config.CapPlan} {
+		if IsVerification(cap) {
+			t.Errorf("%s is not a verification task and was treated as one", cap)
+		}
+		adv := NextState(StateVerifying, cap, "pass", config.RadiusNone, policy())
+		if adv.Inferred {
+			t.Errorf("%s moved an item out of verification", cap)
+		}
 	}
 }

@@ -200,7 +200,7 @@ func TestTheAreaDecidesTheWorkerNotTheAlphabet(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "in_progress")
 	h.item(t, "S1-002", "S1", "api", "in_progress")
-	h.item(t, "S1-003", "S1", "auth", "validating")
+	h.item(t, "S1-003", "S1", "auth", "verifying")
 	h.item(t, "S1-004", "S1", "docs", "in_progress") // area nobody owns
 
 	cands, err := h.D.Candidates(Filter{})
@@ -231,8 +231,8 @@ func TestVerificationIsPickedBeforeNewImplementation(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
 	h.segment(t, "S1", "seg", "", 0)
-	h.item(t, "S1-001", "S1", "ui", "ready")   // new work
-	h.item(t, "S1-002", "S1", "ui", "testing") // work waiting to be checked
+	h.item(t, "S1-001", "S1", "ui", "ready")     // new work
+	h.item(t, "S1-002", "S1", "ui", "verifying") // work waiting to be checked
 
 	cands, err := h.D.Candidates(Filter{})
 	if err != nil {
@@ -252,7 +252,7 @@ func TestALaneOnlySeesItsOwnWork(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "in_progress")
 	h.item(t, "S1-002", "S1", "api", "in_progress")
-	h.item(t, "S1-003", "S1", "ui", "testing")
+	h.item(t, "S1-003", "S1", "ui", "verifying")
 
 	only, err := h.D.Candidates(Filter{Capability: config.CapTest})
 	if err != nil {
