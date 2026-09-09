@@ -293,3 +293,26 @@ func SegmentPlanAccepted(s SegmentState) bool {
 	}
 	return false
 }
+
+// PlanGateHolds reports whether an unreviewed breakdown stops work of this
+// blast radius from starting.
+//
+// Blocking is right for work that reaches something real and is pure cost on
+// work that reaches a file. One contested plan for a static page that reaches
+// nothing kept twelve items unstartable for hours across four rejections, while
+// the review itself went on running and finding nothing anybody acted on.
+//
+// Below the threshold the validation still runs, its objections are still
+// recorded, still become lessons the next planner is given, and still show on
+// every surface. It simply does not hold the work.
+//
+// An unrecognised radius HOLDS. Radius comparison fails closed everywhere in
+// this package, and a typo must not be the thing that lets unreviewed work
+// reach something.
+func PlanGateHolds(itemRadius string, policy config.BlastPolicy) bool {
+	min := policy.PlanGateMin
+	if !min.Known() {
+		return true
+	}
+	return config.Radius(itemRadius).Rank() >= min.Rank()
+}

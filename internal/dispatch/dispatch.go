@@ -210,6 +210,9 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 		segByID[s.ID] = s
 	}
 
+	// advised keeps the "the gate is advising here" note to once per deliverable
+	// per pass, so a real signal does not become a wall of repeated lines.
+	advised := map[string]bool{}
 	var out []Candidate
 	for _, it := range items {
 		st := authority.State(it.State)
@@ -251,11 +254,23 @@ func (d *Dispatcher) Candidates(f Filter) ([]Candidate, error) {
 
 		if seg, ok := segByID[it.SegmentID]; ok {
 			if st := authority.SegmentState(seg.State); st.Known() && !st.OpenForWork() {
-				// The handoff gate. A breakdown nobody has reviewed does not become work,
-				// and the reason is stated rather than the item silently not appearing.
-				d.log("HELD %s — %s is %s; the breakdown has not been reviewed against its brief yet",
-					it.ID, seg.ID, seg.State)
-				continue
+				// The handoff gate. A breakdown nobody has reviewed does not become
+				// work — for work that reaches something real. Below the declared
+				// threshold the review still runs and still records everything it
+				// finds; it simply does not hold the item, because a contested plan
+				// for a page that reaches a file is not worth stopping twelve items
+				// for. Said out loud the first time, so an advised gate is never a
+				// silent one.
+				if authority.PlanGateHolds(it.Radius, d.Cfg.Blast) {
+					d.log("HELD %s — %s is %s; the breakdown has not been reviewed against its brief yet",
+						it.ID, seg.ID, seg.State)
+					continue
+				}
+				if !advised[it.SegmentID] {
+					advised[it.SegmentID] = true
+					d.log("ADVISED %s is %s and its breakdown is still under review, but this work is blast radius %q — below plan_gate_min %q, so the review advises rather than holds. Its objections are still recorded and still reach the next planner.",
+						seg.ID, seg.State, orNone(it.Radius), d.Cfg.Blast.PlanGateMin)
+				}
 			}
 		}
 		// A stage with several tasks offers one candidate per task still

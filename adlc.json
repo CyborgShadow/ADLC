@@ -389,6 +389,7 @@
 
   "blast": {
     "auto_apply_max": "none",
+    "plan_gate_min": "host",
     "named_approver_min": "host",
     "two_approvals_min": "region",
     "approval_ttl_minutes": 1440

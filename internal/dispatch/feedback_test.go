@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/CyborgShadow/ADLC/internal/authority"
 	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/envelope"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
@@ -310,5 +311,42 @@ func TestARejectionBecomesALessonForTheNextPlanner(t *testing.T) {
 		Segment: ledger.Segment{ID: "S1"}}, &envelope.Envelope{Verdict: "reject"})
 	if len(d.lessons(planner, "")) != before {
 		t.Error("a rejection that said nothing was recorded as a lesson anyway")
+	}
+}
+
+// An unreviewed breakdown advises on source-only work and holds everything else.
+//
+// The end-to-end half of the rule: the authority test pins the decision, this
+// pins that the dispatcher acts on it. One contested plan for a static page had
+// kept twelve items unstartable across four rejections.
+func TestAnUnreviewedPlanAdvisesSourceOnlyWorkAndHoldsTheRest(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	d.Cfg.Blast.PlanGateMin = config.RadiusHost
+
+	// A deliverable whose breakdown is still under review.
+	h.segmentAt(t, "S1", "seg", "Build the thing", 3, string(authority.SegValidating))
+	h.item(t, "S1-001", "S1", "ui", "ready")
+
+	cands, err := d.Candidates(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) == 0 {
+		t.Fatal("source-only work was held by a breakdown still under review; the review advises here")
+	}
+
+	// The firing case: the same unreviewed breakdown still holds work that
+	// reaches a machine.
+	h.itemAt(t, "S1-002", "S1", "ui", "ready", string(config.RadiusHost))
+	held, err := d.Candidates(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range held {
+		if c.Item.ID == "S1-002" {
+			t.Fatal("host-radius work started on a breakdown nobody had reviewed")
+		}
 	}
 }

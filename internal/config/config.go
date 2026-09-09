@@ -200,6 +200,24 @@ type BlastPolicy struct {
 	// approves a specific plan digest; this bounds how long that stays true even
 	// when the digest has not moved.
 	ApprovalTTLMinutes int `json:"approval_ttl_minutes"`
+	// PlanGateMin is the lowest blast radius at which an unreviewed breakdown
+	// HOLDS the work under it.
+	//
+	// Below it, plan validation still runs and its objections are still
+	// recorded, still become lessons the next planner is given, and still show
+	// on every surface — it simply does not stop the items from being built.
+	//
+	// The rule it replaces held everything: one contested plan for a static page
+	// that reaches nothing kept twelve items unstartable for hours across four
+	// rejections, and the fleet's only escalation was to ask a person. Blocking
+	// is right for work that reaches something real and is pure cost on work
+	// that reaches a file.
+	//
+	// Empty means host: source-only work is advised, everything else is held.
+	// An unrecognised value HOLDS, like every other radius comparison here — the
+	// failure this policy exists to prevent is unreviewed work reaching
+	// something, and a typo must not be the thing that lets it.
+	PlanGateMin Radius `json:"plan_gate_min,omitempty"`
 }
 
 // Radius is the reach of a change if it is wrong.
@@ -457,6 +475,14 @@ func (c *Config) validate() error {
 		if lp.Capability != "" && len(c.WorkersWith(lp.Capability)) == 0 {
 			return fmt.Errorf("loop %s drains %q work and no declared worker holds that capability, so it would fire forever and find nothing", lp.Name, lp.Capability)
 		}
+	}
+	if c.Blast.PlanGateMin == "" {
+		// Source-only work is advised; everything else is held.
+		c.Blast.PlanGateMin = RadiusHost
+	}
+	if !c.Blast.PlanGateMin.Known() {
+		return fmt.Errorf(
+			"blast.plan_gate_min %q is not a known radius. It decides where an unreviewed breakdown HOLDS the work under it, so an unrecognised value is refused rather than guessed: guessing low would let unreviewed work reach something real", c.Blast.PlanGateMin)
 	}
 	if c.Blast.ApprovalTTLMinutes <= 0 {
 		c.Blast.ApprovalTTLMinutes = 24 * 60

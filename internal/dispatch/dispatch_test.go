@@ -684,3 +684,23 @@ func (h *harness) moveSegment(t *testing.T, id, to string) {
 		t.Fatal(err)
 	}
 }
+
+// itemAt seeds an item with a blast radius other than none, for the rules that
+// turn on how far work reaches.
+func (h *harness) itemAt(t *testing.T, id, seg, area, state, radius string) {
+	t.Helper()
+	if _, err := h.Led.Append("t", ledger.KindItemCreated, id, ledger.ItemCreated{
+		ID: id, SegmentID: seg, Title: "item " + id, Area: area,
+		Radius: radius, Resources: []string{"a-machine"},
+		Criteria: []string{"it does the thing"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if state != "queued" {
+		if _, err := h.Led.Append("t", ledger.KindItemTransitioned, id, ledger.ItemTransitioned{
+			ItemID: id, From: "queued", To: state, RunID: "seed",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

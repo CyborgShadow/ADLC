@@ -333,6 +333,8 @@ func (s *Server) cfgSafety() ([]cfgRadiusRow, []cfgSetting, string) {
 	set := []cfgSetting{
 		{"auto_apply_max", string(b.AutoApplyMax),
 			"The largest radius an agent may apply with nobody watching. Raise it and changes of that size stop appearing on the Approvals page at all."},
+		{"plan_gate_min", string(b.PlanGateMin),
+			"From this radius up, work does not start until a validator has reviewed the breakdown it came from. Below it the review still runs and everything it finds is still recorded and still reaches the next planner — it advises rather than holds, because one contested plan for work that reaches a file should not stop a dozen items."},
 		{"named_approver_min", string(b.NamedApproverMin),
 			"From this radius up, an approval has to carry a person's name. Below it, an approval row with no name still counts — which is nobody, recorded."},
 		{"two_approvals_min", string(b.TwoApprovalsMin),
