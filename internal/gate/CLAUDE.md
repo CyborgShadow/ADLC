@@ -32,6 +32,13 @@ budget expired before is `UNKNOWN` and not the `RED` a hang earns: the check's c
 the run's expiry, so reporting "timed out after 15m0s" there blames a check that was never given
 a second of those fifteen minutes, and sends whoever reads it hunting a hang that never happened.
 
+**Reading `ctx.Err()` as a yes-or-no.** A stopped parent is not one condition but two, and the
+parent's error is read by *which kind* it is: `context.Canceled` is somebody stopping the run —
+Ctrl-C, a shutdown signal — and `context.DeadlineExceeded` is the run's budget expiring. Both are
+`UNKNOWN`, but only one of them is about a clock. Blaming a budget for an operator pressing Ctrl-C
+appends a message to the chain that names an expiry that never happened, and sends its reader to
+raise `dispatch.timeout_seconds` against a stop no timeout would have prevented.
+
 **Walking the tree unscoped.** `TreeState` refuses to guess: with no `source_roots` it returns an
 error rather than reporting clean. An unscoped walk counts vendored dependencies and build output
 as uncommitted work and refuses runs over a tree nobody edited.
@@ -46,6 +53,7 @@ the rule says so, a run that discovered nothing is a failure, a counting check r
 scan, an absent tool is `UNKNOWN` not green, a behavioural check with no artifact is `UNKNOWN`, a
 fabricated exit code is a discrepancy, an honest `not_run` never is, a claim is judged in the
 channel the observation was, silence about a failing check is an omission but silence about a
-passing one is not, a gate with no declared checks is not green, and a run that ran out of its own
-budget says so rather than blaming a check it never started — while a check that really does
-outlive its own budget is still `RED`.
+passing one is not, a gate with no declared checks is not green, a run that ran out of its own
+budget says so rather than blaming a check it never started, and a run somebody *cancelled* says
+that instead of naming a budget — while an expired run still names its budget and a check that
+really does outlive its own budget is still `RED`.

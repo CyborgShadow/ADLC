@@ -420,7 +420,43 @@ func hangCmd(t *testing.T) []string {
 	return []string{self, "-test.run=^TestHangUntilKilled$"}
 }
 
-// TestARunOutOfBudgetSaysSoInsteadOfBlamingTheCheck is the firing case.
+// TestACancelledRunSaysItWasCancelledRatherThanOutOfBudget is the firing case.
+//
+// A cancelled parent and an expired one are both a non-nil ctx.Err(), and the
+// guard above read only that: an operator pressing Ctrl-C got "the run's
+// budget was exhausted" appended to the chain, naming a clock that never
+// expired and sending its reader to raise dispatch.timeout_seconds against a
+// stop no timeout would have prevented.
+func TestACancelledRunSaysItWasCancelledRatherThanOutOfBudget(t *testing.T) {
+	cfg := mustConfig(t, []config.Check{{
+		ID: "slow", Command: hangCmd(t), Env: []string{hangEnv},
+		Verdict: config.VerdictExitZero, TimeoutSeconds: 900,
+	}})
+	r := &Runner{Cfg: cfg, Dir: t.TempDir()}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	obs := r.runOne(ctx, cfg.Check("slow"))
+
+	if !strings.Contains(obs.Why, "cancelled") {
+		t.Errorf("the reason should name the cancellation as what stopped the run, got %q", obs.Why)
+	}
+	if strings.Contains(obs.Why, "budget") {
+		t.Errorf("no budget expired here; blaming one sends its reader to raise a timeout, got %q", obs.Why)
+	}
+	// It did not run, so it cannot have passed, and it did not hang either.
+	if obs.Verdict != StatusUnknown {
+		t.Errorf("a check that was never started is UNKNOWN, got %s (%s)", obs.Verdict, obs.Why)
+	}
+	if obs.Ran {
+		t.Errorf("the check never started; recording it as ran claims evidence nobody has")
+	}
+}
+
+// TestARunOutOfBudgetSaysSoInsteadOfBlamingTheCheck is the first clean case for
+// the guard above: an expired parent is still reported as the exhausted budget
+// it is. Reclassifying every non-nil parent error as a cancellation would pass
+// the firing case and lose the distinction the guard exists to draw.
 //
 // The check's context is derived from the run's, so an expired run expires it
 // too — and the observation then read "timed out after 15m0s" about a check
@@ -452,8 +488,8 @@ func TestARunOutOfBudgetSaysSoInsteadOfBlamingTheCheck(t *testing.T) {
 	}
 }
 
-// TestACheckThatOutlivesItsOwnBudgetIsStillRed is the clean case for the guard
-// above: with the run still inside its budget, a check that hangs past its own
+// TestACheckThatOutlivesItsOwnBudgetIsStillRed is the second clean case for
+// the guards above: with the run still inside its budget, a check that hangs past its own
 // is reported as the hang it is. A guard that reclassified every timeout would
 // pass the firing case and disarm the one rule this package has about hangs.
 func TestACheckThatOutlivesItsOwnBudgetIsStillRed(t *testing.T) {

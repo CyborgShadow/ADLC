@@ -250,6 +250,15 @@ func (r *Runner) runOne(ctx context.Context, ch *config.Check) Observation {
 	obs.Output = tail(buf.String(), 8000)
 
 	switch {
+	case err != nil && errors.Is(ctx.Err(), context.Canceled):
+		// Somebody stopped the run — Ctrl-C, a shutdown signal, a cancelled
+		// parent. Reporting that as an exhausted budget names a clock that never
+		// expired, and sends its reader to raise dispatch.timeout_seconds against
+		// a stop that no timeout would have prevented. The check did not run, so
+		// this is UNKNOWN and not the RED a real hang earns.
+		obs.Why = "the run was cancelled before the check could be given its own time — check not run, NOT passed"
+		obs.Verdict = StatusUnknown
+		return obs
 	case err != nil && ctx.Err() != nil:
 		// The run's own budget ran out, not the check's. The child context
 		// inherits the parent's expiry, so a check that was never given a second
