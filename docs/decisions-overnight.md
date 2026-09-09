@@ -109,6 +109,35 @@ mechanism now carries a refused envelope's shape forward; it does not yet carry
 an answered question forward to a sibling run. That is a real gap and it is
 listed below.
 
+
+## D6 — S1-019-Q1: an agent's self-service commands were broken, and it was right to stop
+
+**Asked because** every `adlc` subcommand a worker is told to use — `item show`,
+`run list`, `gate run` — refused the `ADLC_DB` it is given, taking the whole
+`file:...?mode=ro` DSN as a filesystem path and trying to create a directory
+called `file:C:...`.
+
+**The agent's lean** was an item against the ledger-open path, and it explicitly
+refused the alternative of handing workers a plain path because that would give
+every worker a writable handle to the ledger, which the first invariant is
+against. Both halves of that reasoning are right.
+
+**Decided:** no item. `ledger.Open` has accepted a `file:` DSN since `5e70b57` at
+03:35 this morning. The run works in a worktree cut from its item's branch, which
+is based on a commit from *before* that, so `go run ./cmd/adlc` in its own
+workspace builds an old `adlc` that knows nothing about DSNs. I reproduced every
+command it named against the current tree, from inside a workspace, and they all
+work. It clears itself as branches rebase past `5e70b57`.
+
+**What it actually found, and I am leaving for you:** a worker self-services with
+a binary built from *its own branch*, so any change to the control plane's CLI
+contract is invisible to every run already in flight — and looks to that run like
+a defect in the tree it is holding. The obvious fix is to bring the item's branch
+up to trunk when a workspace is prepared, merging trunk in where it is clean and
+carrying on where it is not. I have not done it: it rewrites real branches
+carrying real work, and that is a change I want you watching rather than one I
+land while you are asleep.
+
 ## Changes made without being asked
 
 These were defects, not judgement calls, but they are listed because each
