@@ -119,12 +119,24 @@ expected; one that is not is worth asking about.
 
 ### Money
 
-`report fleet` prints 24-hour and total spend. Two things to flag:
+`report fleet` prints 24-hour and total spend. Four things can appear beside those two
+figures, and each one means the number next to it is not the whole story:
 
-- `no daily cap configured — unlimited, which is not the same as zero`. Say it plainly if
-  it appears.
-- `UNPRICED` — finished runs used tokens under a model with no price entry. Cost unknown,
-  not cost nothing, and the daily cap can never be reached while a model is unpriced.
+- `no daily cap configured — unlimited, which is not the same as zero`, on the 24-hour
+  line. Say it plainly if it appears.
+- `INCOMPLETE (a floor: N run(s) reported no usage)`, on either figure. The figure is a
+  lower bound, not a total. Report it as a floor — a floor read as a total is how a fleet
+  is believed to be under a cap it has already passed.
+- `UNMEASURED` — N finished runs reported no token usage at all, with the first one named.
+  Their cost is UNKNOWN, not zero. This is what the INCOMPLETE marker is counting.
+- `UNPRICED` — N finished runs used tokens under a model with no price entry, with the
+  first one named. Cost unknown, not cost nothing, it is not included in the figures above,
+  and the daily cap can never be reached while a model is unpriced.
+
+The last two are different faults: UNMEASURED means nobody recorded the tokens, UNPRICED
+means the tokens were recorded but the model has no price. Naming the wrong one sends
+somebody to fix the wrong thing — a harness that reports no usage, or a missing entry in
+the pricing table.
 
 ### The record itself
 
@@ -148,7 +160,7 @@ Plain language. No table of raw output. This order:
 4. **Lanes that stopped**, with how long they have been silent, and roles that have never
    run.
 5. **Anything about the record or the money** worth knowing — TAMPERED, UNKNOWN, stale
-   projections, UNPRICED runs, no daily cap.
+   projections, UNMEASURED or UNPRICED runs, an INCOMPLETE figure, no daily cap.
 6. **The single next action**, and whose it is. If it is theirs, say exactly where. If it is
    a config change, describe it and offer to do it in a separate step — this skill does not
    make it.
