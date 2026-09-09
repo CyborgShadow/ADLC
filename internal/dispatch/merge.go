@@ -3,6 +3,8 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"strings"
 
 	"github.com/CyborgShadow/ADLC/internal/authority"
 	"github.com/CyborgShadow/ADLC/internal/gate"
@@ -147,18 +149,56 @@ func (d *Dispatcher) mergeGate() merge.GateFunc {
 }
 
 // branchFor finds the ref an item's work lives on: the branch of the most
-// recent run against it that recorded one.
+// branchFor is the branch that carries this item's work.
+//
+// It used to be the newest run's branch, whichever run that was. By the time an
+// item reaches the merge queue the newest run is an arbiter or a janitor, and
+// those change nothing — so the queue tried to land a branch sitting exactly on
+// the trunk and refused it as a conflict: "already at <trunk sha>". The work was
+// on the engineer's branch the whole time, one row further down.
+//
+// So the rule is what the sentence says: the branch that carries the work is the
+// newest one with commits the trunk does not have. That is measured rather than
+// inferred from the role, because a tester adding a test and a janitor tidying
+// one both legitimately commit, and picking by capability would land the wrong
+// branch the first time one of them did.
 func (d *Dispatcher) branchFor(itemID string) (string, error) {
 	runs, err := d.Led.Runs(itemID, 0)
 	if err != nil {
 		return "", err
 	}
+	trunk := d.Cfg.Dispatch.Trunk
+	if trunk == "" {
+		trunk = "main"
+	}
+	var first string
 	for _, r := range runs {
-		if r.Branch != "" {
+		if r.Branch == "" {
+			continue
+		}
+		if first == "" {
+			first = r.Branch
+		}
+		if d.branchHasWork(trunk, r.Branch) {
 			return r.Branch, nil
 		}
 	}
-	return "", nil
+	// Nothing is ahead of the trunk. Returning the newest branch anyway lets
+	// the queue report what it found rather than reporting no branch at all,
+	// which reads as a run that never recorded one.
+	return first, nil
+}
+
+// branchHasWork reports whether a branch carries commits the trunk does not.
+func (d *Dispatcher) branchHasWork(trunk, branch string) bool {
+	out, err := exec.Command("git", "-C", d.Repo, "rev-list", "--count",
+		trunk+".."+branch).Output()
+	if err != nil {
+		// Unknown, so do not claim it is empty: a branch this cannot measure is
+		// better offered to the queue, which checks properly, than skipped here.
+		return true
+	}
+	return strings.TrimSpace(string(out)) != "0"
 }
 
 // leaveMerging records both halves of a refusal: the reason, in the same place
