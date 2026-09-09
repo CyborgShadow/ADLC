@@ -43,3 +43,6 @@ command keeps its colons, every parameterised verdict rule can be declared, a pa
 metacharacters, a missing parameter is named here rather than at load, and a spec that cannot be
 built is refused. `commands_prompt_test.go` pins that `prompt list` answers on a project with no
 prompts yet and exits non-zero while any referenced prompt is absent.
+`commands_story_test.go` pins `run envelope`: the bytes a run was refused for print verbatim and
+exit `exitOK`, and a run that retained nothing says so rather than reporting success over an empty
+envelope.
