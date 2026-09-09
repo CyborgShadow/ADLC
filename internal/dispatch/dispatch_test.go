@@ -705,3 +705,140 @@ func (h *harness) itemAt(t *testing.T, id, seg, area, state, radius string) {
 		}
 	}
 }
+
+// questionEnvelope is a worker's report carrying questions and nothing else of
+// interest, so a test about what happens to a question is not also a test about
+// verdicts, gates or generated items.
+func questionEnvelope(qs ...map[string]any) string {
+	env := map[string]any{
+		"envelope_version": "1",
+		"run_id":           "{{run_id}}",
+		"worker_type":      "frontend",
+		"verdict":          "fail",
+		"summary":          "could not decide",
+		"commands_run":     []any{},
+		"questions":        qs,
+		"usage":            map[string]any{"input_tokens": 10, "output_tokens": 5},
+	}
+	b, _ := json.Marshal(env)
+	return string(b)
+}
+
+func questionByID(t *testing.T, h *harness, id string) ledger.Question {
+	t.Helper()
+	// The read path `adlc question list` uses, so what this asserts is what a
+	// person running that command would see.
+	qs, err := h.Led.Questions("", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range qs {
+		if q.ID == id {
+			return q
+		}
+	}
+	var ids []string
+	for _, q := range qs {
+		ids = append(ids, q.ID)
+	}
+	t.Fatalf("no question %q in the record; it lists %v", id, ids)
+	return ledger.Question{}
+}
+
+// TestAQuestionWhoseIdIsTakenIsRecordedNotDestroyed is the firing case.
+//
+// An agent composes the question id, and nothing makes it unique — the
+// preamble's worked example handed every run the same one. `adlc_question.id`
+// is a PRIMARY KEY, so the second claim on an id was refused by the chain and
+// the question was then dropped with a log line: a fully-formed question, with
+// text, lean and evidence, that nobody was ever asked to answer. It is now
+// re-raised under the control plane's own id, which cannot collide.
+func TestAQuestionWhoseIdIsTakenIsRecordedNotDestroyed(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "in_progress")
+
+	// An earlier run already took the id this run is about to claim.
+	if _, err := h.Led.Append("t", ledger.KindQuestionRaised, "S1-001-Q1", ledger.QuestionRaised{
+		ID: "S1-001-Q1", ItemID: "S1-001", Text: "An earlier question",
+		Lean: "the earlier lean", RaisedBy: "earlier-run",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.Run.envelope = questionEnvelope(map[string]any{
+		"id": "S1-001-Q1", "blocking": false,
+		"text":     "Should the id be scoped to the item or to the run?",
+		"lean":     "to the run, because run ids are already unique",
+		"evidence": "the preamble's example handed every run the same id",
+	})
+	if _, err := h.D.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	runID := h.Run.lastInv.RunID
+	if runID == "" {
+		t.Fatal("no run was dispatched")
+	}
+
+	got := questionByID(t, h, "Q-"+runID+"-1")
+	if got.Text != "Should the id be scoped to the item or to the run?" {
+		t.Errorf("the agent's question did not survive the rename: %q", got.Text)
+	}
+	if got.Lean != "to the run, because run ids are already unique" {
+		t.Errorf("the lean did not survive the rename: %q", got.Lean)
+	}
+	if got.Evidence != "the preamble's example handed every run the same id" {
+		t.Errorf("the evidence did not survive the rename: %q", got.Evidence)
+	}
+	if got.ItemID != "S1-001" {
+		t.Errorf("the question is not attached to the item it was raised against, got %q", got.ItemID)
+	}
+	if got.RaisedBy != runID {
+		t.Errorf("the question does not name the run that raised it, got %q", got.RaisedBy)
+	}
+
+	// The question already on file is untouched: this recovers the second
+	// question, it does not overwrite the first.
+	first := questionByID(t, h, "S1-001-Q1")
+	if first.Text != "An earlier question" {
+		t.Errorf("the earlier question was overwritten: %q", first.Text)
+	}
+	if !h.logged("QUESTION ID TAKEN") {
+		t.Error("the collision was recovered silently; a question filed under a name its author did not choose has to be said out loud")
+	}
+}
+
+// TestAQuestionWithAFreeIdKeepsTheIdTheAgentGave is the clean case: without it
+// the test above passes on the day every question is quietly renamed.
+func TestAQuestionWithAFreeIdKeepsTheIdTheAgentGave(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "in_progress")
+
+	h.Run.envelope = questionEnvelope(map[string]any{
+		"id": "S1-001-Q7", "blocking": true,
+		"text":     "Which store backs the ledger?",
+		"lean":     "sqlite",
+		"evidence": "the fleet is single-host today",
+	})
+	if _, err := h.D.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := questionByID(t, h, "S1-001-Q7")
+	if got.Text != "Which store backs the ledger?" || !got.Blocking {
+		t.Errorf("the question was altered on the way in: %+v", got)
+	}
+	qs, err := h.Led.Questions("", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 1 {
+		t.Fatalf("one question was raised; the record holds %d", len(qs))
+	}
+	if h.logged("QUESTION ID TAKEN") {
+		t.Error("a free id was treated as a collision")
+	}
+}

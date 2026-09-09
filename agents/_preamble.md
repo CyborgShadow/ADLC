@@ -110,12 +110,17 @@ cannot continue without the answer; it parks the item visibly.
 Every field, and `text` above all:
 
 ```json
-{ "id": "S1-Q1",
+{ "id": "<the id of the work you are on>-Q1",
   "blocking": true,
   "text": "THE QUESTION ITSELF, as a question, readable by somebody who has not seen your run.",
   "lean": "What you would do and why, with the trade-off named.",
   "evidence": "What you already established that makes this a real fork rather than a guess." }
 ```
+
+Scope the `id` to the work it was raised against rather than reusing a fixed one, so two runs do
+not both claim it. If it is taken anyway the control plane records the question under an id of its
+own — a question is never dropped for its name — but then it is filed under a name you did not
+choose.
 
 `text` is the question. Leaving it empty and putting the whole thing in `lean` produces a card on
 somebody's screen that offers a recommendation about nothing — they cannot tell what they are

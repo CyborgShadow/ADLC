@@ -882,9 +882,14 @@ func (d *Dispatcher) existingItemSummary(segmentID string) string {
 
 func (d *Dispatcher) recordQuestions(runID string, c Candidate, env *envelope.Envelope) {
 	for i, q := range env.Questions {
+		// The control plane's own id for this question, and the one id that
+		// cannot already be taken: a run id is minted unique and the index is
+		// unique within the run. It is the fallback below as well as the name
+		// for a question the agent did not name at all.
+		derived := fmt.Sprintf("Q-%s-%d", runID, i+1)
 		id := q.ID
 		if id == "" {
-			id = fmt.Sprintf("Q-%s-%d", runID, i+1)
+			id = derived
 		}
 		// A question with no question in it is still recorded, because losing a
 		// blocking one is worse than showing a defective one — but it is said
@@ -896,14 +901,38 @@ func (d *Dispatcher) recordQuestions(runID string, c Candidate, env *envelope.En
 			d.log("MALFORMED QUESTION %s from %s (%s) — no `text`, so nothing states what is being asked. Whoever answers it is guessing at the question. Fix the role's prompt: `text` is the question, `lean` is only what the agent would do about it.",
 				id, runID, c.Worker)
 		}
-		if _, err := d.Led.Append(d.Actor, ledger.KindQuestionRaised, id, ledger.QuestionRaised{
+		p := ledger.QuestionRaised{
 			ID: id, ItemID: c.Item.ID, Blocking: q.Blocking, Text: q.Text,
 			Lean: q.Lean, Evidence: q.Evidence, RaisedBy: runID,
-		}); err != nil {
-			// Swallowing this left a blocking question that nobody would ever
-			// see, on an item that would sit still with no stated reason.
-			d.log("QUESTION %s from %s could not be recorded: %v — the item it was raised against will look idle for no reason", id, runID, err)
 		}
+		_, err := d.Led.Append(d.Actor, ledger.KindQuestionRaised, id, p)
+		if err == nil {
+			continue
+		}
+		// The id an agent composes is not unique and was never guaranteed to
+		// be: the preamble's own worked example handed every run the same one,
+		// and `adlc_question.id` is a PRIMARY KEY, so the second question to
+		// claim a taken id was refused by the chain and then dropped with a
+		// log line nobody reads. A fully-formed non-blocking question went that
+		// way. The question is the thing worth keeping; the id is not, so the
+		// question is re-raised under the control plane's own id.
+		//
+		// Retried on any append failure rather than on a detected collision:
+		// the append is what decides, and a question recorded under a second
+		// name beats a question that only a log line remembers.
+		if id != derived {
+			p.ID = derived
+			_, second := d.Led.Append(d.Actor, ledger.KindQuestionRaised, derived, p)
+			if second == nil {
+				d.log("QUESTION ID TAKEN %s from %s claimed id %q, which the chain refused (%v); it is recorded as %s instead, with its text intact",
+					c.Item.ID, runID, id, err, derived)
+				continue
+			}
+			err = second
+		}
+		// Swallowing this left a blocking question that nobody would ever
+		// see, on an item that would sit still with no stated reason.
+		d.log("QUESTION %s from %s could not be recorded: %v — the item it was raised against will look idle for no reason", id, runID, err)
 	}
 }
 

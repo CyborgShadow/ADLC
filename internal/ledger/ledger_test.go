@@ -395,3 +395,80 @@ func TestRebuildRestoresAProjectionFromTheChain(t *testing.T) {
 		t.Error("the append-only guards must survive a rebuild")
 	}
 }
+
+// TestASecondQuestionUnderATakenIdAppendsNothing pins the chain's half of the
+// contract the dispatcher is written against. `adlc_question.id` is a PRIMARY
+// KEY and `apply` does a plain INSERT, so a duplicate id is refused — and
+// because the whole append is one transaction, the refusal costs the chain
+// nothing: the head does not move and the question already on file is not
+// touched, answer included. The dispatcher recovers by re-raising the question
+// under an id of its own, and this test is what says that recovery is a change
+// above the chain rather than a change to it.
+func TestASecondQuestionUnderATakenIdAppendsNothing(t *testing.T) {
+	l := open(t)
+	seed(t, l)
+
+	if _, err := l.Append("pm", KindQuestionRaised, "S1-001-Q1", QuestionRaised{
+		ID: "S1-001-Q1", ItemID: "S1-001", Blocking: true,
+		Text: "Which store?", Lean: "sqlite", Evidence: "the fleet is single-host",
+		RaisedBy: "wp-1",
+	}); err != nil {
+		t.Fatalf("first question: %v", err)
+	}
+	if _, err := l.Append("pm", KindQuestionAnswered, "S1-001-Q1", QuestionAnswered{
+		ID: "S1-001-Q1", Answer: "sqlite", AnsweredBy: "a person",
+	}); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+
+	beforeSeq, beforeHash, err := l.Head()
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+
+	// Firing case: a second run claims the id the first one took.
+	if _, err := l.Append("pm", KindQuestionRaised, "S1-001-Q1", QuestionRaised{
+		ID: "S1-001-Q1", ItemID: "S1-002", Text: "Something else entirely",
+		Lean: "the other thing", Evidence: "measured", RaisedBy: "wp-2",
+	}); err == nil {
+		t.Fatal("a second question under a taken id must be refused; letting it through would overwrite a question somebody has already answered")
+	}
+
+	afterSeq, afterHash, err := l.Head()
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	if afterSeq != beforeSeq || afterHash != beforeHash {
+		t.Fatalf("the refused append moved the head from %d/%s to %d/%s; a rejected event must leave no trace on the chain",
+			beforeSeq, beforeHash, afterSeq, afterHash)
+	}
+
+	qs, err := l.Questions("", false)
+	if err != nil {
+		t.Fatalf("questions: %v", err)
+	}
+	if len(qs) != 1 {
+		t.Fatalf("want the one question that was recorded, got %d", len(qs))
+	}
+	got := qs[0]
+	if got.Text != "Which store?" || got.Lean != "sqlite" || got.Evidence != "the fleet is single-host" {
+		t.Errorf("the stored question was altered by the refused append: %+v", got)
+	}
+	if got.Answer != "sqlite" || !got.Answered {
+		t.Errorf("the answer already recorded against the question was lost: %+v", got)
+	}
+	if got.ItemID != "S1-001" {
+		t.Errorf("the question was re-pointed at the second run's item: %+v", got)
+	}
+
+	// Clean case: a fresh id still appends, so the guard is refusing the
+	// collision rather than refusing questions.
+	if _, err := l.Append("pm", KindQuestionRaised, "S1-002-Q1", QuestionRaised{
+		ID: "S1-002-Q1", ItemID: "S1-002", Text: "Something else entirely", RaisedBy: "wp-2",
+	}); err != nil {
+		t.Fatalf("a question with a free id must still be recorded: %v", err)
+	}
+	if qs, err = l.Questions("", false); err != nil || len(qs) != 2 {
+		t.Fatalf("want both questions after the fresh id, got %d (%v)", len(qs), err)
+	}
+}
