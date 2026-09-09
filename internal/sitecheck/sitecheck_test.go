@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -982,5 +983,113 @@ func TestTheSourcesListIsReadWholeRatherThanCollapsed(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestTheShippedFixturesStillCarryTheDefectTheyAreNamedFor runs the directories
+// S1-007's criteria name as arguments to `sitecheck -dir`, because nothing else
+// in the suite touches them. Every other test in this package builds its site
+// in memory with goodSite and swap, and cmd/sitecheck walks testdata/bad-* and
+// maps the suffix to a rule id — these four are deliberately not named bad-*,
+// since there is no rule called "sources-second-link". So today they are
+// exercised only when a person types the command out of the criterion, and a
+// fixture nobody runs is one that rots into a page with nothing wrong with it
+// while the criterion it stands for still reads as met.
+//
+// The clean case is the other half and is not decoration: what these rules must
+// refuse is an unpinned URL, an ambiguous id and an ambiguous entry, and
+// site-ok — five entries, five pinned URLs, one per topic — is what says so.
+func TestTheShippedFixturesStillCarryTheDefectTheyAreNamedFor(t *testing.T) {
+	for _, c := range shippedFixtureCases {
+		t.Run(c.dir, func(t *testing.T) {
+			res, err := Check(os.DirFS(filepath.Join("testdata", c.dir)), nil)
+			if err != nil {
+				t.Fatalf("checking testdata/%s: %v", c.dir, err)
+			}
+			got := joinFindings(res.Findings)
+			if len(c.want) == 0 {
+				if !res.OK() {
+					t.Fatalf("the conforming fixture produced findings: %s", got)
+				}
+				return
+			}
+			if res.OK() {
+				t.Fatalf("testdata/%s produced no findings: the fixture no longer carries the defect the criterion names it for", c.dir)
+			}
+			// Each substring, not merely "some finding fired": a page missing
+			// one topic still fails when the gap moves to another topic, so an
+			// assertion satisfied by the presence of a finding would pass a
+			// fixture that had stopped standing for its criterion.
+			for _, want := range c.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("the findings on testdata/%s do not carry %q: %s", c.dir, want, got)
+				}
+			}
+		})
+	}
+}
+
+// shippedFixtureCases is the table above, hoisted so the walk below can hold it
+// to the tree. want lists substrings of the findings; none means the fixture
+// must come back clean.
+var shippedFixtureCases = []struct {
+	dir  string
+	want []string
+}{
+	{"site-ok", nil},
+
+	// AC-2, the three shapes that read like a citation and were never opened.
+	// Each names the rule id and the URL, which is what the criterion's command
+	// is required to print.
+	{"sources-second-link", []string{
+		"html.source-pinned",
+		"source #s3 names 2 documents",
+		`source #s3 cites "https://example.org/invented-oxytocin-paper"`,
+		"not a pinned source",
+	}},
+	{"sources-repeated-id", []string{
+		"html.source-pinned",
+		"source #s1 is declared twice",
+		`source #s1 cites "https://example.org/never-opened"`,
+	}},
+	{"sources-second-section", []string{
+		"html.source-pinned",
+		"section#sources is declared 2 times",
+		`source #s6 cites "https://example.org/never-opened"`,
+	}},
+
+	// AC-4: an omitted subject cannot pass by silence. The finding names the
+	// topic, since a count sends a reviewer to look for which of five.
+	{"four-of-five-topics", []string{"html.topics", "does not cover choosing-a-person"}},
+}
+
+// TestEveryShippedFixtureIsRunBySomething walks testdata rather than trusting
+// the list above to stay complete, because that is the defect this item has
+// already produced once: sources-second-section was added to the tree in the
+// same round, and a table written out by hand goes on passing while the new
+// directory is read by nothing. bad-* is excluded because cmd/sitecheck globs
+// it, and site-empty because TestCheckRefusesASiteItExaminedNothingIn owns the
+// shape it stands for.
+func TestEveryShippedFixtureIsRunBySomething(t *testing.T) {
+	entries, err := os.ReadDir("testdata")
+	if err != nil {
+		t.Fatalf("reading testdata: %v", err)
+	}
+	covered := map[string]bool{"site-empty": true}
+	for _, c := range shippedFixtureCases {
+		covered[c.dir] = true
+	}
+	var walked int
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), "bad-") {
+			continue
+		}
+		walked++
+		if !covered[e.Name()] {
+			t.Errorf("testdata/%s is run by nothing: add it to shippedFixtureCases with what its findings must name, or say here which test owns it", e.Name())
+		}
+	}
+	if walked == 0 {
+		t.Fatal("no fixture directories outside bad-* were found: a walk that discovered zero units of work has failed")
 	}
 }
