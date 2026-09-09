@@ -492,3 +492,43 @@ func TestAFencelessPreambleStillRefreshes(t *testing.T) {
 		t.Errorf("a fenceless preamble was frozen at its startup copy: %q", asm.Text)
 	}
 }
+
+// The researcher is told to research the deliverable, not the repository.
+//
+// It was not, and the bill came in on the first run that mattered: given a brief
+// for a small website about cats for a five- and an eight-year-old, a research
+// pass spent fourteen minutes and more than half its report on the control
+// plane's own internals — its config, its tree guard, its declared checks — and
+// almost nothing on cats or on what a child that age finds delightful. Every
+// sentence was true and the whole document answered a question nobody asked.
+//
+// The prompt caused it. Every instruction in it was about reading source: "every
+// claim about the CODEBASE carries the path it came from", "trace one real path
+// end to end", "read a package's tests before its implementation" — and it named
+// this project's own entry points, adlc.json and cmd/, as where to start. Given
+// that, archaeology is not the agent going wrong; it is the agent complying.
+func TestTheResearcherIsPointedAtTheDeliverableAndNotOnlyAtTheTree(t *testing.T) {
+	lib := thisProjectsLibrary(t)
+	a, err := lib.Assemble("researcher", nil)
+	if err != nil {
+		t.Fatalf("assemble researcher: %v", err)
+	}
+	for _, want := range []string{"subject", "audience"} {
+		if !strings.Contains(a.Text, want) {
+			t.Errorf("the researcher prompt never says %q, so nothing points it at what the deliverable is about", want)
+		}
+	}
+	// The proportion rule is the operative half. Naming the subject once and
+	// then giving four pages of archaeology instructions would read the same to
+	// a grep and produce the same report.
+	if !strings.Contains(a.Text, "Proportion") {
+		t.Error("the prompt does not tell the researcher to weigh subject against tree, so a page for two children can still earn a report about the build system")
+	}
+	// And it must not hardcode THIS project's files as where to start. A prompt
+	// that names adlc.json is a prompt that only works on adlc.
+	for _, leak := range []string{"adlc.json", "cmd/adlc", "internal/errors"} {
+		if strings.Contains(a.Text, leak) {
+			t.Errorf("the researcher prompt names %q, so it steers every deliverable toward this repository's own guts", leak)
+		}
+	}
+}
