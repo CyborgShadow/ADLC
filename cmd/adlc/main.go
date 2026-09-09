@@ -52,7 +52,10 @@ var (
 	flagConfig string
 	flagActor  string
 	flagRepo   string
-	flagJSON   bool
+	// flagRepoSet records that an operator named the path themselves, so a
+	// configured project_root never silently overrides an explicit -repo.
+	flagRepoSet bool
+	flagJSON    bool
 )
 
 func main() {
@@ -74,6 +77,13 @@ func main() {
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		os.Exit(exitUsage)
 	}
+	// Recorded after parsing: an operator who named -repo themselves has answered
+	// the question project_root answers by default, and must not be overridden.
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "repo" {
+			flagRepoSet = true
+		}
+	})
 	args := fs.Args()
 	if len(args) == 0 {
 		usage()
@@ -140,7 +150,27 @@ func withEnv(args []string, f func(*env, []string) int) int {
 	}
 	defer led.Close()
 
-	e := &env{cfg: cfg, led: led, actor: flagActor, repo: flagRepo, jsonOut: flagJSON}
+	// The tree the fleet builds in, which is not always the tree the control
+	// plane lives in. -repo still wins when given, because an operator naming a
+	// path explicitly is answering the question the config answers by default.
+	buildIn := flagRepo
+	if pr := strings.TrimSpace(cfg.Dispatch.ProjectRoot); pr != "" && pr != "." && !flagRepoSet {
+		buildIn = filepath.Join(flagRepo, pr)
+		if st, err := os.Stat(filepath.Join(buildIn, ".git")); err != nil || !st.IsDir() {
+			// Fail closed, and say which of the two things is wrong. Carrying on
+			// with the control plane's own tree would put the fleet to work on
+			// the wrong repository while every surface reported it building the
+			// right one — and a worktree cut from here would hand each agent the
+			// source it was configured not to see.
+			fmt.Fprintf(os.Stderr,
+				"adlc: dispatch.project_root is %q, and %s is not a git repository. "+
+					"The fleet builds there and the merge queue lands there, so it has to exist and be initialised: "+
+					"`git init %s`. Set project_root to \".\" if this control plane is meant to build itself.\n",
+				pr, buildIn, buildIn)
+			return exitUsage
+		}
+	}
+	e := &env{cfg: cfg, led: led, actor: flagActor, repo: buildIn, jsonOut: flagJSON}
 	if e.actor == "" {
 		// An unattributable row on an append-only chain cannot be corrected, only
 		// annotated. Refusing here is cheaper than annotating later.

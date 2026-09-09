@@ -307,6 +307,26 @@ type DispatchPolicy struct {
 	Isolation string `json:"isolation"`
 	// Trunk is the branch the merge queue lands on. Empty means "main".
 	Trunk string `json:"trunk,omitempty"`
+	// ProjectRoot is the repository the fleet BUILDS IN, which is not
+	// necessarily the one the control plane lives in. Empty or "." means they
+	// are the same tree, which is the self-hosting case: adlc improving adlc.
+	//
+	// Anything else points the fleet at a separate git repository, and the point
+	// is what an agent can then see. A worktree is cut from this repository, so
+	// with them separated the control plane's own source is not merely out of
+	// scope for a run — it is not on disk for it.
+	//
+	// That distinction is not tidiness. Pointed at a brief for a small website
+	// and handed a checkout of a Go control plane, a researcher spent fourteen
+	// minutes and over half its report on config loading and tree-dirtiness
+	// guards, because that is what was in front of it. Every sentence was true
+	// and the document answered a question nobody had asked. A prompt can
+	// discourage that; a tree that does not contain the distraction ends it.
+	//
+	// The gate, the merge queue and every workspace follow this root, so the
+	// checks declared here are the PRODUCT's checks — a fleet building a website
+	// declares the website's checks, not a Go toolchain's.
+	ProjectRoot string `json:"project_root,omitempty"`
 }
 
 // PromptPolicy governs the prompt library.

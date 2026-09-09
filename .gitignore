@@ -33,3 +33,8 @@
 # queue sees an empty branch and the item does not land. That is correct for
 # this repository and wrong for one where the site IS the deliverable.
 site/
+
+# The product trees a fleet builds in. Each is its own git repository — that is
+# what makes the control plane invisible to the agents working there, rather
+# than merely out of their declared scope.
+projects/
