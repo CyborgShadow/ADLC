@@ -80,6 +80,29 @@ answers integrity and knowledge separately, so read the verdict rather than the 
 CI also runs `go test -race -count=1 ./...` as a separate job, because a host with no C toolchain
 cannot run the detector at all and "not run" must never be recorded as "passed".
 
+## Stopping a running fleet
+
+**Never kill the control plane process.** It holds agents that are mid-build, and killing it takes
+them with it — the reaper then records every one as `UNKNOWN`, which is real money spent on work
+nobody will ever see. That is not a hypothetical: it is what `internal/dispatch/drain.go` was
+written to end, after six engineer runs went that way in one evening.
+
+```
+go run ./cmd/adlc schedule stop            # asks; waits up to 30m for work in flight
+go run ./cmd/adlc schedule stop -wait 120  # same, but stop watching after 2m
+go run ./cmd/adlc schedule status          # what is in flight, and which lanes are STALE
+```
+
+`schedule stop` writes a stop file under `.adlc/runs/`, which any running control plane reads on
+its next selection pass. Dispatch halts immediately; runs already in flight are left to finish,
+because they are being paid for either way and letting them land is the only thing that makes
+stopping cheap. Ctrl+C at the waiting prompt stops the waiting, not the fleet. A fresh control
+plane calls `ClearStop`, so a previous instruction never shuts down the next one.
+
+`taskkill /F`, `kill -9` and closing the terminal are all the same mistake wearing different
+clothes. Reach for one only when `schedule stop` itself is broken, and expect to pay for every run
+it interrupts.
+
 ## House style
 
 - Comments explain **why**, not what. A comment that restates the mechanics of the line below it is

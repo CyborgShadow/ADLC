@@ -82,7 +82,7 @@ func Fleet(l *ledger.Ledger, cfg *config.Config, now time.Time) (string, error) 
 		return "", err
 	}
 	b.WriteString(workerActivity(stats))
-	b.WriteString(neverRun(cfg, stats, ""))
+	b.WriteString(neverRun(cfg, stats, items, ""))
 	b.WriteString(openQuestions(openQ))
 	b.WriteString(refusalSummary(refusals))
 	return b.String(), nil
@@ -121,7 +121,7 @@ func Segment(l *ledger.Ledger, cfg *config.Config, segmentID string) (string, er
 		return "", err
 	}
 	b.WriteString(workerActivity(stats))
-	b.WriteString(neverRun(cfg, stats, segmentID))
+	b.WriteString(neverRun(cfg, stats, items, segmentID))
 	return b.String(), nil
 }
 
@@ -235,10 +235,30 @@ func workerActivity(stats []ledger.WorkerStat) string {
 // activity and listing what it finds. That inversion is the entire mechanism:
 // a worker that has never run files nothing, so listing what filed renders its
 // absence as silence, and silence reads as fine.
-func neverRun(cfg *config.Config, stats []ledger.WorkerStat, scope string) string {
+//
+// Silence has two causes and they need different actions, so the roll call
+// separates them by counting the work FILED in each silent worker's areas. A
+// role nobody routed anything to is idle, which is ordinary. A role with items
+// sitting in its areas and no runs against them is a ROUTING FAILURE: the work
+// exists, it was filed where somebody owns it, and it never reached them. Until
+// this counted the items, both rendered as the same line — and the unreachable
+// case is indistinguishable from "nobody has got round to it yet", which is
+// exactly how an item stays unbuilt for a night while every surface reads calm.
+func neverRun(cfg *config.Config, stats []ledger.WorkerStat, items []ledger.Item, scope string) string {
 	byType := map[string]ledger.WorkerStat{}
 	for _, s := range stats {
 		byType[s.Type] = s
+	}
+	// Work waiting on each worker, by the same routing the dispatcher uses, so
+	// the report cannot disagree with the picker about who owns an area.
+	waiting := map[string]int{}
+	for _, it := range items {
+		if authority.State(it.State).Terminal() {
+			continue
+		}
+		if owner, ok := cfg.OwnerFor(it.Area, config.CapImplement); ok {
+			waiting[owner]++
+		}
 	}
 	var dark, quiet []config.WorkerDecl
 	for _, w := range cfg.Workers {
@@ -266,6 +286,15 @@ func neverRun(cfg *config.Config, stats []ledger.WorkerStat, scope string) strin
 		b.WriteString("  This is absence, not health. Do not read a missing verdict as a pass.\n\n")
 		for _, w := range dark {
 			fmt.Fprintf(&b, "    %-18s %-14s 0 runs   caps: %s\n", w.Type, w.Layer, strings.Join(w.Capabilities, ","))
+			if n := waiting[w.Type]; n > 0 {
+				were := "items are"
+				if n == 1 {
+					were = "item is"
+				}
+				fmt.Fprintf(&b, "    %-18s UNREACHED: %d unfinished %s filed in this worker's areas and none has reached it.\n",
+					"", n, were)
+				fmt.Fprintf(&b, "    %-18s That is a routing failure, not an idle role — the work exists and nobody is doing it.\n", "")
+			}
 			if w.Description != "" {
 				fmt.Fprintf(&b, "    %-18s %s\n", "", truncate(w.Description, 88))
 			}

@@ -387,3 +387,56 @@ func TestReportingAMissingSegmentIsAnError(t *testing.T) {
 		t.Fatal("a segment that does not exist is not an empty one")
 	}
 }
+
+// A silent role has two possible causes and they need opposite responses, so
+// the roll call has to separate them. Nobody routed work to it is ordinary;
+// work filed in its areas that never reached it is a routing failure. Both
+// rendered as the same line until the report counted the items, and the
+// unreachable case is indistinguishable from a backlog nobody has got to yet.
+func TestASilentWorkerWithWorkInItsAreasIsNamedAsARoutingFailure(t *testing.T) {
+	l, cfg := fixture(t)
+	for _, w := range cfg.Workers {
+		add(t, l, ledger.KindWorkerRegistered, w.Type,
+			ledger.WorkerRegistered{Type: w.Type, Layer: w.Layer, LowCadence: w.LowCadence})
+	}
+	add(t, l, ledger.KindSegmentCreated, "S1", ledger.SegmentCreated{ID: "S1", Title: "First"})
+	// Filed under an area the engineer owns, and left unfinished. The engineer
+	// has no runs, so this is work that exists and reached nobody.
+	add(t, l, ledger.KindItemCreated, "S1-001", ledger.ItemCreated{
+		ID: "S1-001", SegmentID: "S1", Title: "An item", Area: "core", Radius: "none",
+		Criteria: []string{"it works"},
+	})
+
+	out, err := Fleet(l, cfg, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "UNREACHED") {
+		t.Fatal("an unfinished item in a silent worker's area must be reported as unreached, not left to read as an idle role")
+	}
+	if !strings.Contains(out, "routing failure") {
+		t.Error("the report must say what the reader should do about it, not only that it happened")
+	}
+}
+
+// The clean case, without which the guard above could fire on every silent
+// role and the distinction it exists to draw would be worthless.
+func TestASilentWorkerWithNoWorkInItsAreasIsNotCalledARoutingFailure(t *testing.T) {
+	l, cfg := fixture(t)
+	for _, w := range cfg.Workers {
+		add(t, l, ledger.KindWorkerRegistered, w.Type,
+			ledger.WorkerRegistered{Type: w.Type, Layer: w.Layer, LowCadence: w.LowCadence})
+	}
+	add(t, l, ledger.KindSegmentCreated, "S1", ledger.SegmentCreated{ID: "S1", Title: "First"})
+
+	out, err := Fleet(l, cfg, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "NEVER RUN") {
+		t.Fatal("the roll call must still name every silent worker")
+	}
+	if strings.Contains(out, "UNREACHED") {
+		t.Error("a worker with nothing filed in its areas is idle, not unreached — calling that a routing failure teaches the reader to ignore the label")
+	}
+}
