@@ -1253,18 +1253,24 @@ func TestJudgeS1023RefusedVerificationRecordsRedAndClearsNothing(t *testing.T) {
 //
 // The case it needs is the awkward one: the gate refuses the transition off
 // the back of the failing report as well, and the report still has to land.
+//
+// The refusal has to be the checks coming back RED. This test was first written
+// declaring its check over verifying->in_progress, on the belief that a failing
+// task is ejected from the stage; a setback takes the same self-edge a pass does
+// (authority/advance.go), so the declared check was required for an edge nobody
+// travelled and the run was refused as zero_checks_declared instead — the gate
+// with nothing to run, not the gate that ran and said no. The append it guards
+// was still pinned, because the run was refused either way. What went untested
+// was the case the item is actually about: a gate that RAN, observed RED, and
+// refused the move, with the failing report still reaching the record. So the
+// reason is asserted too, and a check declared over the edge that is travelled
+// is what makes it RED.
 func TestAFailedVerificationTaskIsRecordedOnTheClaim(t *testing.T) {
 	ws, routing := specialists()
 	h := newHarness(t, ws, routing)
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
-	// A failing verification task is routed to in_progress rather than round the
-	// self-edge, so the check is declared over that edge — and read the way
-	// `gofmt -l` is, so the gate observes RED there and refuses the move.
-	h.Cfg.Checks = []config.Check{{
-		ID: "noop", Kind: config.KindSource, Command: []string{"go", "version"},
-		Verdict: config.VerdictOutputEmpty, RequiredFor: []string{"verifying->in_progress"},
-	}}
+	h.edgeCheck(config.VerdictOutputEmpty) // the gate will observe RED here
 	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "fail")
 
 	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
@@ -1276,6 +1282,10 @@ func TestAFailedVerificationTaskIsRecordedOnTheClaim(t *testing.T) {
 	}
 	if res.Admitted {
 		t.Fatalf("the move out of verification was admitted over a RED gate: %+v", res)
+	}
+	if res.Reason != "gate_failed" {
+		t.Fatalf("refused as %q, want gate_failed — this test needs the checks to have RUN and failed, "+
+			"because a gate with nothing to run refuses too and proves nothing about the append below", res.Reason)
 	}
 
 	evs, err := h.Led.EventsOfKind([]ledger.Kind{ledger.KindVerificationFailed}, "S1-001", 0)
