@@ -960,17 +960,17 @@ func TestAMeasuredRunUnderTheCapIsStillAdmitted(t *testing.T) {
 
 // --- a verification task clears on the gate's answer -----------------------
 
-// verifyEnvelope is a verification run's report claiming a pass and nothing
-// else of interest, so a test about what clears a task is not also a test about
-// criteria, findings or generated items.
-func verifyEnvelope(worker, itemID string) string {
+// verifyEnvelope is a verification run's report claiming the given verdict and
+// nothing else of interest, so a test about what clears a task is not also a
+// test about criteria, findings or generated items.
+func verifyEnvelope(worker, itemID, verdict string) string {
 	env := map[string]any{
 		"envelope_version": "1",
 		"run_id":           "{{run_id}}",
 		"worker_type":      worker,
 		"work_item_id":     itemID,
-		"verdict":          "pass",
-		"summary":          "ran the suite and it passed",
+		"verdict":          verdict,
+		"summary":          "ran the suite and it reported " + verdict,
 		"commands_run":     []any{},
 		"usage":            map[string]any{"input_tokens": 10, "output_tokens": 5},
 	}
@@ -1016,7 +1016,7 @@ func TestAVerificationTaskTheGateRefusedClearsNothing(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
 	h.edgeCheck(config.VerdictOutputEmpty) // the gate will observe RED here
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
 
 	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
 	if err != nil {
@@ -1056,7 +1056,7 @@ func TestAVerificationTaskTheGateConfirmsClearsExactlyOnce(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
 	h.edgeCheck(config.VerdictExitZero) // the gate will observe GREEN here
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
 
 	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
 	if err != nil {
@@ -1134,7 +1134,7 @@ func TestAStageDoesNotLeaveVerificationOnARefusedClaim(t *testing.T) {
 	}
 
 	h.edgeCheck(config.VerdictOutputEmpty) // the third run's gate observes RED
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
 	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
 	if err != nil {
 		t.Fatal(err)
@@ -1161,7 +1161,7 @@ func TestAStageDoesNotLeaveVerificationOnARefusedClaim(t *testing.T) {
 	// clears, the stage completes and the item moves. Without it the assertion
 	// above passes on the day nothing ever leaves verification.
 	h.edgeCheck(config.VerdictExitZero)
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
 	res, err = h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
 	if err != nil {
 		t.Fatal(err)
@@ -1199,7 +1199,7 @@ func TestJudgeS1023RefusedVerificationRecordsRedAndClearsNothing(t *testing.T) {
 	h.segment(t, "S1", "seg", "", 0)
 	h.item(t, "S1-001", "S1", "ui", "verifying")
 	h.edgeCheck(config.VerdictOutputEmpty)
-	h.Run.envelope = verifyEnvelope("verifier", "S1-001")
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "pass")
 
 	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
 	if err != nil {
@@ -1242,5 +1242,62 @@ func TestJudgeS1023RefusedVerificationRecordsRedAndClearsNothing(t *testing.T) {
 	}
 	if len(evs) != 0 {
 		t.Fatalf("%d verification.passed appended for a run the gate refused", len(evs))
+	}
+}
+
+// TestAFailedVerificationTaskIsRecordedOnTheClaim is the other half of the
+// asymmetry the guard above rests on, and the half a merge could quietly drop.
+//
+// A claimed PASS clears a task, so it is recorded only once the gate has
+// confirmed it. A claimed FAILURE grants the item nothing — it can only hold
+// the stage back — and it has to reach the record whatever happens to the
+// transition off the back of it, because the stage settles once with
+// everything it observed. Here the gate refuses that transition too, and the
+// report still lands: without this, a failing task whose own edge went RED
+// would report nothing at all and the stage would never settle.
+func TestAFailedVerificationTaskIsRecordedOnTheClaim(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "verifying")
+	// A failing verification task is routed to in_progress rather than round the
+	// self-edge, so the check is declared over that edge — and read the way
+	// `gofmt -l` is, so the gate observes RED there and refuses the move.
+	h.Cfg.Checks = []config.Check{{
+		ID: "noop", Kind: config.KindSource, Command: []string{"go", "version"},
+		Verdict: config.VerdictOutputEmpty, RequiredFor: []string{"verifying->in_progress"},
+	}}
+	h.Run.envelope = verifyEnvelope("verifier", "S1-001", "fail")
+
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Dispatched {
+		t.Fatalf("the test task was not dispatched: %s", res.Idle)
+	}
+	if res.Admitted {
+		t.Fatalf("the move out of verification was admitted over a RED gate: %+v", res)
+	}
+
+	evs, err := h.Led.EventsOfKind([]ledger.Kind{ledger.KindVerificationFailed}, "S1-001", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 {
+		t.Fatalf("%d verification.failed recorded for one failing task, want exactly 1", len(evs))
+	}
+	var p ledger.VerificationFailed
+	if err := json.Unmarshal(evs[0].Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Capability != config.CapTest {
+		t.Errorf("the failure was recorded against %q, not the task that reported it", p.Capability)
+	}
+	if !strings.Contains(p.Detail, "reported fail") {
+		t.Errorf("what the task observed did not reach the record: detail %q", p.Detail)
+	}
+	if n := len(verificationEvents(t, h, "S1-001")); n != 0 {
+		t.Fatalf("%d verification.passed recorded for a task that reported fail", n)
 	}
 }

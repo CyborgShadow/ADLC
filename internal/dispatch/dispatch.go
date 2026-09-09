@@ -784,7 +784,7 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	}
 
 	// A verification task clears on the admitted self-edge and moves nothing:
-	// the stage is left only when every task has cleared, and Refresh derives
+	// the stage is left only when every task has reported, and Refresh derives
 	// that from the record for the reason given there.
 	//
 	// It is recorded here, after the decision, because it was once recorded from
