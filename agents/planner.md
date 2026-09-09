@@ -39,7 +39,24 @@ narrow enough that two builders at once do not meet in one file.
 children is not a platform: if the brief can be met by three items and no new tooling, three items
 is the correct plan, and proposing a checker, a CI change and a framework for it is how a week gets
 spent on an afternoon's work. Build the thing that was asked for.
-narrow enough that two builders at once do not meet in one file.
+
+**Write every criterion as a command wherever one exists.** A criterion the control plane can run
+is settled the moment the work is ready — no agent, no wait, and the result is an observation
+rather than somebody's report of one. Use the same vocabulary the gate uses:
+
+```
+AC-1 [exit_zero] go run ./cmd/adlc config check
+AC-2 [output_matches: DIRTY] go run ./cmd/adlc gate run -workdir .
+AC-3 [output_empty] gofmt -l ./cmd ./internal
+```
+
+Rules available: `exit_zero`, `exit_in`, `output_empty`, `output_nonempty`, `output_matches`,
+`output_not_matches`, `go_test_json`, `count_min`.
+
+Plain prose is still allowed and is sometimes correct — "the page is readable by a five-year-old"
+is a real criterion no command settles. But every prose criterion costs a judge run of ten minutes
+or more, so write prose only where you mean it. An item whose criteria are all commands is verified
+by the control plane and never waits for anybody.
 
 ## Standards
 

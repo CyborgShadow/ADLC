@@ -489,3 +489,39 @@ func tail(s string, n int) string {
 	}
 	return "…" + s[len(s)-n:]
 }
+
+// RunCriteria executes an item's acceptance criteria and reports what it saw.
+//
+// The same executor, the same verdict rules and the same observation shape the
+// declared checks get, because "did this criterion hold" and "did this check
+// pass" are the same question asked about different things — and answering them
+// through two code paths is how the two answers drift.
+//
+// This is what makes an acceptance criterion evidence rather than a report. It
+// was the only verification in the system settled by asking an agent to run a
+// command and believing its account; every other one the control plane runs
+// itself, in the run's own tree, and compares the claim afterwards.
+func (r *Runner) RunCriteria(ctx context.Context, cs []config.Check) *Result {
+	res := &Result{Dir: r.Dir, Edge: "acceptance", Status: StatusGreen}
+	if len(cs) == 0 {
+		// No executable criterion is not a pass. An item whose specification
+		// nobody could run has not been verified, and saying GREEN about it
+		// would be the exact failure the gate exists to prevent.
+		res.NoChecksDeclared = true
+		res.Status = StatusUnknown
+		return res
+	}
+	for i := range cs {
+		obs := r.runOne(ctx, &cs[i])
+		res.Checks = append(res.Checks, obs)
+		switch obs.Verdict {
+		case StatusRed:
+			res.Status = StatusRed
+		case StatusUnknown:
+			if res.Status != StatusRed {
+				res.Status = StatusUnknown
+			}
+		}
+	}
+	return res
+}
