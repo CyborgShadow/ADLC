@@ -73,7 +73,7 @@ const configPageHTML = `
         <td><form method="post" action="/loop">
           <input type="hidden" name="name" value="{{.Name}}">
           <input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}} title="running">
-          <input type="number" name="every" value="{{.EverySeconds}}" min="15" title="seconds between firings">s
+          <input type="number" name="every" value="{{.EverySeconds}}" min="{{$.Body.CadenceFloor}}" title="seconds between firings; below {{$.Body.CadenceFloor}}s a lane spends more time starting runs than doing them">s
           <input type="number" name="max" value="{{.MaxPerTick}}" min="1" title="most dispatches per firing">max
           <button type="submit">Save</button>
         </form></td>
@@ -104,6 +104,10 @@ const configPageHTML = `
         <td><span class="pill {{.Class}}">{{.Requires}}</span></td>
       </tr>{{end}}
     </table></div>
+    {{if .BlastRaw}}<dl class="raw">
+      {{range .BlastRaw}}<dt>{{.Key}} <span class="v">{{.Value}}</span></dt>
+        <dd>{{.Means}}</dd>{{end}}
+    </dl>{{end}}
   </div>
 
   <div class="box">
@@ -180,7 +184,7 @@ const configPageHTML = `
   </div>
 </div>
 
-<h2>Everything else <span class="sub">edited in {{.Path}}, then <span class="mono">adlc config check</span></span></h2>
+<h2>Everything else <span class="sub">{{if .HasPath}}edited in {{.Path}}, then <span class="mono">adlc config check</span>{{else}}{{.Path}} — there is no file to edit, so nothing here survives a restart{{end}}</span></h2>
 
 <details class="ref2">
   <summary>Checks <span class="c">{{len .Checks}} declared</span></summary>

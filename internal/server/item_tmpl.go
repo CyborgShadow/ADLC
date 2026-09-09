@@ -75,6 +75,9 @@ const itemPageHTML = `
 
 {{if .Refusals}}
 <h2>What was refused <span class="sub">oldest first, with what happened next</span></h2>
+{{if .Outstanding}}<div class="banner warn"><b>{{plural .Outstanding "refusal is" "refusals are"}} still
+standing.</b> The rest were corrected and the work came back. These are the ones nothing has answered
+yet, so they are the reason this item is where it is rather than history.</div>{{end}}
 <div class="banner calm">A refusal is the system working, not the work failing. A run asked for
 something it had not earned — a stage skipped, a check that came back red, work judging itself — and
 the authority said no and said why. The work was then corrected and came back, which is why this item

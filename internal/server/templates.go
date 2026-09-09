@@ -213,7 +213,7 @@ max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
 ` + aboutCSS + consoleCSS + historyPageCSS + roadmapPageCSS +
 	itemPageCSS + gatesCSS + questionsCSS + rolesPageCSS + configPageCSS + aboutDataCSS +
-	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + tileCSS + saidCSS + depsCSS + `
+	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + tileCSS + saidCSS + depsCSS + rawCSS + `
 </style></head><body>
 <header>
   <h1>{{.Project}}</h1>
@@ -286,6 +286,14 @@ being researched has no items yet, so the row below reads zero while an agent is
   <a class="card tile" href="/history?tab=runs"><div class="n">{{.Cost.Week}}</div>
     <div class="l">spend, last 7 days</div></a>
 </div>
+<p class="dim small">{{.Cost.Basis}}
+{{if .Cost.Defaulted}} Of {{plural .Cost.Runs "priced run" "priced runs"}}, {{.Cost.Defaulted}}
+  fell back to the built-in table because your own has no entry for the model they used.{{end}}</p>
+{{if .Cost.Restated}}<div class="banner warn"><b>These figures are re-priced, and the ledger disagrees.</b>
+The chain recorded {{.Cost.Recorded}} for the last 24 hours; re-pricing the same runs from today's
+table gives {{.Cost.Day}}. That gap is runs that were priced at zero when they ran, because no rate
+was known for their model at the time. The re-priced figure is the better one and the recorded one
+is what was actually charged against any cap.</div>{{end}}
 {{if .Cost.OnDefaults}}<div class="banner"><b>These figures use the built-in price table.</b>
 Nobody here has confirmed those rates against the provider's current pricing, so treat them as an
 estimate — <a href="/config">the Config page</a> shows what each model is being charged at.
@@ -294,7 +302,8 @@ estimate — <a href="/config">the Config page</a> shows what each model is bein
 {{else if .Cost.TopRole}}<div class="banner calm">Most of the last 24 hours went to
 <a href="/roles/{{.Cost.TopRole}}">{{.Cost.TopRole}}</a> ({{.Cost.TopRoleSpend}}).</div>{{end}}
 {{if .Spend.Unpriced}}<div class="banner bad">{{plural .Spend.Unpriced "finished run" "finished runs"}} used a model
-with no price entry. Their cost is <b>unknown, not zero</b>, and is not in the figure above. First: <span class="mono">{{.Spend.UnpricedRun}}</span>.</div>{{end}}
+with no price entry{{if .Cost.UnpricedModel}}, the first being <span class="mono">{{.Cost.UnpricedModel}}</span>{{end}}.
+Their cost is <b>unknown, not zero</b>, and is not in the figure above. First run: <span class="mono">{{.Spend.UnpricedRun}}</span>.</div>{{end}}
 
 {{if .Refusals}}<h2>Recently refused <span class="sub">a refusal is a recorded outcome, not an error that went away</span></h2>
 <div class="wrap"><table>

@@ -752,13 +752,6 @@ func lowCadence(c *config.Config) []string {
 	return out
 }
 
-type loopRow struct {
-	config.LoopDecl
-	Health ledger.LoopHealth
-	Status string
-	Since  string
-}
-
 type historyRun struct {
 	ledger.Run
 	Headline string

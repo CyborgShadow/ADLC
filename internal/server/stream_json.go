@@ -27,9 +27,8 @@ type streamDecoder struct {
 }
 
 type streamLine struct {
-	Type    string `json:"type"`
-	Subtype string `json:"subtype"`
-	Event   struct {
+	Type  string `json:"type"`
+	Event struct {
 		Type  string `json:"type"`
 		Index int    `json:"index"`
 		Delta struct {

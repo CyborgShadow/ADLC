@@ -65,11 +65,17 @@ const liveScript = `<script>
     var all = document.querySelectorAll("textarea, input[type=text], input:not([type])");
     for (var i = 0; i < all.length; i++) { fields.push(all[i]); before.push(all[i].value); }
   })();
+  // "In use" is wider than "typing". A dependency tree somebody opened is the
+  // page being read, and reloading it shut every fifteen seconds made the
+  // pop-out useless — you could open it, and then you could open it again.
+  //
+  // A disclosure closed by a refresh is the same defect as a sentence lost to
+  // one: the page threw away what somebody had just done to it.
   function typing(){
     for (var i = 0; i < fields.length; i++) {
       if (fields[i].value.trim() && fields[i].value !== before[i]) return true;
     }
-    return false;
+    return document.querySelector("details[open]") !== null;
   }
   function stopRefresh(){
     var m = document.querySelector("meta[http-equiv=refresh]");
@@ -212,4 +218,15 @@ const depTreeHTML = `
     </div>{{end}}
   </div>
 </details>{{end}}{{end}}
+`
+
+// rawCSS lists a settings group as key, value and what it means. Used where a
+// form cannot carry every setting — a check is a command line and a form that
+// writes argv is a remote shell with a hat on, so those stay file-only and are
+// shown here rather than hidden.
+const rawCSS = `
+.raw{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:12px 0 0;font-size:12.5px}
+.raw dt{font-family:ui-monospace,Consolas,monospace;color:var(--dim);white-space:nowrap}
+.raw dt .v{color:var(--ink)}
+.raw dd{margin:0;color:var(--dim);line-height:1.5}
 `

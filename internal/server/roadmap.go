@@ -68,9 +68,6 @@ type roadmapRow struct {
 	AskWhy      string
 	WhyHint     string
 	Parked      bool
-
-	// Updated is when this deliverable last moved at all.
-	Updated string
 }
 
 func (s *Server) roadmap(*http.Request) (string, any, error) {
