@@ -286,3 +286,46 @@ func TestAMetCountOverAFailedProcessIsStillRed(t *testing.T) {
 		t.Errorf("reason %q, want %q", why, want)
 	}
 }
+
+// TestTheGateAndTheClaimMatcherReadOneCounter pins the half of the anchoring
+// fix that nothing else guards: the count pattern is compiled once, in
+// internal/config, and both the gate's own observation and the claim matcher
+// reach it through judge.
+//
+// The failure this prevents is not a wrong count but an unexplainable one. Give
+// the matcher a second way to read a count and the two answers drift apart on
+// exactly the inputs the anchoring changed: an envelope quoting precisely what
+// the gate saw is refused for a claim_discrepancy that reports two verdicts over
+// one output, and nobody reading the refusal can tell which definition is wrong.
+func TestTheGateAndTheClaimMatcherReadOneCounter(t *testing.T) {
+	cfg := mustConfig(t, []config.Check{{
+		ID: "images", Command: []string{"x"}, Verdict: config.VerdictCountMin,
+		CountPattern: `^images checked: ([0-9]+)$`, MinCount: 6,
+	}})
+	const ran = "scanning site/cats\nimages checked: 6\nall rules passed\n"
+	res := &Result{Checks: []Observation{{
+		CheckID: "images", Rule: config.VerdictCountMin, Ran: true,
+		ExitCode: 0, Output: ran, Count: 6, Verdict: StatusGreen, Why: "examined 6",
+	}}}
+
+	// Clean: the envelope quotes the anchored line the gate also saw, and the two
+	// agree. Agreement on its own would prove little — before the fix both sides
+	// counted 0 over this output and agreed on RED — so what is pinned here is
+	// agreement on GREEN over a scan that did run.
+	truthful := res.CompareClaims(cfg, envWith(t, []envelope.Command{
+		{CheckID: "images", Cmd: "sitecheck", ExitCode: 0, OutputTail: ran},
+	}))
+	if len(truthful) != 0 {
+		t.Fatalf("an envelope quoting the output the gate judged GREEN must not be refused, got %+v", truthful)
+	}
+
+	// Firing: widening the match must not blind the matcher. An envelope whose
+	// own output carries no such line reads RED against a GREEN observation, and
+	// that disagreement is still reported.
+	doctored := res.CompareClaims(cfg, envWith(t, []envelope.Command{
+		{CheckID: "images", Cmd: "sitecheck", ExitCode: 0, OutputTail: "scanning site/cats\ndone\n"},
+	}))
+	if len(doctored) != 1 || doctored[0].Kind != "discrepancy" {
+		t.Fatalf("an output carrying no count must disagree with a GREEN observation, got %+v", doctored)
+	}
+}
