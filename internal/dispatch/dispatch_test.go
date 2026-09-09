@@ -1369,3 +1369,66 @@ func TestAFailingTaskDoesNotClearItselfOverAGreenGate(t *testing.T) {
 		t.Fatalf("%d verification.failed recorded for one failing task, want exactly 1", len(failed))
 	}
 }
+
+// The scope rules in internal/authority are pure functions of facts somebody
+// has to gather, and for a while nobody did: AdmitItem's own tests passed
+// against hand-built facts while the dispatcher handed it empty maps, so both
+// rules admitted everything in the only place they run. This test is deliberately
+// at this level rather than in authority — it fails if the wiring is dropped,
+// which is the failure that actually happened.
+func TestTheDispatcherGivesTheScopeRulesTheFactsTheyJudgeOn(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "Build the shop under site/shop", 6)
+	// An open item already holding one file, so a second claim on it collides.
+	if _, err := h.Led.Append("t", ledger.KindItemCreated, "S1-001", ledger.ItemCreated{
+		ID: "S1-001", SegmentID: "S1", Title: "the page", Area: "auth", Radius: "none",
+		FileScope: []string{"site/shop/index.html"},
+		Criteria:  []string{"AC-1 [exit_zero] go build ./..."},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.Run.envelope = genEnvelope(
+		map[string]any{ // beside the work, claimed by nobody
+			"id": "S1-002", "title": "the stylesheet", "area": "auth",
+			"blast_radius": "none", "file_scope": []string{"site/shop/style.css"},
+			"criteria": []string{"AC-1 [exit_zero] go build ./..."},
+		},
+		map[string]any{ // nowhere near what this deliverable touches
+			"id": "S1-003", "title": "rework the dispatcher", "area": "auth",
+			"blast_radius": "none", "file_scope": []string{"internal/dispatch/dispatch.go"},
+			"criteria": []string{"AC-1 [exit_zero] go build ./..."},
+		},
+		map[string]any{ // a file an open item already holds
+			"id": "S1-004", "title": "the page again", "area": "auth",
+			"blast_radius": "none", "file_scope": []string{"site/shop/index.html"},
+			"criteria": []string{"AC-1 [exit_zero] go build ./..."},
+		},
+	)
+
+	res, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapPlan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	props, err := h.Led.Proposals("", true, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]string{}
+	for _, p := range props {
+		byID[p.ItemID] = p.Reason
+		// Printed on failure so a broken wiring names itself rather than
+		// leaving somebody to guess which of the two facts went missing.
+		t.Logf("REFUSED %s: %s — %s", p.ItemID, p.Reason, p.Detail)
+	}
+	if res.Created != 1 {
+		t.Errorf("only the item beside the work is admissible, got %d created", res.Created)
+	}
+	if byID["S1-003"] != "scope_not_in_brief" {
+		t.Errorf("an item scoped outside the deliverable was refused as %q, want scope_not_in_brief — the segment scopes never reached the rule", byID["S1-003"])
+	}
+	if byID["S1-004"] != "file_scope_collision" {
+		t.Errorf("an item claiming an open item's file was refused as %q, want file_scope_collision — the open scopes never reached the rule", byID["S1-004"])
+	}
+}

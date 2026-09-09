@@ -195,10 +195,21 @@ func (d *Dispatcher) amendProposedItem(runID string, c Candidate, seg ledger.Seg
 	if err != nil {
 		return err
 	}
+	all, err := d.Led.Items("")
+	if err != nil {
+		return err
+	}
+	segScopes, openScopes := authority.ScopesFor(seg.ID, all)
+	// An amendment is the SAME item corrected, so the scope it already holds is
+	// not a collision with itself. Leaving it in would refuse every correction
+	// that kept the files it was already scoped to — which is most of them, and
+	// would make the repair path unusable for exactly the items it exists for.
+	delete(openScopes, p.ID)
 	facts := authority.GenerationFacts{
 		SegmentID: seg.ID, SegmentBrief: seg.Brief,
 		// The id is MEANT to exist this time, so it is not offered as a clash.
-		ExistingIDs: map[string]bool{},
+		ExistingIDs:   map[string]bool{},
+		SegmentScopes: segScopes, OpenScopes: openScopes,
 	}
 	dec := authority.AdmitItem(d.Cfg, p, facts)
 	if _, err := d.Led.Append(d.Actor, ledger.KindItemProposed, p.ID, ledger.ItemProposed{

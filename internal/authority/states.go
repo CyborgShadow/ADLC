@@ -240,19 +240,26 @@ func Table() []Edge {
 		// cleared its own work by reporting a pass with no cited command. The
 		// stage collapsing into one state must not quietly collapse the checks
 		// on the way through it.
-		e(StateVerifying, StateVerifying, "the tests were executed and passed; this task is cleared and the item waits on the rest of the stage",
-			[]Proposer{ProposerTest}, ReqIndependentVerifier, ReqGateGreen, ReqClaimsMatch, ReqCommittedTree),
-		e(StateVerifying, StateVerifying, "every acceptance criterion passed, each citing an executed command; this task is cleared",
+		// The tester's and the validator's self-edges are gone with the tasks.
+		// The gate already executes the suite on this edge and the control plane
+		// already executed the criteria that carry commands, so a tester added a
+		// claim over an observation; adversarial review moved to the segment,
+		// where its own declaration always said it belonged — it "looks wider
+		// than one unit of work", and running it per item made it re-read the
+		// whole system once per change.
+		e(StateVerifying, StateVerifying, "the work serves the brief and every criterion held; this task is cleared",
 			[]Proposer{ProposerJudge}, ReqIndependentVerifier, ReqAllCriteriaPass, ReqGateGreen, ReqClaimsMatch),
-		e(StateVerifying, StateVerifying, "adversarial review found no blocker; this task is cleared",
-			[]Proposer{ProposerValidate}, ReqIndependentVerifier, ReqVerdictPass, ReqNoBlockerFindings, ReqCommitReachable, ReqQuestionsAnswered),
 
-		e(StateVerifying, StateReviewed, "every task in the stage passed: the tests were executed, every acceptance criterion held, and adversarial review found no blocker",
+		e(StateVerifying, StateReviewed, "every task in the stage passed: the gate was green, every acceptance criterion held, and the work was judged to serve the brief",
 			[]Proposer{ProposerControl}, ReqCommitReachable, ReqQuestionsAnswered),
 		e(StateVerifying, StateInProgress, "a verification task failed, and the work goes back with what it observed",
-			[]Proposer{ProposerTest, ProposerJudge}, ReqIndependentVerifier, ReqSomeCriterionFails),
+			[]Proposer{ProposerJudge}, ReqIndependentVerifier, ReqSomeCriterionFails),
+		// The judge proposes this now, because it is the only role left in the
+		// stage. An edge declared with a proposer nothing dispatches is an edge
+		// nobody can take, and that is what this one was for its whole life —
+		// see the note in CLAUDE.md about a declared edge nothing routes to.
 		e(StateVerifying, StateRejected, "at least one blocker, citing a location and the smallest change that would clear it",
-			[]Proposer{ProposerValidate}, ReqBlockerFinding),
+			[]Proposer{ProposerJudge}, ReqBlockerFinding),
 
 		// --- janitor and arbiter watch the system rather than the item
 		e(StateReviewed, StateJanitoring, "a janitor picked it up", pmOrControl),
@@ -445,8 +452,25 @@ const StateVerifying State = "verifying"
 // lifecycle rather than a policy knob: a project that wants a different set
 // wants a different lifecycle, and should say so by editing this and the table
 // together.
+// One task, not three, and the two that went are the two the control plane can
+// answer without an agent.
+//
+// `test` re-ran a suite the gate already runs itself on every edge, and
+// reported a claim where the gate produces an observation. `judge` executed
+// acceptance criteria that were already written down as commands —
+// internal/dispatch/acceptance.go now runs those in the item's own tree in
+// seconds. What is left is the question no command answers, and it is the one
+// this fleet actually got wrong: whether the work serves what was asked for.
+//
+// Three concurrent tasks on one item were not free. They held separate leases
+// on the same item, so whichever finished last proposed from a state the others
+// had already left and was refused stale — 35 refusals in one night, each
+// paying for a full gate run first. A failing task also invalidated its
+// siblings' passes, because a pass is keyed on the round and a setback bumps
+// it, so one narrow rejection re-ran everything. Both of those problems are
+// gone rather than fixed: with one task there is no sibling to race.
 func VerificationCapabilities() []string {
-	return []string{config.CapTest, config.CapJudge, config.CapValidate}
+	return []string{config.CapJudge}
 }
 
 // IsVerification reports whether a capability clears a verification task.

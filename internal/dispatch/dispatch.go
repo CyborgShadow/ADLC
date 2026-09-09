@@ -875,6 +875,37 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		return res, true, nil
 	}
 	to := adv.To
+	// The item's own criteria, run by the control plane in the item's own tree,
+	// at the moment the work is first ready to be checked.
+	//
+	// This is the one verification the project used to take an agent's word
+	// for. A judge was dispatched, handed the criteria as prose, and believed:
+	// ten to fifteen minutes of agent time per item to execute commands that
+	// were already written down, and the result was a claim rather than an
+	// observation. It is done here for the same reason the gate runs the
+	// declared checks itself.
+	//
+	// Only leaving in_progress, because that is when the work exists and has
+	// not yet been examined. Re-running them on every later edge would spend
+	// the whole suite again to re-answer a question already on the record.
+	if c.From == authority.StateInProgress {
+		ares, needJudge, aerr := d.acceptance(rctx, runID, c.Item, ws.Dir)
+		if aerr != nil {
+			return res, true, aerr
+		}
+		if ares != nil && ares.Status != gate.StatusGreen {
+			// Work that does not meet its own stated criteria has not finished,
+			// and admitting it here would put it in front of a judge to discover
+			// what a command had already established. The refusal names the
+			// criteria rather than the edge, because that is what has to change.
+			d.recordRefusal(runID, c, authority.ReasonCriteriaFailed, failedCriteria(ares))
+			d.log("CRITERIA %s %s — %s", c.Item.ID, ares.Status, failedCriteria(ares))
+			res.Reason = string(authority.ReasonCriteriaFailed)
+			res.Detail = failedCriteria(ares)
+			return res, true, nil
+		}
+		_ = needJudge
+	}
 	gres, err := d.runGate(rctx, ws.Dir, c.From, to, env.Artifact)
 	if err != nil {
 		return res, true, err
@@ -967,8 +998,10 @@ func (d *Dispatcher) admitProposedItems(runID string, c Candidate, env *envelope
 			seg = s
 		}
 	}
+	segScopes, openScopes := authority.ScopesFor(seg.ID, all)
 	facts := authority.GenerationFacts{
 		SegmentID: seg.ID, SegmentBrief: seg.Brief, ExistingIDs: existing,
+		SegmentScopes: segScopes, OpenScopes: openScopes,
 	}
 	created := 0
 	for _, p := range env.Outputs.WorkItems {
@@ -1065,6 +1098,18 @@ func (d *Dispatcher) promptVars(c Candidate, runID string, ws *Workspace) map[st
 	v["segment_id"] = c.Item.SegmentID
 	v["title"] = c.Item.Title
 	v["state"] = c.Item.State
+	// The deliverable's own brief reaches an ITEM run too, not only a planning
+	// one. The judge is asked whether the work serves what was actually asked
+	// for, and it was being asked that with the brief absent from its prompt —
+	// so the only thing it could compare the work against was the criteria,
+	// which are a planner's reading of the brief rather than the brief. That is
+	// exactly the gap that let a fleet build a coherent, well-tested deliverable
+	// nobody had asked for. A lookup failure leaves it empty rather than
+	// stopping the run: a judge with no brief is worse off, not broken.
+	if seg, err := d.Led.Segment(c.Item.SegmentID); err == nil {
+		v["brief"] = seg.Brief
+		v["rationale"] = seg.Rationale
+	}
 	v["blast_radius"] = c.Item.Radius
 	v["resources"] = strings.Join(c.Item.Resources, ", ")
 	v["file_scope"] = strings.Join(c.Item.FileScope, ", ")

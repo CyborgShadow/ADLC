@@ -23,8 +23,14 @@ A criterion beginning with a bracket — `[exit_zero] …` — was run by the co
 observation is on the record. The rest are prose: somebody wrote them because no command settles
 them, and they are why you were dispatched.
 
-The brief is not in this prompt and you cannot rule on intent without it. `adlc -json segment list`
-carries the brief and the rationale for `{{segment_id}}`; read them before anything else.
+The brief this deliverable was given, which is what you rule against:
+
+{{brief}}
+
+And why it was thought worth doing: {{rationale}}
+
+Read both before the criteria. Reading the criteria first anchors you to a planner's reading of the
+brief, and the failure you exist to catch is work that satisfies that reading and not the brief.
 
 ## What you are producing
 

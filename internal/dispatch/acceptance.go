@@ -30,18 +30,37 @@ import (
 // move the decision.
 
 // checksFor turns an item's executable criteria into checks the gate can run.
-func checksFor(cs []authority.Criterion) []config.Check {
+//
+// Compile is the load-bearing line. A check's verdict rule is prepared during
+// config validation, and nothing validates a criterion — it arrives from an
+// agent at dispatch time. A rule that takes an argument keeps its pattern in a
+// compiled regexp that only Compile fills in, so a criterion built without it
+// reached the executor with a nil matcher: `[output_matches: DIRTY] ...` did not
+// fail the item, it panicked the run that was settling it. That the shipped
+// planner prompt used exactly that form as its worked example is how close this
+// came to firing on the first criterion anybody wrote.
+//
+// A criterion whose rule cannot be prepared is dropped and named rather than
+// run. It is not evidence about the work either way, and a check the executor
+// cannot build must not be reported as one the work failed.
+func checksFor(cs []authority.Criterion) ([]config.Check, []string) {
 	var out []config.Check
+	var broken []string
 	for i, c := range cs {
 		if !c.Executable() {
 			continue
 		}
-		out = append(out, config.Check{
+		ch := config.Check{
 			ID: fmt.Sprintf("AC-%d", i+1), Command: c.Command,
-			Verdict: c.Rule, ExpectPattern: c.Want,
-		})
+			Verdict: c.Rule, ExpectPattern: c.Want, CountPattern: c.Want,
+		}
+		if err := ch.Compile(); err != nil {
+			broken = append(broken, fmt.Sprintf("AC-%d (%v)", i+1, err))
+			continue
+		}
+		out = append(out, ch)
 	}
-	return out
+	return out, broken
 }
 
 // acceptance runs an item's executable criteria in dir and records the result.
@@ -50,8 +69,14 @@ func checksFor(cs []authority.Criterion) []config.Check {
 // judgement. Nothing here refuses or admits anything.
 func (d *Dispatcher) acceptance(ctx context.Context, runID string, it ledger.Item, dir string) (*gate.Result, int, error) {
 	parsed := authority.ParseCriteria(it.Criteria)
-	checks := checksFor(parsed)
+	checks, broken := checksFor(parsed)
 	needJudge := len(authority.NeedsJudgement(parsed))
+	for _, b := range broken {
+		// Loud, because a criterion nobody can build is indistinguishable on
+		// every surface from one nobody has got round to running.
+		d.log("UNBUILDABLE CRITERION %s %s — it settles nothing and a judge is owed it instead", it.ID, b)
+		needJudge++
+	}
 	if len(checks) == 0 {
 		return nil, needJudge, nil
 	}

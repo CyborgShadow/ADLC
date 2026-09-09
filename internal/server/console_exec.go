@@ -118,8 +118,10 @@ func (s *Server) doRaiseItem(a ledger.ConsoleAction, by string) (string, string)
 	// them: an item raised in conversation and an item raised by a planner are
 	// the same object, and one of them being easier to create is how a backlog
 	// fills with work nobody can act on.
+	segScopes, openScopes := authority.ScopesFor(seg.ID, all)
 	dec := authority.AdmitItem(s.Cfg, p, authority.GenerationFacts{
 		SegmentID: seg.ID, SegmentBrief: seg.Brief, ExistingIDs: existing,
+		SegmentScopes: segScopes, OpenScopes: openScopes,
 	})
 	if _, err := s.Led.Append(by, ledger.KindItemProposed, p.ID, ledger.ItemProposed{
 		SegmentID: seg.ID, ProposedID: p.ID, Title: p.Title, Worker: "console",

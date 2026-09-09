@@ -8,6 +8,7 @@ import (
 
 	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/envelope"
+	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
 // Refusal reasons specific to work generation.
@@ -21,7 +22,12 @@ const (
 	ReasonUnownedArea     Reason = "area_has_no_owner"
 	ReasonUnnamedResource Reason = "resource_not_named"
 	ReasonScopeInvented   Reason = "scope_not_in_brief"
-	ReasonScopeCollision  Reason = "file_scope_collision"
+	// ReasonCriteriaFailed is work refused by its OWN acceptance criteria, run
+	// by the control plane rather than reported by anybody. It is separate from
+	// a red gate: the gate says the tree is broken, this says the tree is fine
+	// and does not do what the item said it would.
+	ReasonCriteriaFailed Reason = "acceptance_criteria_failed"
+	ReasonScopeCollision Reason = "file_scope_collision"
 )
 
 var itemIDRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*-[0-9]{3,}$`)
@@ -379,4 +385,31 @@ func SegmentNeedsWork(targetOpen, openItems int) int {
 		return 0
 	}
 	return targetOpen - openItems
+}
+
+// ScopesFor gathers the two scope facts AdmitItem needs out of the items
+// already on the record.
+//
+// It lives here, beside the rules that read it, because it was briefly three
+// separate loops — one in the dispatcher, one in the repair path, one in the
+// console — and three readings of "what this deliverable touches" is three
+// chances for a proposal to be admitted by one surface and refused by another
+// over the same tree. A rule and the fact it consumes are one statement.
+//
+// The two answers differ deliberately. SegmentScopes counts FINISHED items:
+// a deliverable that landed five items still touched what it touched, and
+// forgetting them the moment they merge would switch the relevance rule off
+// exactly when the backlog starts growing. OpenScopes counts only what is
+// still in flight, because a done item's files serialise nobody.
+func ScopesFor(segmentID string, items []ledger.Item) (segment []string, open map[string][]string) {
+	open = map[string][]string{}
+	for _, it := range items {
+		if it.SegmentID == segmentID {
+			segment = append(segment, it.FileScope...)
+		}
+		if !State(it.State).Terminal() && len(it.FileScope) > 0 {
+			open[it.ID] = it.FileScope
+		}
+	}
+	return segment, open
 }

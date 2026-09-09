@@ -89,15 +89,19 @@ func NextState(from State, capability, verdict string, radius config.Radius, pol
 			// those runs diagnosed this defect in the envelope that was thrown
 			// away for reporting it.
 			//
-			// Only "reject" travels it, and only from the validator. A "fail"
-			// stays on the self-edge for the reason given just below, and a
-			// tester's or a judge's "reject" stays there too — the rejected edge
-			// names the validator as its sole proposer, so routing anybody else
-			// to it would swap this refusal for a wrong-proposer one and change
-			// nothing.
-			if verdict == "reject" && capability == config.CapValidate {
+			// Only "reject" travels it, and only from the role the edge names as
+			// its proposer. A "fail" stays on the self-edge for the reason given
+			// just below; routing any other capability here would swap this
+			// refusal for a wrong-proposer one and change nothing.
+			//
+			// That role is the judge now rather than the validator. When
+			// verification held three tasks the validator was the adversarial
+			// one and owned the rejection; the stage holds one task, the judge's,
+			// and a stage whose only occupant cannot stop a change is a stage
+			// that cannot stop anything.
+			if verdict == "reject" && capability == config.CapJudge {
 				return ok(StateRejected,
-					"adversarial review rejected the change, citing at least one blocker")
+					"the judge rejected the change, citing at least one blocker")
 			}
 			// A self-edge, exactly like the pass above, and for the same
 			// reason: this run cleared or failed ONE of three independent
