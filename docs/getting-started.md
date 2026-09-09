@@ -54,7 +54,7 @@ its name, and two parameters are separated by a semicolon:
 ```
 tests:count_min[count_pattern="numTotalTests":(\d+)]:npm test
 plan:exit_in[allowed_exits=0,2]:terraform plan -detailed-exitcode
-lint:output_matches[expect_pattern=^0 problems]:npx eslint .
+lint:output_matches[expect_pattern=(?m)^0 problems]:npx eslint .
 ```
 
 At least one check is required — a gate with no checks reports green over nothing. The other flags

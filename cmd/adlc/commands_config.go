@@ -294,7 +294,7 @@ const checkFlagHelp = `a check as id:verdict:command (repeatable), e.g. test:go_
 a rule that reads parameters takes them in brackets after its name:
   tests:count_min[count_pattern="numTotalTests":(\d+)]:npm test
   plan:exit_in[allowed_exits=0,2]:terraform plan -detailed-exitcode
-  lint:output_matches[expect_pattern=^0 problems]:npx eslint .
+  lint:output_matches[expect_pattern=(?m)^0 problems]:npx eslint .
 two parameters are separated by a semicolon: count_min[count_pattern=…;min_count=20]`
 
 // parseCheckSpec reads id:verdict:command, where the verdict may carry the

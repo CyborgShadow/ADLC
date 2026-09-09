@@ -90,8 +90,8 @@ func TestEveryParameterisedRuleCanBeDeclared(t *testing.T) {
 	})
 
 	t.Run("output_matches", func(t *testing.T) {
-		ch := parse(t, `lint:output_matches[expect_pattern=^0 problems]:npx eslint .`)
-		if ch.ExpectPattern != "^0 problems" {
+		ch := parse(t, `lint:output_matches[expect_pattern=(?m)^0 problems]:npx eslint .`)
+		if ch.ExpectPattern != "(?m)^0 problems" {
 			t.Fatalf("expect_pattern: %q", ch.ExpectPattern)
 		}
 		if ch.Pattern() == nil {
@@ -167,5 +167,42 @@ func TestASpecThatCannotBeBuiltIsRefused(t *testing.T) {
 		if ch, err := parseCheckSpec(spec); err == nil {
 			t.Errorf("%s: %q was accepted as %+v", name, spec, ch)
 		}
+	}
+}
+
+// TestTheShippedExampleMatchesRealToolOutput runs the example out of the help
+// text itself rather than a copy of it, because the defect was that the two
+// could differ and nothing noticed: `^0 problems` anchors to the start of the
+// whole output, so an operator who copied it got a lint check that never went
+// green — eslint prints a file count first, and Go's `^` is not per-line
+// without `(?m)`.
+//
+// Both halves are asserted. A pattern that matched every output would pass the
+// first check and be worse than one that matched nothing.
+func TestTheShippedExampleMatchesRealToolOutput(t *testing.T) {
+	var spec string
+	for _, line := range strings.Split(checkFlagHelp, "\n") {
+		if strings.Contains(line, "output_matches") {
+			spec = strings.TrimSpace(line)
+		}
+	}
+	if spec == "" {
+		t.Fatal("the -check help no longer carries an output_matches example; this test has nothing to check")
+	}
+
+	ch := parse(t, spec)
+	re := ch.Pattern()
+	if re == nil {
+		t.Fatalf("%q compiled to no pattern", spec)
+	}
+
+	const clean = "3 files checked\n0 problems\n"
+	if !re.MatchString(clean) {
+		t.Errorf("%q does not match a clean run:\n%s", re, clean)
+	}
+
+	const dirty = "3 files checked\n7 problems\n"
+	if re.MatchString(dirty) {
+		t.Errorf("%q matches a run with 7 problems, so the check can never go red:\n%s", re, dirty)
 	}
 }
