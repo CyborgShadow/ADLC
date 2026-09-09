@@ -56,19 +56,21 @@ type CostView struct {
 	UnpricedModel string
 
 	// Unmeasured is how many finished runs inside the week reported no token
-	// usage at all, and UnmeasuredDay how many of those started inside the 24
-	// hours Day covers. Nobody counted their tokens, so their cost is unknown
-	// for the same reason an unpriced run's is — and they are counted here
-	// rather than dropped, because a run silently skipped leaves a partial sum
-	// on the page wearing the label of a complete one.
+	// usage at all, UnmeasuredDay how many of those started inside the 24 hours
+	// Day covers, and UnmeasuredRun the first of them. Nobody counted their
+	// tokens, so their cost is unknown for the same reason an unpriced run's is.
+	// Why they are counted rather than dropped is stated once, at the branch in
+	// CostView that counts them.
 	Unmeasured    int
 	UnmeasuredDay int
 	UnmeasuredRun string
 
 	// OnDefaults means the operator has supplied no price table of their own.
 	OnDefaults bool
-	// Basis is one sentence naming where the rates came from, to be printed
-	// next to the figures rather than filed under a help page.
+	// Basis is the line printed next to the figures rather than filed under a
+	// help page: where the rates came from, and then UnmeasuredNote when there
+	// is one. The caveat is already carried here, so a surface that renders
+	// UnmeasuredNote alongside Basis prints it twice.
 	Basis string
 }
 
