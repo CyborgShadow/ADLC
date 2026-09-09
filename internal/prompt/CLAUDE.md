@@ -32,10 +32,20 @@ prompt. `Assembled.Bytes` normalises line endings the same way the digest does; 
 under a hash of normalised text and retrieval silently fails, and the run then reports that its own
 prompt was never kept.
 
-**Writing without replacing the in-memory copy.** The dispatcher assembles from memory. A write
-that only touched disk leaves every run in this process using the old text while the dashboard shows
-the new one. The write is also atomic, because a prompt truncated halfway dispatches an agent with
-half its instructions and no error anywhere.
+**Writing without replacing the in-memory copy.** A write that only touched disk leaves the
+library's own copy stale until the next read refreshes it, and the dashboard's view of what it just
+wrote is then whatever it read last. The write is also atomic, because a prompt truncated halfway
+dispatches an agent with half its instructions and no error anywhere.
+
+**Serving the snapshot `Load` took.** One process holds one library for hours — `adlc schedule run
+--serve` builds it at startup and dispatches from it all day. So `Get`, `Assemble`, `CheckClauses`
+and the preamble accessors re-read their files first: a prompt change merged onto the trunk at noon
+would otherwise reach no run until somebody restarted the scheduler, reviewed and committed and
+live everywhere except in the fleet that is actually reading it. A file that cannot be read now
+keeps the copy already loaded, because refusing to dispatch during a checkout trades a slightly
+stale prompt for no prompt at all. A file that appears in the directory after `Load` is not picked
+up: nothing dispatches through it until the config that names it is reloaded, which is a restart
+either way.
 
 **Reading the map without the lock.** One process holds one library and both the scheduler and the
 dashboard are given it — `adlc schedule run --serve` runs them side by side. A Go map read during a
@@ -46,5 +56,8 @@ write is not a stale read, it is a crash.
 `prompt_test.go` pins front matter parsing, two prompts refusing to share an id, the preamble being
 assembled above every role, variable substitution, the digest addressing exactly the bytes that are
 stored, assembly being stable, a missing clause being reported, and a BOM not changing a prompt's
-identity. `survey_test.go` pins that a project with no prompts still gets an answer and that the
-survey separates what is there from what is named.
+identity. It also pins the refresh from three sides: a role prompt and the preamble edited on disk
+by something other than `SetPrompt` reaching the next assembly, an unchanged file still assembling
+byte for byte the same, and a vanished file keeping the copy already loaded rather than stopping
+the dispatch. `survey_test.go` pins that a project with no prompts still gets an answer and that
+the survey separates what is there from what is named.

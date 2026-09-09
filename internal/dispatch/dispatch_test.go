@@ -1571,3 +1571,27 @@ func TestTheRunThatBuiltTheWorkIsIdentifiedForTheAuthorGuard(t *testing.T) {
 		t.Fatalf("the run that drove the item into verification is %q, want e-built-it — with it empty the author guard compares every verifier against nothing", f.ImplementRunID)
 	}
 }
+func TestAPromptMergedAfterTheLibraryWasBuiltReachesTheNextRun(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "in_progress")
+	h.Run.envelope = genEnvelope()
+
+	// The Lib the dispatcher holds was built by newHarness, before this write.
+	// Written straight to the file, as a merge would: nothing tells the library
+	// about it.
+	path := filepath.Join(h.Cfg.Prompts.Dir, "implementer.md")
+	write(t, path, "---\nid: implementer\nversion: v1\n---\nrole implementer. MERGED INSTRUCTION for {{work_item_id}}.\n")
+
+	if _, err := h.D.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := h.Run.lastInv.PromptText
+	if !strings.Contains(got, "MERGED INSTRUCTION for S1-001.") {
+		t.Errorf("the agent was given the prompt loaded at startup, not the merged one: %q", got)
+	}
+	if !strings.Contains(got, "SHARED POLICY") {
+		t.Error("the shared preamble stopped being assembled above the role")
+	}
+}

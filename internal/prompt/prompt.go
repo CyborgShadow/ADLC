@@ -125,11 +125,61 @@ func readPrompt(path string) (Prompt, error) {
 	return p, nil
 }
 
-// Get returns one prompt.
+// Get returns one prompt, as the file reads now.
 func (l *Library) Get(id string) (Prompt, error) {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reloadPrompt(id)
 	return l.get(id)
+}
+
+// reloadPrompt re-reads one role prompt from its file. The write lock is held.
+//
+// The file is the definition, and one process holds one library for hours:
+// `adlc schedule run --serve` loads it at startup and dispatches from it all
+// day. Read the loaded snapshot and a prompt change merged onto the trunk at
+// noon reaches no run until somebody restarts the scheduler — reviewed,
+// committed, live everywhere except in the fleet that is actually reading it,
+// and with nothing on any surface saying so.
+//
+// A file that cannot be read now keeps the copy already loaded. A prompt is
+// briefly absent during a checkout, and refusing to dispatch then would trade
+// a slightly stale prompt for no prompt at all. A file that appears in the
+// directory after Load is not picked up either: nothing can dispatch it until
+// the config that names it is reloaded too, which is a restart regardless.
+func (l *Library) reloadPrompt(id string) {
+	p, ok := l.prompts[id]
+	if !ok {
+		return
+	}
+	fresh, err := readPrompt(p.Path)
+	if err != nil {
+		return
+	}
+	// Keyed by the id the library knows it under, not by the id the file now
+	// declares: a file whose front matter changed id underneath us would
+	// otherwise orphan the entry every worker resolves through.
+	l.prompts[id] = fresh
+}
+
+// reloadAll re-reads every prompt and the preamble. The write lock is held.
+func (l *Library) reloadAll() {
+	l.reloadPreamble()
+	for id := range l.prompts {
+		l.reloadPrompt(id)
+	}
+}
+
+// reloadPreamble re-reads the shared preamble. The write lock is held.
+func (l *Library) reloadPreamble() {
+	if l.preambleP == "" {
+		return
+	}
+	b, err := os.ReadFile(l.preambleP)
+	if err != nil {
+		return
+	}
+	l.Preamble = string(config.StripBOM(b))
 }
 
 func (l *Library) get(id string) (Prompt, error) {
@@ -180,8 +230,12 @@ func (a Assembled) Bytes() []byte {
 // prompt is written to be read starting at the seam, and the preamble above it
 // is fleet policy that the role does not restate and cannot override.
 func (l *Library) Assemble(promptID string, vars map[string]string) (Assembled, error) {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	// Read the files rather than the snapshot Load took, so the text a run is
+	// given is the text on disk at dispatch. See reloadPrompt.
+	l.reloadPreamble()
+	l.reloadPrompt(promptID)
 	p, err := l.get(promptID)
 	if err != nil {
 		return Assembled{}, err
@@ -217,8 +271,9 @@ func (l *Library) CheckClauses(clauses []string) []ClauseFinding {
 	if len(clauses) == 0 {
 		return nil
 	}
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reloadAll()
 	for _, id := range l.ids() {
 		p := l.prompts[id]
 		whole := l.Preamble + "\n" + p.Body
@@ -236,16 +291,18 @@ func (l *Library) PreamblePath() string { return l.preambleP }
 
 // PreambleSHA identifies the preamble bytes.
 func (l *Library) PreambleSHA() string {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reloadPreamble()
 	return digest(l.Preamble)
 }
 
 // PreambleText reads the shared preamble under the lock. Prefer it to the
 // exported field anywhere the preamble might be edited while it is read.
 func (l *Library) PreambleText() string {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reloadPreamble()
 	return l.Preamble
 }
 

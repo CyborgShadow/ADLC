@@ -263,3 +263,92 @@ func TestTheGoRunWarningIsNotFleetWidePolicy(t *testing.T) {
 		t.Fatal("a role that writes no acceptance criteria carries the planner's exit-code warning, so the guard above proves nothing about the planner")
 	}
 }
+func TestAPromptEditedOnDiskReachesTheNextAssembly(t *testing.T) {
+	lib := library(t, map[string]string{"_preamble.md": preamble, "builder.md": builder})
+
+	// Merged, not written through SetPrompt: the change arrives as a checkout
+	// of somebody else's commit, which is the case that was broken.
+	merged := "---\nid: builder\nversion: v2\n---\n# Builder\n\nMERGED INSTRUCTION for {{work_item_id}}.\n"
+	if err := os.WriteFile(filepath.Join(lib.Dir, "builder.md"), []byte(merged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := lib.Get("builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.Body, "MERGED INSTRUCTION") {
+		t.Errorf("Get served the body loaded at startup, not the file: %q", p.Body)
+	}
+
+	asm, err := lib.Assemble("builder", map[string]string{"work_item_id": "S1-032"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(asm.Text, "MERGED INSTRUCTION for S1-032.") {
+		t.Errorf("Assemble served the body loaded at startup, not the file: %q", asm.Text)
+	}
+	if !strings.Contains(asm.Text, "FLEET POLICY") {
+		t.Error("the shared preamble stopped being assembled above the role")
+	}
+
+	// The preamble is one edit that reaches every role, so it is refreshed the
+	// same way.
+	if err := os.WriteFile(filepath.Join(lib.Dir, "_preamble.md"),
+		[]byte("---\nid: _preamble\n---\nMERGED POLICY. You never write the ledger.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asm, err = lib.Assemble("builder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(asm.Text, "MERGED POLICY") {
+		t.Errorf("a merged preamble change did not reach the assembly: %q", asm.Text)
+	}
+	if lib.PreambleSHA() == digest(preamble) {
+		t.Error("PreambleSHA still addresses the bytes loaded at startup")
+	}
+}
+
+// The clean case. Rereading must not invent a change: an untouched file serves
+// the body and the digest it always did, or every surface that compares a
+// prompt pin with the library reports drift on a tree nobody edited.
+func TestAnUnchangedFileStillServesItsOriginalBody(t *testing.T) {
+	lib := library(t, map[string]string{"_preamble.md": preamble, "builder.md": builder})
+	first, err := lib.Assemble("builder", map[string]string{"work_item_id": "S1-032", "workdir": "w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := lib.Get("builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := lib.Assemble("builder", map[string]string{"work_item_id": "S1-032", "workdir": "w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Text != first.Text || again.SHA != first.SHA {
+		t.Fatalf("an unchanged file assembled differently the second time:\n%q\n%q", first.Text, again.Text)
+	}
+	if !strings.HasPrefix(p.Body, "# Builder") || p.Version != "v2" {
+		t.Fatalf("an unchanged file no longer reads as itself: %+v", p)
+	}
+}
+
+// A prompt file that is unreadable — a checkout is mid-flight, or somebody has
+// moved it — keeps the copy already loaded. The alternative trades a slightly
+// stale prompt for no prompt at all, which stops the fleet dispatching for the
+// length of a git operation.
+func TestAnUnreadablePromptKeepsTheLoadedCopy(t *testing.T) {
+	lib := library(t, map[string]string{"_preamble.md": preamble, "builder.md": builder})
+	if err := os.Remove(filepath.Join(lib.Dir, "builder.md")); err != nil {
+		t.Fatal(err)
+	}
+	asm, err := lib.Assemble("builder", map[string]string{"work_item_id": "S1-032"})
+	if err != nil {
+		t.Fatalf("a vanished file should not stop a dispatch: %v", err)
+	}
+	if !strings.Contains(asm.Text, "# Builder") {
+		t.Errorf("the loaded copy was not kept: %q", asm.Text)
+	}
+}
