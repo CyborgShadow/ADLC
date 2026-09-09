@@ -219,9 +219,9 @@ Read a prompt. Do the bounded job. Write an envelope. That is the whole contract
 control plane computes the rest from the state the item was in, the capability the run held, and
 the item's blast radius.
 
-Role-specific output goes in `outputs`: `approach` for a researcher, `work_items` for a planner
-or an improver, `criteria` for a judge,
-`findings` for a validator, `files_changed` for a builder.
+Role-specific output goes in `outputs`: `notes_md` for a researcher or an improver,
+`work_items` for a planner or an improver, `criteria` for a judge, `findings` for a
+validator, `files_changed` for a builder.
 
 A command the agent honestly could not run is declared `"not_run": true` with a reason, and is
 excluded from claim matching entirely. Omitting the line, or writing an exit code it did not see,
