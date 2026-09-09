@@ -67,6 +67,21 @@ func (d *Dispatcher) prepareWorkspace(runID, base, capability string) (*Workspac
 	dir := strings.ReplaceAll(tmpl, "{{run_id}}", runID)
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(repo, dir)
+		// Absolute from here on, and that is not tidiness.
+		//
+		// The path is now relative to the repository, and git is invoked with
+		// -C repo — so `worktree add` resolves it relative to repo a SECOND
+		// time and builds the tree at repo/repo/... . While the fleet built in
+		// the same directory it ran from, repo was "." and joining twice was
+		// harmless; the day it was pointed at a product tree of its own, every
+		// worktree landed one level too deep. git reported success, the
+		// dispatcher wrote the run's prompt to the path it had asked for, and
+		// the open failed on a directory that had been created somewhere else.
+		// The lane then retried on cadence, because nothing about a workspace
+		// that could not be prepared marks the item as having been attempted.
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
 	}
 
 	switch mode {

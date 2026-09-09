@@ -323,3 +323,44 @@ func TestOnlyTheImproverWorksInTheControlPlanesOwnTree(t *testing.T) {
 		t.Errorf("with one tree the improver must use it, got %q", got)
 	}
 }
+
+// A workspace lands inside the repository it was cut from, not one level deeper.
+//
+// The workdir template is relative to the repository, and git is invoked with
+// -C repo — so a path already joined to repo is resolved against repo a second
+// time and the tree appears at repo/repo/... . It stayed invisible for as long
+// as the fleet built in the directory it ran from, because joining "." twice
+// changes nothing. Pointed at a product repository of its own, every dispatch
+// failed: git reported success, the dispatcher wrote the run's prompt to the
+// path it had asked for, and the open failed on a directory created elsewhere.
+func TestAWorktreeIsCutInsideItsOwnRepositoryAndNotOneLevelDeeper(t *testing.T) {
+	// The repository is reached by a RELATIVE path, which is the only way this
+	// defect appears: joining an absolute repo to the template already yields an
+	// absolute path, so a fixture built the usual way passes with the bug still
+	// in place and proves nothing.
+	repo := trunkRepo(t)
+	t.Chdir(filepath.Dir(repo))
+	rel := filepath.Base(repo)
+
+	d := workspaceDispatcher(t, rel)
+	ws, err := d.prepareWorkspace("r-1", "HEAD", config.CapImplement)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	t.Cleanup(func() { ws.Cleanup() })
+
+	if _, err := os.Stat(ws.Dir); err != nil {
+		t.Fatalf("the workspace the dispatcher reported does not exist: %v", err)
+	}
+	// The doubled path is the specific defect, so name it rather than only
+	// checking that something exists.
+	doubled := filepath.Join(rel, rel)
+	if _, err := os.Stat(doubled); err == nil {
+		t.Errorf("a tree was created at %s — the workdir was resolved against the repository twice", doubled)
+	}
+	// And the prompt the dispatcher writes must land in it, which is the write
+	// that actually failed.
+	if err := os.WriteFile(filepath.Join(ws.Dir, ".adlc-prompt.md"), []byte("x"), 0o644); err != nil {
+		t.Errorf("the run's prompt cannot be written into its own workspace: %v", err)
+	}
+}
