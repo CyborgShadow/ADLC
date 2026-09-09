@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/CyborgShadow/ADLC/internal/config"
+	"github.com/CyborgShadow/ADLC/internal/envelope"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
 )
 
@@ -267,5 +269,46 @@ func TestAnAnsweredQuestionAlwaysReleasesTheWork(t *testing.T) {
 	// "resumed" means "resumed in a few minutes".
 	if !wakesLanes(ledger.KindQuestionAnswered) {
 		t.Error("answering a question does not wake the lanes, so work resumes on a timer instead")
+	}
+}
+
+// A rejected plan teaches the fleet something, immediately.
+//
+// Lessons only ever came from an improver, and an improver runs after an item
+// MERGES — so a deliverable that never got past planning could be rejected four
+// times and the fifth planner would start with exactly what the first one had.
+// The system got no smarter as it got more expensive, and the only escalation
+// left was to stop and ask a person.
+func TestARejectionBecomesALessonForTheNextPlanner(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	d := h.D
+	planner, ok := d.Cfg.OwnerFor("", config.CapPlan)
+	if !ok {
+		t.Skip("no planning worker declared in this fixture")
+	}
+
+	env := &envelope.Envelope{Verdict: "reject",
+		Summary: "Every criterion is prose, so nothing can be checked by a command."}
+	d.learnFromRejection("v-1", Candidate{Kind: KindSegment,
+		Segment: ledger.Segment{ID: "S1"}, Worker: "validator"}, env)
+
+	got := d.lessons(planner, "")
+	if !strings.Contains(got, "Every criterion is prose") {
+		t.Fatalf("the objection did not reach the next planner: %q", got)
+	}
+	// Filed against the role that has to ACT on it. A lesson filed against the
+	// validator would be read by the one agent that already knows.
+	if strings.Contains(d.lessons("validator", ""), "Every criterion is prose") {
+		t.Error("the lesson was filed against the role that raised it, not the role that must act on it")
+	}
+
+	// The clean case: a rejection with nothing written down teaches nothing,
+	// and must not fill the prompt with an empty rule.
+	before := len(d.lessons(planner, ""))
+	d.learnFromRejection("v-2", Candidate{Kind: KindSegment,
+		Segment: ledger.Segment{ID: "S1"}}, &envelope.Envelope{Verdict: "reject"})
+	if len(d.lessons(planner, "")) != before {
+		t.Error("a rejection that said nothing was recorded as a lesson anyway")
 	}
 }

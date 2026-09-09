@@ -424,3 +424,45 @@ func radiusOrUnknown(r string) string {
 	}
 	return r
 }
+
+// learnFromRejection turns a rejected plan into a lesson the next planner gets.
+//
+// The fleet was recording rejections and learning nothing from them. Lessons
+// only ever came from an improver, and an improver runs after an item MERGES —
+// so a deliverable that never got past planning could be rejected four times
+// and the fifth planner would start with exactly what the first one had. The
+// system got no smarter as it got more expensive, which is the opposite of the
+// point, and the only escalation available was to stop and ask a person.
+//
+// A rejection is the cheapest lesson there is: somebody has already written
+// down what was wrong, in the envelope, at the moment they refused it. Keeping
+// it costs one append and it reaches every future run of that role — on this
+// deliverable and on every other one.
+//
+// Recorded by the control plane from what the run reported, like everything
+// else. The validator does not decide that its objection becomes doctrine; it
+// reports, and this keeps it.
+func (d *Dispatcher) learnFromRejection(runID string, c Candidate, env *envelope.Envelope) {
+	said := strings.TrimSpace(env.Summary)
+	if said == "" {
+		return
+	}
+	// The planner is the role that has to act on it, not the validator that
+	// raised it. A lesson filed against the role that wrote the objection would
+	// be read by the one agent that already knows.
+	worker, ok := d.Cfg.OwnerFor("", config.CapPlan)
+	if !ok {
+		return
+	}
+	lesson := oneLine(said, 600)
+	if _, err := d.Led.Append(d.actor(), ledger.KindLessonRecorded,
+		fmt.Sprintf("%s-rejection", runID), ledger.LessonRecorded{
+			RunID: runID, Worker: worker, SegmentID: c.Segment.ID,
+			Lesson: "A breakdown was rejected for this: " + lesson,
+		}); err != nil {
+		d.log("could not keep the lesson from %s: %v", runID, err)
+		return
+	}
+	d.log("LEARNED from %s — the objection is carried into every future %s run, not just the next one on %s",
+		runID, worker, c.Segment.ID)
+}

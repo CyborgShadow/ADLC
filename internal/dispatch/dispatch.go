@@ -618,6 +618,9 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 		res.Created = created
 		res.Admitted = env.Verdict == "pass" || created > 0
 		d.log("PLANNING %s  %s on %s: %s", runID, c.Capability, c.Segment.ID, env.Verdict)
+		if env.Verdict == "reject" {
+			d.learnFromRejection(runID, c, env)
+		}
 		return res, true, d.advanceSegment(c.Segment.ID, runID, c.Capability, env.Verdict, created)
 	}
 

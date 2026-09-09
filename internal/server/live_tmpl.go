@@ -170,3 +170,10 @@ const saidCSS = `
 border-radius:4px;padding:10px 12px;font-size:12.5px;line-height:1.55;margin-top:8px;max-height:420px;overflow:auto}
 .said ul{margin:6px 0 0;padding-left:20px;font-size:13px}
 `
+
+// depsCSS lists the dependencies an item is actually waiting on.
+const depsCSS = `
+.deps{display:flex;flex-direction:column;gap:3px;margin-top:5px}
+.deps a{display:inline-flex;gap:6px;align-items:baseline}
+.deps a:hover{text-decoration:none}
+`

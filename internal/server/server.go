@@ -557,6 +557,10 @@ func (s *Server) progress(r *http.Request) (string, any, error) {
 	for _, it := range all {
 		v.Totals[authority.StageOf(authority.State(it.State)).Key]++
 	}
+	byID := map[string]authority.State{}
+	for _, it := range all {
+		byID[it.ID] = authority.State(it.State)
+	}
 	if v.Stage != "" {
 		for _, st := range authority.Stages() {
 			if st.Key == v.Stage {
@@ -568,10 +572,13 @@ func (s *Server) progress(r *http.Request) (string, any, error) {
 				continue
 			}
 			state := authority.State(it.State)
-			v.Drill = append(v.Drill, itemLine{
-				Item: it, Stage: v.StageLabel,
-				Says: humanState(state), Class: itemClass(state),
-			})
+			line := itemLine{Item: it, Stage: v.StageLabel,
+				Says: humanState(state), Class: itemClass(state)}
+			if state == authority.StateQueued {
+				// Name them. The page knows which and knows their states.
+				line.Says, line.Waiting = blockedOn(it, byID)
+			}
+			v.Drill = append(v.Drill, line)
 		}
 		sort.Slice(v.Drill, func(i, j int) bool { return v.Drill[i].ID < v.Drill[j].ID })
 	}

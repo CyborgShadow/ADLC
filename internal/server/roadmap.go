@@ -32,6 +32,9 @@ type itemLine struct {
 	Says  string
 	Class string
 	Note  string
+	// Waiting are the dependencies this item cannot start without, each with
+	// where it stands. Empty for anything not queued.
+	Waiting []depLine
 }
 
 // bucket is one of the three groups a person actually sorts work into.
@@ -266,4 +269,51 @@ func (r *roadmapRow) explain() {
 // would read as though somebody had decided what this was for.
 func (r roadmapRow) Undescribed() bool {
 	return strings.TrimSpace(r.Brief) == "" && strings.TrimSpace(r.Rationale) == ""
+}
+
+// blockedOn names the dependencies an item is actually waiting for, and where
+// each of them stands.
+//
+// "waiting on something it depends on" was all a row said, on a page whose
+// whole job is to explain where work is. The system knows exactly which items
+// they are and exactly what state each is in — it is one map lookup — and it
+// threw both away to print a sentence that sends somebody hunting through
+// twelve rows to work out what it already knew.
+//
+// A dependency that is done is not named: what a person needs is the reason it
+// cannot start, not a roll call. If every dependency IS done the item is not
+// waiting on one at all, and that is said too, because an item stuck in queued
+// with nothing outstanding is a bug rather than a queue.
+func blockedOn(it ledger.Item, state map[string]authority.State) (string, []depLine) {
+	if len(it.DependsOn) == 0 {
+		return "queued with nothing to wait for — this should have become ready, and its not doing so is a defect worth reporting", nil
+	}
+	var open []depLine
+	for _, dep := range it.DependsOn {
+		st, known := state[dep]
+		switch {
+		case !known:
+			open = append(open, depLine{ID: dep, State: "not on the record",
+				Class: "bad", Says: "this dependency does not exist, so the item can never start"})
+		case st != authority.StateDone:
+			open = append(open, depLine{ID: dep, State: string(st),
+				Class: itemClass(st), Says: humanState(st)})
+		}
+	}
+	if len(open) == 0 {
+		return "every dependency is done — this should have become ready, and its not doing so is a defect worth reporting", nil
+	}
+	names := make([]string, 0, len(open))
+	for _, d := range open {
+		names = append(names, d.ID)
+	}
+	return "waiting on " + strings.Join(names, ", "), open
+}
+
+// depLine is one outstanding dependency, as a row renders it.
+type depLine struct {
+	ID    string
+	State string
+	Class string
+	Says  string
 }

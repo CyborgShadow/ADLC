@@ -204,7 +204,7 @@ max-width:1220px;margin:24px auto 0}
 @media (max-width:700px){.chain .step{grid-template-columns:1fr}}
 ` + aboutCSS + consoleCSS + historyPageCSS + roadmapPageCSS +
 	itemPageCSS + gatesCSS + questionsCSS + rolesPageCSS + configPageCSS + aboutDataCSS +
-	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + tileCSS + saidCSS + `
+	aboutMoveCSS + homePageCSS + liveCSS + actionCSS + tileCSS + saidCSS + depsCSS + `
 </style></head><body>
 <header>
   <h1>{{.Project}}</h1>
@@ -332,7 +332,9 @@ const progressHTML = `
     <td class="mono small">{{if .SegmentID}}<a href="/segment/{{.SegmentID}}">{{.SegmentID}}</a>{{end}}</td>
     <td class="dim small">{{.Area}}</td>
     <td><span class="pill {{.Class}}">{{.State}}</span></td>
-    <td class="dim">{{.Says}}</td>
+    <td class="dim">{{.Says}}
+      {{if .Waiting}}<div class="deps">{{range .Waiting}}<a href="/item/{{.ID}}"><span class="pill {{.Class}}">{{.State}}</span> {{.ID}}</a>
+        <span class="dim small">{{.Says}}</span>{{end}}</div>{{end}}</td>
   </tr>{{else}}<tr><td colspan="5" class="dim">Nothing is in this stage.</td></tr>{{end}}
 </table></div>
 {{end}}
