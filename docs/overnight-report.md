@@ -82,6 +82,45 @@ problem — nine specific bugs were, and eight of them were mine.**
 
 Each of these has a test that was verified to fail without the fix.
 
+
+## Two more, found by counting refusals rather than by watching
+
+The fleet was healthy by 08:30 and still throwing runs away. Counting the
+refusals by reason rather than reading the log found two more classes, both
+fixed and both guarded.
+
+**10. Five of seven malformed envelopes were formatting, not meaning.** Agents
+wrote `criteria` as an object keyed by criterion id, `"met"` where the schema
+says `"pass"`, and findings as prose. None of them was wrong about the work; each
+threw away a whole run. `Parse` already held the line — forgiving about
+encoding, unforgiving about meaning, because refusing a fenced envelope costs a
+run to punish formatting — and it now extends to shape and stops exactly there.
+A status word maps only from a closed list; an unstated finding severity is
+resolved against the worker's own verdict so it fails closed; a severity from no
+vocabulary is still refused rather than guessed. The raw bytes are untouched, so
+the blob on the chain is what the agent wrote and every re-shaping is auditable
+against it.
+
+The refusals that remain now teach. A malformed envelope was refused *before*
+`recordLessons` was reached, so the next run — a fresh agent that cannot see the
+ledger — wrote the same shape and lost its work the same way. Three runs did
+exactly that in one night.
+
+**11. One failing verification task discarded its two siblings.** This was the
+largest remaining cost in the lifecycle. Test, judge and adversarial review ask
+three independent questions of one commit; the first failure sent the item
+straight back to the builder, so the two runs still examining that commit were
+refused as stale when they finished, and the builder was told one of the three
+things wrong with its work — learning the other two a whole round later. Two
+extra verification rounds per failing item.
+
+A failed task is now a self-edge, exactly like a passing one. `NextState` stays
+a pure function of state, capability, verdict and radius — it still knows
+nothing about siblings — and `Refresh` settles the stage from the record:
+forward when every task passed, backward once every task has *reported*,
+carrying every failure in one line. Adversarial review still outranks the rest:
+a blocker rejects whoever else agreed.
+
 ## Decisions I took for you
 
 Recorded in full in `docs/decisions-overnight.md`, attributed on the chain to

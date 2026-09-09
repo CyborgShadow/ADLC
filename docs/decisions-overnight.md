@@ -61,6 +61,54 @@ nothing in the control plane changed for this one.
 
 ---
 
+
+## D3 — S1-017-Q2: a spend guard that cannot fire
+
+**Asked because** the new `spend_unknown` guard in `CheckRun` cannot fire for any
+real run: `dispatch` writes `int64(cost)` into the ledger's cost column, so
+`spend.Cost` returns a real zero rather than a sentinel, and hands that same zero
+to `CheckRun`. An unmeasured run clears the per-run cap exactly as it did before.
+
+**The agent's lean** was a follow-up item widening the scope to `internal/dispatch`
+rather than reopening this one, because the split is at the call site: dispatch
+needs the recorded cost (a real zero, so the ledger column stays money) *and* the
+measurement fact (so the cap sees UNKNOWN), and only the caller holds both.
+
+**Decided:** accepted. `spend.CostOf` already returns exactly that pair, so the
+follow-up is passing the second return value on, not a new mechanism. I asked it
+to say plainly in the item record that until that lands the per-run cap is as
+blind to unmeasured runs as it was before — its own point, and the honest one:
+anyone reading AC-3 as delivered would otherwise be wrong about the running
+system.
+
+**To reverse:** the follow-up item is the change; drop it and the cap stays blind.
+
+---
+
+## D4 — S1-017-QJ1: a triage skill that names two flags where there are now four
+
+**Asked because** `.claude/skills/adlc-triage/SKILL.md` says there are "two things
+to flag" in `report fleet`'s spend output; S1-017 added UNMEASURED and INCOMPLETE
+to that same surface. The run refused to edit it because `.claude/skills` is
+outside its declared file scope.
+
+**Decided:** a follow-up item, and the refusal was right for the right reason — a
+hygiene run reaching outside its scope to edit a skill is a worse precedent than
+a stale paragraph. Folded together with S1-017-Q4 (the same omission on the
+dashboard) into one item rather than two editing adjacent paragraphs, because
+they are one defect: a money surface telling two stories.
+
+---
+
+## D5 — three questions asked twice by runs that could not see each other
+
+S1-002-Q2 was S1-002-Q1 again, asked by a second run. Answered identically. Worth
+noting as a pattern rather than a decision: two runs on one item raise the same
+question because neither can see the other's, and both then wait. The lessons
+mechanism now carries a refused envelope's shape forward; it does not yet carry
+an answered question forward to a sibling run. That is a real gap and it is
+listed below.
+
 ## Changes made without being asked
 
 These were defects, not judgement calls, but they are listed because each
@@ -72,6 +120,9 @@ changed how the fleet behaves.
 | A claim is the LAST run of a check | `9e70159` | An agent was refused for showing its working |
 | `schedule stop` drains instead of killing | `ee4ca22` | Six engineer runs were abandoned by restarts |
 | Plan review advises below `plan_gate_min` | earlier | One contested plan held twelve items for hours |
+| The envelope parser accepts shapes, not meanings | `9bf789e` | Five of seven malformed refusals were formatting |
+| A refused envelope is recorded as a lesson | `9bf789e` | The next run could not see the refusal and repeated it |
+| The verification stage settles once, with everything it saw | `48fb8cf` | One failure discarded its two in-flight siblings |
 
 ---
 
@@ -83,3 +134,7 @@ changed how the fleet behaves.
 - **Eleven view fields** were computed and shown nowhere. Three were dead and
   removed; eight are now on a page. If any of those eight are noise on a page
   you actually read, say so and they come off.
+- **An answered question does not reach a sibling run.** Two runs on one item
+  raise the same question, neither can see the other's, and both wait for you.
+  It happened twice in one night (S1-002-Q1/Q2, and S1-017's pair). The fix is
+  the same shape as the lessons mechanism and I have not built it.
