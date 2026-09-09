@@ -34,8 +34,12 @@ func (c *criteriaList) UnmarshalJSON(b []byte) error {
 	}
 	if b[0] == '[' {
 		var arr []Criterion
+		// encoding/json adds no field context to an error a custom unmarshaler
+		// returns, so a criterion written as prose was refused with a message
+		// naming only the Go type -- which tells an agent reading the refusal
+		// nothing about which part of its envelope to fix.
 		if err := json.Unmarshal(b, &arr); err != nil {
-			return err
+			return fmt.Errorf("outputs.criteria: %w", err)
 		}
 		*c = arr
 		return nil
@@ -53,6 +57,7 @@ func (c *criteriaList) UnmarshalJSON(b []byte) error {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(b, &m); err != nil {
 		return fmt.Errorf("outputs.criteria is neither a list nor an object keyed by criterion id")
+		return fmt.Errorf("outputs.criteria: %w", err)
 	}
 	keys := make([]string, 0, len(m))
 	for k := range m {
