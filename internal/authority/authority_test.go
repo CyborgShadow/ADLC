@@ -87,6 +87,38 @@ func TestAStaleReadIsNamedAsOne(t *testing.T) {
 	if !strings.Contains(d.Detail, "stale read") {
 		t.Errorf("the refusal should say what went wrong: %q", d.Detail)
 	}
+
+	// Each substring is a thing the reader has to be able to act on, and each is
+	// asserted by name because "the detail is non-empty" passes vacuously the day
+	// the message is gutted back to naming the run as the cause.
+	for _, want := range []string{
+		"S1-001",         // which item moved
+		"verifying",      // the state the ledger actually holds
+		"adlc item show", // the command that shows it
+		"envelope",       // and that none of the run's output was
+		"questions",      // discarded when the transition was refused —
+		"lessons",        // it was all recorded before this decision
+		"recorded",       // was reached
+	} {
+		if !strings.Contains(d.Detail, want) {
+			t.Errorf("the refusal should carry %q so the reader knows what to do next: %q", want, d.Detail)
+		}
+	}
+}
+
+// TestAFreshReadIsNotRefusedAsStale is the clean case for the guard above: a
+// proposal whose From matches the ledger must get past this check entirely.
+// Without it the stale-read test still passes on the day the comparison is
+// inverted and every proposal is refused as stale.
+func TestAFreshReadIsNotRefusedAsStale(t *testing.T) {
+	a := New(cfg(t))
+	d := a.Decide(Request{
+		RunID: "r-1", Worker: "performer", From: StateInProgress, To: StateVerifying,
+		Env: env(t, nil), Gate: greenGate(), Now: now,
+	}, Facts{RunStarted: true, Item: item("in_progress"), CommitReachable: true})
+	if d.Reason == ReasonStaleFromState {
+		t.Fatalf("the item is in the state the proposal claims; got [%s] %s", d.Reason, d.Detail)
+	}
 }
 
 // TestOnlyTheJudgeMayClearAVerificationTask pins who the stage belongs to at

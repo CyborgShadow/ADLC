@@ -98,9 +98,16 @@ func (a *Authority) Decide(req Request, f Facts) Decision {
 	// The item's state now, not the state the proposal remembers. Concurrent runs
 	// read, work for a while, and propose against a world that has moved.
 	if State(f.Item.State) != req.From {
+		// The detail names what to do next and what survived, because the run
+		// reading it did nothing wrong — the item moved underneath it. A refusal
+		// that says only "you worked from a stale read" is an accusation with no
+		// next step, and a worker that reads it as its output being thrown away
+		// re-does the work against a state that has moved again. The envelope,
+		// the questions and the lessons are all on the chain before this fires;
+		// saying so is what stops that second run.
 		return Decision{Edge: edge, Reason: ReasonStaleFromState, Detail: fmt.Sprintf(
-			"the proposal says %s is in %s, but the ledger says %s — the proposing run worked from a stale read",
-			f.Item.ID, req.From, f.Item.State)}
+			"the proposal says %s is in %s, but the ledger says %s — a stale read, because the item moved while this run was working. Nothing this run produced was lost: its envelope, its questions and its lessons were recorded before this transition was put, and they stay on the chain. Run `adlc item show %s` for the state the ledger holds now, and propose from that",
+			f.Item.ID, req.From, f.Item.State, f.Item.ID)}
 	}
 
 	// A worker's proposal has to come from a run the control plane started.
