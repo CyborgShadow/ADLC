@@ -82,12 +82,18 @@ func (r *ExecRunner) Invoke(ctx context.Context, in Invocation) (Result, error) 
 		cmd.Env = append(cmd.Env, "ADLC_DB="+in.LedgerPath)
 	}
 	out := NewTailBuffer(4000)
+	// Every line, always: the tail buffer keeps only the last few thousand
+	// characters and a result line can be pushed out of it by whatever the tool
+	// prints afterwards. Measuring what a run spent must not depend on that.
+	var usage usageWatcher
+	measure := NewLineWriter(usage.observe)
 	lines := NewLineWriter(in.OnOutput)
-	var sink io.Writer = out
+	sink := io.MultiWriter(out, measure)
 	if in.OnOutput != nil {
-		// Both: the caller watching a run in progress gets each line as it
-		// arrives, and the Result still carries the tail that explains a failure.
-		sink = io.MultiWriter(out, lines)
+		// Also the caller watching a run in progress, which gets each line as
+		// it arrives while the Result still carries the tail that explains a
+		// failure.
+		sink = io.MultiWriter(out, measure, lines)
 	}
 	cmd.Stdout, cmd.Stderr = sink, sink
 	// The prompt reaches the agent by path AND on stdin, because the two common
@@ -96,7 +102,9 @@ func (r *ExecRunner) Invoke(ctx context.Context, in Invocation) (Result, error) 
 
 	err := cmd.Run()
 	_ = lines.Close()
+	_ = measure.Close()
 	res := Result{Stderr: out.String()}
+	res.Usage, res.Measured = usage.measured()
 	if cmd.ProcessState != nil {
 		res.ExitCode = cmd.ProcessState.ExitCode()
 	}

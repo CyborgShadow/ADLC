@@ -67,6 +67,12 @@ type Result struct {
 	Envelope []byte
 	ExitCode int
 	Stderr   string
+	// Usage is what the agent tool itself reported spending, read off its own
+	// output rather than taken from the envelope. Measured reports whether
+	// anything was measured at all: absence must not render as zero, because
+	// "nobody counted" and "it cost nothing" are opposite facts.
+	Usage    ledger.Usage
+	Measured bool
 }
 
 // Runner invokes one agent. It is an interface so that the control plane has
@@ -634,7 +640,15 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	for _, n := range env.Normalised() {
 		d.log("RESHAPED %s — %s. The envelope on the chain is still exactly what the agent wrote", runID, n)
 	}
+	// What the tool reported spending outranks what the agent declared. An
+	// envelope's usage block is a claim like every other field in it, and it is
+	// the one no agent fills in — 157 finished runs in one night reported no
+	// tokens at all, so every spend figure was a floor and the per-run cap
+	// could not fire. The gate runs the checks itself for the same reason.
 	usage := ledger.Usage(env.Usage)
+	if agentOut.Measured {
+		usage = agentOut.Usage
+	}
 	model := env.Model
 	if model == "" {
 		model = d.Cfg.Budget.DefaultModel
