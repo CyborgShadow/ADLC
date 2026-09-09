@@ -98,17 +98,31 @@ func checkHTMLTopics(s *site) []Finding {
 
 const sourcesSectionID = "sources"
 
-// sourcesSection, sourceEntryList and sourceEntries are the one definition of
-// what the citation rules read, because three rules resolve a citation and a
-// second definition would let them disagree about what an entry is:
-// html.data-source would report a reference as resolved while
-// html.source-pinned reported the entry it resolved to as absent, and a reader
-// would have to guess which was right.
+// sourcesSections, sourceEntryList and sourceCitations are the list view: what
+// the page cites, all of it, in document order. sourcesSection and
+// sourceEntries are the resolution view: the one section and the one entry a
+// data-source resolves to. The split is the same one at every level, and it is
+// the same defect at every level — a rule asking what the list cites that reads
+// a collapsed view of it passes a URL nobody opened, because the collapse threw
+// the URL away before the rule saw it.
+//
+// They live together because three rules resolve a citation and a second
+// definition would let them disagree about what an entry is: html.data-source
+// would report a reference as resolved while html.source-pinned reported the
+// entry it resolved to as absent, and a reader would have to guess which was
+// right.
+func sourcesSections(f *htmlFile) []*node {
+	return f.root.findAll(func(n *node) bool { return n.tag == "section" && n.attrs["id"] == sourcesSectionID })
+}
+
+// sourcesSection is the section a data-source resolves against: the first, since
+// a reference names one id and has to resolve to one entry. A rule asking what
+// the page cites must read sourcesSections instead — a second section#sources is
+// a whole list of citations this one never returns, sitting under a Sources
+// heading a reader can see.
 func sourcesSection(f *htmlFile) *node {
-	for _, n := range f.root.tags("section") {
-		if n.attrs["id"] == sourcesSectionID {
-			return n
-		}
+	if secs := sourcesSections(f); len(secs) > 0 {
+		return secs[0]
 	}
 	return nil
 }
@@ -205,15 +219,28 @@ func sourceCitations(sources *node) []sourceCitation {
 	return out
 }
 
-// entryURL is the document a source entry points at. A citation is a link:
-// without one the entry is a name and a year, which is exactly what an invented
-// citation also has.
-func entryURL(entry *node) string {
+// entryURLs is every document one source entry links to, in document order.
+// More than one is a defect rather than a detail: entryURL below has to pick,
+// and whichever it picks is the answer html.source-topic gives to "which
+// document was this claim checked against".
+func entryURLs(entry *node) []string {
+	var out []string
 	if href, ok := entry.attrs["href"]; ok {
-		return strings.TrimSpace(href)
+		out = append(out, strings.TrimSpace(href))
 	}
 	for _, n := range entry.findAll(func(n *node) bool { _, ok := n.attrs["href"]; return ok }) {
-		return strings.TrimSpace(n.attrs["href"])
+		out = append(out, strings.TrimSpace(n.attrs["href"]))
+	}
+	return out
+}
+
+// entryURL is the document a source entry points at. A citation is a link:
+// without one the entry is a name and a year, which is exactly what an invented
+// citation also has. It reads the first link, which is only an answer at all
+// because html.source-pinned refuses an entry carrying two.
+func entryURL(entry *node) string {
+	if urls := entryURLs(entry); len(urls) > 0 {
+		return urls[0]
 	}
 	return ""
 }
@@ -270,18 +297,37 @@ func checkHTMLDataSource(s *site) []Finding {
 // requested and recorded a status for.
 //
 // The rule reads the list rather than a collapsed view of it, and that is the
-// whole of its correctness. It asks the same question three ways — every entry
-// links somewhere, every link is pinned, no id is declared twice — because each
-// of the other two shapes leaves a URL nobody opened sitting in the sources
-// list with every declared command green over it.
+// whole of its correctness. It asks the same question at every level a collapse
+// can happen — every section#sources, every entry in each of them, every link in
+// each entry, every id declared once — because each collapse leaves a URL nobody
+// opened sitting in the sources list with every declared command green over it,
+// and each is decided by where in the page the citation sits rather than by what
+// it says.
 func checkHTMLSourcePinned(s *site) []Finding {
 	var out []Finding
 	for _, f := range s.htmls {
-		sources := sourcesSection(f)
-		if sources == nil {
+		sections := sourcesSections(f)
+		if len(sections) == 0 {
 			continue // html.data-source owns a page whose citations resolve to nothing
 		}
-		entries := sourceEntryList(sources)
+
+		// A second list is refused for the reason a repeated id is, one level
+		// up: every rule that resolves a citation reads sourcesSection, the
+		// first, so the entries in a second one are cited by nothing and read by
+		// nothing while a reader sees them under the Sources heading. Two
+		// elements sharing an id is invalid HTML, which makes this shape less
+		// likely to arrive by accident than a copied <li> and no less green.
+		if n := len(sections); n > 1 {
+			out = append(out, Finding{RuleID: "html.source-pinned", Path: f.path,
+				Detail: fmt.Sprintf("section#%s is declared %d times, so which list a claim was checked against is unanswerable", sourcesSectionID, n)})
+		}
+
+		// Every entry in every such section, so an id repeated across two of
+		// them is one repeated id rather than two lists nobody compared.
+		var entries []*node
+		for _, sources := range sections {
+			entries = append(entries, sourceEntryList(sources)...)
+		}
 
 		// A repeated id is refused rather than deduplicated, because
 		// html.source-topic resolves a data-source to whichever entry came
@@ -293,20 +339,31 @@ func checkHTMLSourcePinned(s *site) []Finding {
 		}
 
 		for _, entry := range entries {
-			if entryURL(entry) == "" {
+			switch urls := entryURLs(entry); {
+			case len(urls) == 0:
 				out = append(out, Finding{RuleID: "html.source-pinned", Path: f.path,
 					Detail: fmt.Sprintf("source #%s links to nothing: a name and a year is what an invented citation has too", entry.attrs["id"])})
+			case len(urls) > 1:
+				// Both links can be pinned and the entry still answer the
+				// question wrongly: html.source-topic asks which topic this
+				// source was read for, and an entry naming two documents has two
+				// answers, of which it reports the one that happens to lead.
+				out = append(out, Finding{RuleID: "html.source-pinned", Path: f.path,
+					Detail: fmt.Sprintf("source #%s names %d documents, so which one backs a claim citing it is unanswerable",
+						entry.attrs["id"], len(urls))})
 			}
 		}
 
-		for _, c := range sourceCitations(sources) {
-			if c.url == "" {
-				continue // the "links to nothing" finding owns an entry naming no document
-			}
-			if _, ok := pinnedFor(c.url); !ok {
-				out = append(out, Finding{RuleID: "html.source-pinned", Path: f.path,
-					Detail: fmt.Sprintf("%s cites %q, which is not a pinned source; the pinned ones are %s",
-						c.where(), c.url, strings.Join(pinnedURLs(), ", "))})
+		for _, sources := range sections {
+			for _, c := range sourceCitations(sources) {
+				if c.url == "" {
+					continue // the "links to nothing" finding owns an entry naming no document
+				}
+				if _, ok := pinnedFor(c.url); !ok {
+					out = append(out, Finding{RuleID: "html.source-pinned", Path: f.path,
+						Detail: fmt.Sprintf("%s cites %q, which is not a pinned source; the pinned ones are %s",
+							c.where(), c.url, strings.Join(pinnedURLs(), ", "))})
+				}
 			}
 		}
 	}

@@ -859,13 +859,17 @@ func TestAnOmittedTopicIsNamedRatherThanPassingBySilence(t *testing.T) {
 	}
 }
 
-// TestTheSourcesListIsReadWholeRatherThanCollapsed covers the two shapes that
-// got past html.source-pinned while it read one URL per deduplicated id. Both
-// are the condition S1-007 AC-2 names — a #sources list carrying a URL absent
-// from the allowlist — and both exited 0: a second link inside an entry was
-// never reached, and a second entry reusing an id was dropped before any rule
-// read its URL. The clean cases are the other half of the pair: what is refused
-// is an unpinned URL and an ambiguous id, not a second link or a sixth entry.
+// TestTheSourcesListIsReadWholeRatherThanCollapsed covers the shapes that got
+// past html.source-pinned while it read a collapsed view of the list. Each is
+// the condition S1-007 AC-2 names — a #sources list carrying a URL absent from
+// the allowlist — and each exited 0: a second link inside an entry was never
+// reached, a second entry reusing an id was dropped before any rule read its
+// URL, and a second section#sources was invisible to a rule that read the
+// first. The collapse is the same at all three levels and so is the symptom: a
+// citation is refused or not according to where in the page it sits, which the
+// two ordering pairs below assert directly. The clean cases are the other half:
+// what is refused is an unpinned URL, an ambiguous id and an ambiguous entry,
+// not a sixth entry or a second list as such.
 func TestTheSourcesListIsReadWholeRatherThanCollapsed(t *testing.T) {
 	const (
 		s3Open   = `<li id="s3">Nagasawa, Kimura, Masuda and Uchiyama, 2023. `
@@ -873,6 +877,17 @@ func TestTheSourcesListIsReadWholeRatherThanCollapsed(t *testing.T) {
 		s3Entry  = s3Open + s3Pinned + `</li>`
 		invented = `<a href="https://example.org/invented-oxytocin-paper">Invented 2024</a>`
 		babyFace = `<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4782005/">Pet Face</a>`
+
+		// A whole second list, which is how the collapse looks one level up
+		// from a copied <li>: nothing in the real list changes, so every rule
+		// that resolves a citation goes on resolving against it.
+		secondSection = `<section id="sources">
+<h2>Sources</h2>
+<ul>
+<li id="s6">Fabricated and Nobody, 2024. <a href="https://example.org/never-opened">A paper nobody fetched</a></li>
+</ul>
+</section>`
+		firstFact = `<section class="fact" data-topic="baby-faces" data-source="s1">`
 	)
 	// The list ends at </ul>, so this is how an entry arrives in a real page:
 	// somebody copies the <li> above it and edits the text.
@@ -889,15 +904,15 @@ func TestTheSourcesListIsReadWholeRatherThanCollapsed(t *testing.T) {
 			func(t *testing.T) fstest.MapFS {
 				return swap(t, goodSite(t), "index.html", s3Entry, s3Open+s3Pinned+" see also "+invented+"</li>")
 			},
-			[]string{`source #s3 cites "https://example.org/invented-oxytocin-paper"`}},
+			[]string{"source #s3 names 2 documents", `source #s3 cites "https://example.org/invented-oxytocin-paper"`}},
 
 		{"the same entry with the two links in the opposite order",
 			func(t *testing.T) fstest.MapFS {
 				return swap(t, goodSite(t), "index.html", s3Entry, s3Open+invented+" see also "+s3Pinned+"</li>")
 			},
-			// Identical content, opposite order: the same finding, because the
+			// Identical content, opposite order: the same findings, because the
 			// question is what the list cites and not what it cites first.
-			[]string{`source #s3 cites "https://example.org/invented-oxytocin-paper"`}},
+			[]string{"source #s3 names 2 documents", `source #s3 cites "https://example.org/invented-oxytocin-paper"`}},
 
 		{"a second entry under an existing id, linking to a URL nobody opened",
 			func(t *testing.T) fstest.MapFS {
@@ -933,7 +948,28 @@ func TestTheSourcesListIsReadWholeRatherThanCollapsed(t *testing.T) {
 			func(t *testing.T) fstest.MapFS {
 				return swap(t, goodSite(t), "index.html", s3Entry, s3Open+s3Pinned+" and "+babyFace+"</li>")
 			},
-			nil},
+			// Nothing here was invented, and the entry still cannot say which
+			// document backs the claim citing it: html.source-topic reads the
+			// first link, so the oxytocin claim is correct or misattached
+			// according to which <a> was typed first.
+			[]string{"source #s3 names 2 documents"}},
+
+		{"a second section#sources holding a URL nobody opened",
+			func(t *testing.T) fstest.MapFS {
+				return swap(t, goodSite(t), "index.html", "</body>", secondSection+"\n</body>")
+			},
+			[]string{"section#sources is declared 2 times", `source #s6 cites "https://example.org/never-opened"`}},
+
+		{"the same second section, placed before the first",
+			func(t *testing.T) fstest.MapFS {
+				return swap(t, goodSite(t), "index.html", firstFact, secondSection+"\n\n"+firstFact)
+			},
+			// Byte-identical content, opposite position, and this is the pair
+			// that matters: while the rule read the first section#sources, the
+			// version below exited 1 and the version above exited 0, so what
+			// decided whether an invented citation was refused was where in the
+			// page somebody pasted it.
+			[]string{"section#sources is declared 2 times", `source #s6 cites "https://example.org/never-opened"`}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := runRule(t, "html.source-pinned", c.fsys(t))
