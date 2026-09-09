@@ -629,7 +629,22 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	env, err := envelope.Parse(raw)
 	if err != nil {
 		// A malformed envelope is a refusable proposal, not a dead run.
-		d.finish(runID, "fail", "", "", "", ledger.Usage{}, 0)
+		//
+		// The bytes are retained here because the PutBlob further down is
+		// never reached on this path: a run refused for malformed output kept
+		// no copy of the output it was refused for, so `adlc run envelope`
+		// answered "no digest given" and the one artefact that explains the
+		// refusal was readable nowhere. Retaining decides nothing — the
+		// verdict is still fail, the refusal is still recorded, and every
+		// reader of this blob parses it defensively, so a stored malformed
+		// envelope is never read back as a proposal.
+		envSHA, berr := d.Led.PutBlob(ledger.BlobEnvelope, raw)
+		if berr != nil {
+			// Failing to keep the copy must not also lose the refusal, which
+			// is the part somebody is owed.
+			d.log("UNRETAINED %s — the malformed envelope could not be stored: %v", runID, berr)
+		}
+		d.finish(runID, "fail", envSHA, "", "", ledger.Usage{}, 0)
 		d.recordRefusal(runID, c, authority.ReasonMalformedEnvelope, err.Error())
 		d.learnFromMalformed(runID, c, err.Error())
 		res.Reason, res.Detail = string(authority.ReasonMalformedEnvelope), err.Error()
