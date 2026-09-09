@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,6 +48,7 @@ type harness struct {
 	Cfg  *config.Config
 	Run  *fakeRunner
 	Logs []string
+	mu   sync.Mutex
 }
 
 func newHarness(t *testing.T, workers []config.WorkerDecl, routing map[string]string) *harness {
@@ -88,8 +91,15 @@ func newHarness(t *testing.T, workers []config.WorkerDecl, routing map[string]st
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { led.Close() })
-	n := 0
-	led.SetClock(func() time.Time { n++; return testNow.Add(time.Duration(n) * time.Second) })
+	// Atomic because the ledger is appended to from every lane goroutine at once
+	// and this counter is what orders the events. A plain n++ here is a data
+	// race, and the damage is worse than a lost tick: two appends reading the
+	// same n get the same timestamp, so a test that depends on event order gets
+	// an order that depends on scheduling.
+	var n int64
+	led.SetClock(func() time.Time {
+		return testNow.Add(time.Duration(atomic.AddInt64(&n, 1)) * time.Second)
+	})
 	for _, w := range workers {
 		if _, err := led.Append("t", ledger.KindWorkerRegistered, w.Type, ledger.WorkerRegistered{
 			Type: w.Type, Layer: w.Layer, LowCadence: w.LowCadence,
@@ -104,7 +114,19 @@ func newHarness(t *testing.T, workers []config.WorkerDecl, routing map[string]st
 		Leases: lease.New(filepath.Join(dir, "leases"), 60, nil),
 		Runner: h.Run, Repo: dir, Actor: "test",
 		Now: func() time.Time { return testNow },
-		Log: func(s string) { h.Logs = append(h.Logs, s) },
+		// Under the lock because lanes genuinely run at once: fireParallel starts
+		// max_per_tick goroutines and every one of them calls d.log. An unguarded
+		// append here is a real data race, and the race detector says so the
+		// moment a concurrency test runs — but the reason it matters is quieter
+		// than that. `logged` reads this slice and several tests assert on what
+		// it contains, so a lost or torn append makes those tests pass and fail
+		// on timing rather than on behaviour. Production is not affected: it logs
+		// through fmt.Println, whose writer holds its own lock.
+		Log: func(s string) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.Logs = append(h.Logs, s)
+		},
 	}
 	return h
 }
@@ -171,6 +193,8 @@ func (h *harness) item(t *testing.T, id, seg, area, state string) {
 }
 
 func (h *harness) logged(sub string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	for _, l := range h.Logs {
 		if strings.Contains(l, sub) {
 			return true
