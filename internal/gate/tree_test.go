@@ -75,28 +75,28 @@ func TestOnlyDeclaredRootsAreWalked(t *testing.T) {
 
 	// The same file under a directory nobody declared is invisible, and that is
 	// exactly why widening the declared list is the whole of the fix.
-	writeUnder(t, dir, "site/cats/probe.html", "probe\n")
+	writeUnder(t, dir, "web/probe.html", "probe\n")
 	if _, _, paths, err := TreeState(dir, roots); err != nil || len(paths) != 1 {
 		t.Errorf("an undeclared directory must not be walked, got paths=%v err=%v", paths, err)
 	}
-	if _, dirty, paths, err := TreeState(dir, append(roots, "site")); err != nil || !dirty || len(paths) != 2 {
+	if _, dirty, paths, err := TreeState(dir, append(roots, "web")); err != nil || !dirty || len(paths) != 2 {
 		t.Errorf("declaring that directory must make its uncommitted work visible, got dirty=%v paths=%v err=%v", dirty, paths, err)
 	}
 }
 
 // TestADeclaredRootWithNothingInItYetIsCleanNotAnError covers the state a root
-// is in between being declared and being filled, which is where site/ stands on
-// the commit that declares it.
+// is in between being declared and being filled, which is where any root stands
+// on the commit that declares it.
 //
 // If a root that does not exist on disk made the walk fail, declaring one ahead
 // of the tree it names would refuse every run until somebody committed a file
 // there — and the error would name git rather than the config that caused it.
 func TestADeclaredRootWithNothingInItYetIsCleanNotAnError(t *testing.T) {
 	dir := treeRepo(t)
-	roots := []string{"cmd", "site"}
+	roots := []string{"cmd", "web"}
 
-	if _, err := os.Stat(filepath.Join(dir, "site")); !os.IsNotExist(err) {
-		t.Fatalf("this test needs site/ to be absent, stat said %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "web")); !os.IsNotExist(err) {
+		t.Fatalf("this test needs web/ to be absent, stat said %v", err)
 	}
 	if _, dirty, paths, err := TreeState(dir, roots); err != nil {
 		t.Fatalf("a declared root that does not exist yet must not fail the walk: %v", err)
@@ -106,7 +106,7 @@ func TestADeclaredRootWithNothingInItYetIsCleanNotAnError(t *testing.T) {
 
 	// Firing case: the same root, once it holds something, is watched like any
 	// other — so the clean answer above was scope and not silence.
-	writeUnder(t, dir, "site/cats/index.html", "<!doctype html>\n")
+	writeUnder(t, dir, "web/index.html", "<!doctype html>\n")
 	if _, dirty, _, err := TreeState(dir, roots); err != nil || !dirty {
 		t.Errorf("work under a declared root must read dirty once it exists, got dirty=%v err=%v", dirty, err)
 	}
@@ -126,17 +126,19 @@ func TestAnUnscopedWalkIsRefusedRatherThanGuessed(t *testing.T) {
 	}
 }
 
-// TestTheShippedRootsWatchTheSiteTree reads the roots this repository actually
-// declares and puts them to the walk, rather than asserting on the string
-// "site" in a config file.
+// TestTheShippedRootsWatchTheTreesThisRepositoryHolds reads the roots this
+// repository actually declares and puts them to the walk, rather than asserting
+// on a string in a config file.
 //
-// The defect was never in TreeState: uncommitted work under site/ was invisible
-// because site was not on the declared list, so the gate reported a clean tree
-// over a page somebody had edited and never committed. A test that only reads
-// the config would still pass if the walk stopped honouring the list; this one
-// fails if either half breaks, and it is red on the commit before site was
-// declared.
-func TestTheShippedRootsWatchTheSiteTree(t *testing.T) {
+// The defect this pins was never in TreeState: uncommitted work was invisible
+// because the tree holding it was not on the declared list, so the gate
+// reported a clean tree over a file somebody had edited and never committed. A
+// test that only read the config would still pass if the walk stopped honouring
+// the list; this one fails if either half breaks.
+//
+// It walks `agents/`, because a prompt is the one artefact here that a run can
+// change and that no compiler would notice going missing.
+func TestTheShippedRootsWatchTheTreesThisRepositoryHolds(t *testing.T) {
 	cfg, err := config.Load("../../adlc.json")
 	if err != nil {
 		t.Fatalf("load the shipped config: %v", err)
@@ -149,17 +151,17 @@ func TestTheShippedRootsWatchTheSiteTree(t *testing.T) {
 		t.Fatalf("a clean tree must stay clean under the shipped roots, got dirty=%v paths=%v err=%v", dirty, paths, err)
 	}
 
-	// Firing case: a page nobody committed is uncommitted work, and the gate
+	// Firing case: a prompt nobody committed is uncommitted work, and the gate
 	// has to see it before it collects evidence over that tree.
-	writeUnder(t, dir, "site/cats/index.html", "<!doctype html>\n")
+	writeUnder(t, dir, "agents/probe.md", "# probe\n")
 	_, dirty, paths, err := TreeState(dir, cfg.SourceRoots)
 	if err != nil {
 		t.Fatalf("TreeState: %v", err)
 	}
 	if !dirty {
-		t.Fatalf("uncommitted work under site/ must be visible to the shipped roots %v; it was not, so the gate would report a clean tree over it", cfg.SourceRoots)
+		t.Fatalf("uncommitted work under agents/ must be visible to the shipped roots %v; it was not, so the gate would report a clean tree over it", cfg.SourceRoots)
 	}
-	if len(paths) != 1 || !strings.Contains(paths[0], "site/") {
-		t.Errorf("the walk must name the uncommitted site path, got %v", paths)
+	if len(paths) != 1 || !strings.Contains(paths[0], "agents/") {
+		t.Errorf("the walk must name the uncommitted path, got %v", paths)
 	}
 }

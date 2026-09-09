@@ -4,7 +4,7 @@
   "version": 1,
   "project": "adlc",
 
-  "source_roots": ["cmd", "internal", "agents", "site", "docs", "README.md", "adlc.json", ".gitattributes"],
+  "source_roots": ["cmd", "internal", "agents", "docs", "README.md", "adlc.json", ".gitattributes"],
 
   "checks": [
     {
@@ -181,7 +181,7 @@
     {
       "type": "judge",
       "layer": "verification",
-      "description": "Checks an item against its acceptance criteria by executing commands. Never the run that wrote the code.",
+      "description": "Rules on whether the work serves the brief and fits the deliverable. The criteria a command can settle are run by the control plane, not here. Never the run that wrote the code.",
       "prompt": "judge",
       "capabilities": ["judge"]
     },

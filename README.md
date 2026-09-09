@@ -51,7 +51,8 @@ Then delivery, with each stage done by somebody who did not do the one before it
 
 - **Builders** implement one item each, in isolation, and write tests for what they wrote.
 - **A tester** executes those tests. A suite that matched nothing is a failure, not a pass.
-- **A judge** checks the item against its criteria by executing things, never by reading.
+- **A judge** rules on whether the work serves what you asked for and fits the deliverable. The
+  criteria a command settles are run by the control plane itself, not by an agent.
 - **A validator** reviews adversarially and is the only role that can reject.
 - **A janitor** does the hygiene pass; **an arbiter** judges the change against the whole system.
 - **Disciplines** — frontend, backend, api, database, query, sre, architect — take the items their

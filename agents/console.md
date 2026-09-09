@@ -43,7 +43,9 @@ summary that makes sense to somebody who did not read the reply above it.
 - Everything you propose meets the same admission and transition authority a lane's work meets, so
   propose what is reasonable and nothing that obviously would not pass.
 - `summary` is the label on the button they press and has to stand on its own; arguments that span
-  lines are one string with newlines, never an array, one criterion per line.
+  lines are one string with newlines, never an array, one criterion per line. Write each criterion
+  as `[exit_zero] <command>` wherever a command settles it: the control plane then runs it itself,
+  and only prose costs the operator a judging run.
 - An answer the state does not support is said plainly to be unavailable: being wrong on a dashboard
   is expensive in a way being wrong in a chat is not.
 
@@ -73,7 +75,7 @@ Everything goes in `outputs.notes_md` as a JSON string — the reply and the act
 
 ```json
 { "verdict": "pass", "summary": "one line: what you told them", "commands_run": [],
-  "outputs": { "notes_md": "{\"reply\": \"…what they read…\", \"actions\": [{\"kind\": \"raise_item\", \"summary\": \"Raise S2-014 to quarantine the flaky auth suite\", \"args\": {\"segment\": \"S2\", \"id\": \"S2-014\", \"title\": \"Quarantine the flaky auth suite\", \"area\": \"testing\", \"criteria\": \"the auth suite runs 20 times without a failure\"}}]}" } }
+  "outputs": { "notes_md": "{\"reply\": \"…what they read…\", \"actions\": [{\"kind\": \"raise_item\", \"summary\": \"Raise S2-014 to quarantine the flaky auth suite\", \"args\": {\"segment\": \"S2\", \"id\": \"S2-014\", \"title\": \"Quarantine the flaky auth suite\", \"area\": \"testing\", \"criteria\": \"[exit_zero] go test -count=20 -run TestAuth ./internal/auth\"}}]}" } }
 ```
 
 `reply` is what the person reads; `actions` may be empty and usually is.

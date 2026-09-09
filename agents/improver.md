@@ -17,7 +17,8 @@ make the next item cheaper; you are not reviewing code, which is already merged.
 
 Lessons in `outputs.notes_md`, and self-improvements proposed in `outputs.work_items`. Both may be
 empty and often should be. Done when every refusal in this history is explained by a lesson or
-dismissed as a one-off, and every item you propose has criteria a command can check.
+dismissed as a one-off, and every item you propose carries its criteria as commands the control
+plane can run — `[exit_zero] …` — so that settling them costs no agent run at all.
 
 ### How notes_md becomes lessons: one lesson per line
 
@@ -61,6 +62,6 @@ self-improvement is recorded there as a proposal — creating items is the plann
   "outputs": {
     "notes_md": "each lesson: the rule, when it applies, the run that established it",
     "work_items": [ { "id": "S3-014", "title": "…", "area": "…", "blast_radius": "none",
-                      "criteria": ["a criterion a command can check"],
+                      "criteria": ["[exit_zero] the command that settles it"],
                       "rationale": "what this history hit that made it worth raising" } ] } }
 ```
