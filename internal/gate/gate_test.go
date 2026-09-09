@@ -239,3 +239,50 @@ func buildEnvelope(t *testing.T, cmds []envelope.Command) []byte {
 	}
 	return b
 }
+
+// TestALineAnchoredCountStillRefusesOutputThatDoesNotCarryIt is the firing case
+// for the anchoring fix in internal/config, and the half that matters more.
+//
+// Widening a match is only safe if the guard it feeds still fires. Output that
+// genuinely does not carry the pattern must still count 0 and read RED, or the
+// fix for a false refusal has bought a false pass, which is the worse defect.
+func TestALineAnchoredCountStillRefusesOutputThatDoesNotCarryIt(t *testing.T) {
+	ch := check(t, config.Check{
+		ID: "images", Command: []string{"x"}, Verdict: config.VerdictCountMin,
+		CountPattern: `^images checked: ([0-9]+)$`, MinCount: 6,
+	})
+
+	// Firing: nothing in this output is the line the pattern names — the count is
+	// on a line with other text, so the anchors do their job and reject it.
+	const noCount = "scanning site/cats\nwarning: images checked: 6 of them were skipped\ndone\n"
+	v, n, why := judge(ch, 0, noCount)
+	if v != StatusRed || n != 0 {
+		t.Fatalf("output not carrying the pattern must be RED with 0, got %s n=%d (%s)", v, n, why)
+	}
+	if want := "found 0, needs at least 6 — a check that examined nothing has not passed"; why != want {
+		t.Errorf("reason %q, want %q", why, want)
+	}
+
+	// Clean: the line the pattern names, which before the fix also counted 0.
+	if v, n, why := judge(ch, 0, "scanning site/cats\nimages checked: 6\nall rules passed\n"); v != StatusGreen || n != 6 {
+		t.Errorf("a scan that reported its count must pass, got %s n=%d (%s)", v, n, why)
+	}
+}
+
+// TestAMetCountOverAFailedProcessIsStillRed pins the exit code that a wider
+// match must not be allowed to carry past. A command that printed its count and
+// then failed has not passed; counting is an extra condition on green, never a
+// replacement for the exit code.
+func TestAMetCountOverAFailedProcessIsStillRed(t *testing.T) {
+	ch := check(t, config.Check{
+		ID: "images", Command: []string{"x"}, Verdict: config.VerdictCountMin,
+		CountPattern: `^images checked: ([0-9]+)$`, MinCount: 6,
+	})
+	v, n, why := judge(ch, 1, "images checked: 6\n")
+	if v != StatusRed || n != 6 {
+		t.Fatalf("a met count under exit 1 must be RED, got %s n=%d (%s)", v, n, why)
+	}
+	if want := "found 6 but the process exited 1"; why != want {
+		t.Errorf("reason %q, want %q", why, want)
+	}
+}

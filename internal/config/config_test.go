@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -285,5 +287,64 @@ func TestStripBOMLeavesEverythingElseAlone(t *testing.T) {
 	}
 	if string(StripBOM(body)) != string(body) {
 		t.Fatal("content without a BOM must be untouched")
+	}
+}
+
+// TestAnAnchoredCountPatternFindsTheLineItNames pins the fix: a count_pattern
+// anchored to its line is compiled so that ^ and $ mean the line, not the whole
+// output.
+//
+// Written the obvious way, "^images checked: ([0-9]+)$" matched nothing at all,
+// because a command's output ends in a newline and Go's $ without (?m) is end
+// of text. The check counted 0 and refused a scan that had run.
+func TestAnAnchoredCountPatternFindsTheLineItNames(t *testing.T) {
+	const pattern = `^images checked: ([0-9]+)$`
+	ch := Check{ID: "images", Command: []string{"x"}, Verdict: VerdictCountMin, CountPattern: pattern, MinCount: 6}
+	if err := ch.Compile(); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+
+	for _, output := range []string{
+		"images checked: 6\n",
+		"scanning site/cats\nimages checked: 6\nall rules passed\n",
+	} {
+		m := ch.Counter().FindStringSubmatch(output)
+		if len(m) < 2 || m[1] != "6" {
+			t.Errorf("over %q the compiled counter found %q, want the capture 6", output, m)
+		}
+	}
+
+	// The defect itself, so this test fails for the right reason if the anchoring
+	// is ever dropped again: the raw pattern, compiled as written, finds nothing.
+	if m := regexp.MustCompile(pattern).FindStringSubmatch("images checked: 6\n"); m != nil {
+		t.Errorf("the unanchored-compile defect is gone from Go itself, got %q — this test no longer proves anything", m)
+	}
+}
+
+// TestOnlyAnchoredCountPatternsMove is the clean case for the rule above: the
+// count patterns that exist in this repository's examples carry no anchors, and
+// line anchoring must leave them counting exactly what they counted before.
+//
+// A count rule that started matching more than it was written to match would be
+// a worse defect than the one being fixed, because it would read as green.
+func TestOnlyAnchoredCountPatternsMove(t *testing.T) {
+	cases := []struct {
+		pattern string
+		output  string
+	}{
+		// examples/infra.adlc.json: the ansible-check and cis-scan patterns.
+		{`ok=(\d+)`, "host-a : ok=12 changed=3 failed=0\nhost-b : ok=9 changed=0 failed=0\n"},
+		{`([0-9]+) rules evaluated`, "profile level1-server\n412 rules evaluated\n"},
+	}
+	for _, tc := range cases {
+		ch := Check{ID: "c", Command: []string{"x"}, Verdict: VerdictCountMin, CountPattern: tc.pattern, MinCount: 1}
+		if err := ch.Compile(); err != nil {
+			t.Fatalf("compile %q: %v", tc.pattern, err)
+		}
+		got := ch.Counter().FindAllStringSubmatch(tc.output, -1)
+		want := regexp.MustCompile(tc.pattern).FindAllStringSubmatch(tc.output, -1)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%q counts differently after line anchoring: got %q, want %q", tc.pattern, got, want)
+		}
 	}
 }

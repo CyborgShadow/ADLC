@@ -525,7 +525,7 @@ func (ch *Check) compile() error {
 		if ch.CountPattern == "" {
 			return fmt.Errorf("check %s: count_min needs count_pattern", ch.ID)
 		}
-		re, err := regexp.Compile(ch.CountPattern)
+		re, err := regexp.Compile(lineAnchored(ch.CountPattern))
 		if err != nil {
 			return fmt.Errorf("check %s: count_pattern: %w", ch.ID, err)
 		}
@@ -543,6 +543,23 @@ func (ch *Check) compile() error {
 	}
 	return nil
 }
+
+// lineAnchored makes ^ and $ inside a count pattern mean the start and end of a
+// LINE rather than of the whole output.
+//
+// A counting check reads one line out of a command's output — "images checked:
+// 6" — and the obvious way to write that is anchored. In Go, $ without (?m)
+// means end of TEXT, so an anchored pattern misses the very line it names as
+// soon as anything follows it, and every command's output ends in a newline.
+// The check then counts 0 and reports "a check that examined nothing has not
+// passed" over a scan that in fact ran — a false refusal phrased exactly like
+// the true one this rule exists to produce, which is why nobody could tell them
+// apart.
+//
+// Unanchored patterns are untouched: (?m) changes the meaning of ^ and $ and of
+// nothing else. (?s), which would also make . swallow newlines and let one
+// match span lines, is deliberately not set.
+func lineAnchored(pattern string) string { return "(?m)" + pattern }
 
 // Compile prepares a check's verdict rule and reports what the rule needs and
 // does not have.
