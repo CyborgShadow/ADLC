@@ -52,8 +52,16 @@ of your eight. A lesson must therefore be a single unwrapped line, however long 
 ## When you stop
 
 Report `pass`. The control plane marks the item done; you do not, and nothing is dispatched after
-you. This item's lane ends here, your lessons stay readable in the run record, and each
-self-improvement is recorded there as a proposal — creating items is the planning lane's job.
+you. This item's lane ends here and your lessons stay readable in the run record.
+
+Each self-improvement you raise is filed under `SELF`, the fleet's own deliverable, which sits on
+the roadmap waiting for a person. It is not filed under the deliverable you were working on, and it
+is not built until somebody agrees it is worth building. Both halves of that matter to how you
+write: it will be read next to every other repair the fleet has asked for rather than in the
+context of this item, so say what is wrong in terms somebody who has not seen this run can act on —
+the id of the item that provoked it is attached for you. And a person is deciding, so an item that
+cannot survive the question "is this worth doing at all?" is one to leave out. Raising nothing is a
+complete and common answer.
 
 ## Your envelope
 

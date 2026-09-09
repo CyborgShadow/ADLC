@@ -102,7 +102,8 @@ validator      confirms against the applied artifact, not the plan
   ↓
 merge queue    rebases, re-gates on the rebased tree, fast-forwards — the control plane itself
   ↓
-improver       records what was learned and raises self-improvements as their own items
+improver       records what was learned; repairs it proposes go to SELF, the fleet's own
+  ↓            deliverable, which waits on the roadmap for you to sign off
 ```
 
 The Coordination page renders this live, with who currently owns each stage and whether their

@@ -330,6 +330,28 @@ hypothetical: it produced 212 runs in one hour, 81 of them against a single item
 night's entire run count in its last two hours. Lanes now back off while a no-envelope streak is
 running, and past a declared streak the fleet drains itself and stops.
 
+## Raising a repair is not deciding to build it
+
+The last step of an item is what it taught, and part of that is raising what the system itself got
+wrong as ordinary work. Ordinary work is signed off, researched, decomposed and reviewed. An
+improver's proposals were none of those: they became queued items the moment they were written.
+
+They also went under the deliverable whose work provoked them, on the argument that this keeps the
+reason and the work in the same place. The reason belongs there; the work does not. Those items
+counted against that deliverable's own open-item target, so `SegmentNeedsWork` returned zero, the
+planner stopped being dispatched, and the deliverable was starved by its own byproduct. Thirty-nine
+of forty-four items arrived that way, after the last thing anybody reviewed.
+
+So they are filed under one deliverable of their own, which starts on the roadmap waiting for a
+person, and every item carries the run and item that provoked it in its rationale. Nothing is
+dropped — that was the failure the direct-creation path was added to fix, and dropping them
+silently would be worse than either. What changed is that the fleet may now *ask* for work without
+that being the same act as *starting* it.
+
+Its target is zero open items, deliberately: a planner asked to keep a backlog topped up here would
+invent maintenance to fill the quota, which is the failure the improver already has to be argued
+out of.
+
 ## Generation judges relevance, by shape
 
 Generation is the one place an agent decides what work *exists*, which makes it the one place an

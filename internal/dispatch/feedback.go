@@ -579,3 +579,40 @@ func joinSections(parts ...string) string {
 	}
 	return strings.Join(kept, "\n\n")
 }
+
+// selfImprovementSegmentID is the one deliverable the fleet may propose into
+// without a person having asked for it. One, fixed, so self-improvements
+// accumulate somewhere a person can read them all at once rather than being
+// scattered through whatever deliverable happened to provoke each.
+const selfImprovementSegmentID = "SELF"
+
+// selfImprovementSegment returns the deliverable an improver's proposals are
+// filed under, creating it on the roadmap the first time.
+//
+// It is created at `roadmap` deliberately, which is the state that waits for a
+// person. Items can be filed into it, are visible on every surface, and are
+// skipped by Candidates for a stated reason until somebody signs it off — the
+// same gate every other idea passes, applied to the one source of work nobody
+// asked for. The alternative the fleet ran on was that an improver's proposal
+// became dispatchable the moment it was written.
+func (d *Dispatcher) selfImprovementSegment(provoked ledger.Segment) (ledger.Segment, error) {
+	if s, err := d.Led.Segment(selfImprovementSegmentID); err == nil {
+		return s, nil
+	}
+	// TargetOpen 0: this deliverable is never topped up. A planner asked to keep
+	// N items in flight here would invent maintenance to fill the quota, which
+	// is the failure the improver already has to be argued out of.
+	if _, err := d.Led.Append(d.Actor, ledger.KindSegmentCreated, selfImprovementSegmentID, ledger.SegmentCreated{
+		ID:    selfImprovementSegmentID,
+		Title: "The fleet's own repairs",
+		Brief: "Defects the fleet found in itself while doing other work. Each item names the run " +
+			"or refusal that provoked it. Nothing here is built until somebody signs this off, " +
+			"because work nobody asked for is exactly the work that needs asking about.",
+		Rationale:  "Raised by improvers, first while working on " + provoked.ID + ".",
+		TargetOpen: 0,
+	}); err != nil {
+		return ledger.Segment{}, err
+	}
+	d.log("SELF-IMPROVEMENT %s created on the roadmap; it waits for you before any of it is built", selfImprovementSegmentID)
+	return d.Led.Segment(selfImprovementSegmentID)
+}

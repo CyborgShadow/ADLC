@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"strings"
+
 	"github.com/CyborgShadow/ADLC/internal/authority"
 	"github.com/CyborgShadow/ADLC/internal/config"
 	"github.com/CyborgShadow/ADLC/internal/ledger"
@@ -297,7 +299,64 @@ func TestAnImproversProposalsAreActuallyCreated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.SegmentID != "S1" {
-		t.Errorf("a self-improvement belongs to the deliverable whose work provoked it, got %q", created.SegmentID)
+	// Not the deliverable that provoked it. Filing it there made it dispatchable
+	// without the sign-off every other idea passes, and counted it against that
+	// deliverable's open-item target — so SegmentNeedsWork returned zero and the
+	// planner stopped being dispatched. A five-item plan became forty-four that
+	// way and the deliverable was starved by its own byproduct.
+	if created.SegmentID != selfImprovementSegmentID {
+		t.Errorf("a self-improvement belongs to the fleet's own deliverable, got %q", created.SegmentID)
+	}
+	// The reason it exists survives the move, or nothing can get back to the run
+	// that hit the problem.
+	if !strings.Contains(created.Rationale, "S1-001") {
+		t.Errorf("the provoking item is not named in the rationale (%q); moving the work must not lose why it was raised", created.Rationale)
+	}
+}
+
+// The other half, and the one that matters: raising a self-improvement must not
+// be the same act as deciding to build it.
+//
+// Nothing is dropped — the item exists and is on the chain, which is what the
+// direct-creation path was added to fix. What changed is that it lands on a
+// deliverable waiting for a person, so Candidates skips it with a stated reason
+// until somebody signs it off. Work nobody asked for is exactly the work that
+// needs asking about.
+func TestASelfImprovementIsNotDispatchableUntilSomebodySignsItOff(t *testing.T) {
+	ws, routing := specialists()
+	ws = append(ws, config.WorkerDecl{Type: "improver", Layer: "stewardship",
+		Prompt: "implementer", Capabilities: []string{config.CapImprove}})
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "merged")
+	h.Run.envelope = `{"envelope_version":"1","run_id":"{{run_id}}","worker_type":"improver",
+		"work_item_id":"S1-001","verdict":"pass","summary":"recorded what it taught",
+		"commands_run":[],"outputs":{"work_items":[
+		  {"id":"S1-900","title":"Make the refusal message name the failing check",
+		   "area":"ui","blast_radius":"none",
+		   "criteria":["AC-1 [exit_zero] go build ./internal/authority/"]}
+		]},"usage":{"input_tokens":1,"output_tokens":1}}`
+	if _, err := h.D.TickScoped(context.Background(), Filter{Capability: config.CapImprove}); err != nil {
+		t.Fatal(err)
+	}
+
+	seg, err := h.Led.Segment(selfImprovementSegmentID)
+	if err != nil {
+		t.Fatalf("the fleet's own deliverable must exist once something is raised into it: %v", err)
+	}
+	if authority.SegmentState(seg.State).OpenForWork() {
+		t.Fatalf("the fleet's own deliverable is %s, which is open for work — a self-improvement would be built without anybody agreeing to it", seg.State)
+	}
+	// The clean case that stops the guard passing vacuously: it is not that
+	// nothing is dispatchable, it is that THIS is not. The provoking
+	// deliverable's own work is still offered.
+	cands, err := h.D.Candidates(Filter{Capability: config.CapImplement})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cands {
+		if c.Item.ID == "S1-900" {
+			t.Error("a self-improvement was offered for building before anybody signed it off")
+		}
 	}
 }

@@ -997,14 +997,36 @@ func (d *Dispatcher) admitProposedItems(runID string, c Candidate, env *envelope
 		existing[it.ID] = true
 	}
 	// A planning run carries its segment on the candidate; an improver run
-	// carries an item, so the segment is the one that item belongs to. Filing a
-	// self-improvement under the deliverable whose work provoked it keeps the
-	// reason and the work in the same place.
+	// carries an item, so the segment is the one that item belongs to.
 	seg := c.Segment
 	if seg.ID == "" && c.Item.SegmentID != "" {
 		if s, err := d.Led.Segment(c.Item.SegmentID); err == nil {
 			seg = s
 		}
+	}
+	// A self-improvement is not part of the deliverable that provoked it, and
+	// filing it there was how a reviewed five-item plan became forty-four.
+	//
+	// It used to go under the provoking deliverable, on the argument that this
+	// "keeps the reason and the work in the same place". The reason is kept —
+	// it rides in the rationale below — but the work must not be, for two
+	// reasons that both cost a night. Those items became dispatchable
+	// immediately, without the sign-off and the plan review every other idea
+	// passes; and they counted against the deliverable's own open-item target,
+	// so SegmentNeedsWork returned zero and the planner was never dispatched
+	// again. The deliverable was starved by its own byproduct.
+	//
+	// So they go to a deliverable of their own, which starts on the roadmap
+	// awaiting a person. Nothing is dropped — the items exist, are visible and
+	// are on the chain — and nothing is built until somebody agrees it is worth
+	// building. That is what the improver's own prompt has always said happens
+	// to them: "creating items is the planning lane's job".
+	if c.Capability == config.CapImprove {
+		s, err := d.selfImprovementSegment(seg)
+		if err != nil {
+			return 0, err
+		}
+		seg = s
 	}
 	segScopes, openScopes := authority.ScopesFor(seg.ID, all)
 	facts := authority.GenerationFacts{
@@ -1049,9 +1071,19 @@ func (d *Dispatcher) admitProposedItems(runID string, c Candidate, env *envelope
 		if radius == "" {
 			radius = string(config.RadiusNone)
 		}
+		// The rationale carries what provoked it. Moving a self-improvement out
+		// of the deliverable that provoked it would otherwise lose the one thing
+		// that made filing it there defensible — somebody reading it later has to
+		// be able to get back to the run that hit the problem.
+		rationale := p.Rationale
+		if c.Capability == config.CapImprove && c.Item.ID != "" {
+			rationale = strings.TrimSpace(fmt.Sprintf("Raised while working on %s (run %s). %s",
+				c.Item.ID, runID, rationale))
+		}
 		if _, err := d.Led.Append(d.Actor, ledger.KindItemCreated, p.ID, ledger.ItemCreated{
 			ID: p.ID, SegmentID: seg.ID, Title: p.Title, Area: p.Area, Radius: radius,
-			Resources: p.Resources, FileScope: p.FileScope, DependsOn: p.DependsOn, Criteria: p.Criteria,
+			Resources: p.Resources, FileScope: p.FileScope, DependsOn: p.DependsOn,
+			Criteria: p.Criteria, Rationale: rationale,
 		}); err != nil {
 			return created, err
 		}
