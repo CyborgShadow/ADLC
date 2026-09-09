@@ -98,6 +98,36 @@ func (d *Dispatcher) prepareWorkspace(runID, base string) (*Workspace, error) {
 	return nil, fmt.Errorf("unknown dispatch.isolation %q: want worktree, copy or none", mode)
 }
 
+// workspaceBase is the ref a run on an item is cut from, or "" for the trunk.
+//
+// It is not simply branchFor. branchFor answers a different question for the
+// merge queue: when nothing is ahead of the trunk it returns the newest branch
+// anyway, so the queue can report what it found rather than report no branch at
+// all. A workspace cannot take that answer. A branch that is not ahead is one a
+// run committed nothing to, or one whose work has already landed — and cutting
+// a rework run from a landed tip hides every sibling change that landed since,
+// so the item is reworked against a tree the trunk no longer has and the
+// difference comes back as a merge conflict nobody wrote.
+func (d *Dispatcher) workspaceBase(itemID string) string {
+	if itemID == "" || d.Led == nil {
+		return ""
+	}
+	b, err := d.branchFor(itemID)
+	if err != nil || b == "" {
+		// Unreadable is not a licence to guess at a branch. The trunk is what
+		// this did before a branch was consulted at all.
+		return ""
+	}
+	trunk := d.Cfg.Dispatch.Trunk
+	if trunk == "" {
+		trunk = "main"
+	}
+	if !d.branchHasWork(trunk, b) {
+		return ""
+	}
+	return b
+}
+
 // envelopePath is ABSOLUTE.
 //
 // The agent runs with its working directory set to the workspace, so a path

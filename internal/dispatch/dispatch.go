@@ -497,10 +497,8 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, c Candidate, now time.Time
 	// rejection it is the difference between fixing what it wrote and writing
 	// it again.
 	base := ""
-	if c.Kind == KindItem && c.Item.ID != "" {
-		if b, berr := d.branchFor(c.Item.ID); berr == nil {
-			base = b
-		}
+	if c.Kind == KindItem {
+		base = d.workspaceBase(c.Item.ID)
 	}
 	ws, err := d.prepareWorkspace(runID, base)
 	if err != nil {

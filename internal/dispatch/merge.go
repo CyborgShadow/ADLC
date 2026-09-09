@@ -162,7 +162,6 @@ func (d *Dispatcher) mergeGate() merge.GateFunc {
 	}
 }
 
-// branchFor finds the ref an item's work lives on: the branch of the most
 // branchFor is the branch that carries this item's work.
 //
 // It used to be the newest run's branch, whichever run that was. By the time an

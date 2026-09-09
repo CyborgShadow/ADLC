@@ -42,6 +42,14 @@ clean.
 **Claiming after the fact.** The lease is taken before the work starts. A claim taken at the end
 records a collision rather than preventing one.
 
+**Cutting a workspace from the trunk, or from a branch that is not ahead of it.** A builder's
+commit sits on its own branch until the merge lane lands it, so a workspace cut from the trunk
+hands the tester, the judge and the reviewer a tree without the change they were dispatched to
+examine — and they report on the trunk believing they reviewed it. `workspaceBase` is that rule,
+and it is deliberately not `branchFor`: the merge queue wants the newest branch even when nothing
+is ahead of the trunk, so it can report what it found, while a workspace cut from a branch that is
+not ahead is based on a tip whose work has already landed and so hides every sibling change since.
+
 **A lane that fires and writes nothing.** Every firing writes a tick, including the idle ones. A
 lane that stops firing then stops producing ticks and becomes a derived alarm; a lane that only
 records dispatches is indistinguishable from a lane with nothing to do.
@@ -64,4 +72,7 @@ verification is picked before new implementation, a lane only sees its own work,
 skipped rather than stolen, a segment under its target asks for work, generated items are admitted
 or refused and both are recorded, an idle loop still writes a tick, a loop that never fired is not
 silent, a killed run leaves `UNKNOWN`, and the run id, workspace and lease are one string.
-`merge_test.go` covers the merge lane's held and empty cases.
+`merge_test.go` covers the merge lane's held and empty cases. `workspace_test.go` builds real
+repositories: a workspace carries the item's unmerged branch, and — the clean case, without which
+the rule could quietly widen — stays on the trunk when this item's branch is not ahead of it and
+when the branch that is ahead belongs to somebody else. It also covers `copyTree`'s declared roots.
