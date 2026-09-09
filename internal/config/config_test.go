@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -346,5 +347,131 @@ func TestOnlyAnchoredCountPatternsMove(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%q counts differently after line anchoring: got %q, want %q", tc.pattern, got, want)
 		}
+	}
+}
+
+// gitInRepo runs one git command in a throwaway repository, failing the test
+// with the command that broke rather than an errno nobody can place.
+func gitInRepo(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+// docsRepo makes a repository holding one file of code and one of prose, both
+// committed, so a test can edit either and ask what the declared scope sees.
+func docsRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	gitInRepo(t, dir, "init", "-b", "main")
+	gitInRepo(t, dir, "config", "user.email", "t@example.invalid")
+	gitInRepo(t, dir, "config", "user.name", "t")
+	// A checkout that rewrites line endings shows as a file modified by nobody,
+	// which is the state this test exists to tell a real edit apart from.
+	gitInRepo(t, dir, "config", "core.autocrlf", "false")
+	for rel, body := range map[string]string{
+		"cmd/main.go":    "package main\n",
+		"README.md":      "# t\n",
+		"docs/design.md": "# design\n",
+	} {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitInRepo(t, dir, "add", "-A")
+	gitInRepo(t, dir, "commit", "-m", "base")
+	return dir
+}
+
+// scopedStatus asks git the question the dirty-tree guard asks — the porcelain
+// status of exactly the declared roots — and answers with the paths it named.
+//
+// The guard itself is internal/gate.TreeState, which this test cannot call:
+// gate imports config, so a config test importing gate is an import cycle. The
+// half of the guard under test here is its scope, and scope is a git pathspec,
+// so putting the same pathspec to git asks the same question of the same
+// oracle. What the walk does with the answer is pinned next to the walk.
+func scopedStatus(t *testing.T, dir string, roots []string) []string {
+	t.Helper()
+	args := append([]string{"status", "--porcelain", "--untracked-files=normal", "--"}, roots...)
+	var paths []string
+	for _, line := range strings.Split(gitInRepo(t, dir, args...), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if i := strings.LastIndex(line, " "); i >= 0 && i+1 < len(line) {
+			line = line[i+1:]
+		}
+		paths = append(paths, line)
+	}
+	return paths
+}
+
+// TestTheShippedRootsWatchTheDocumentation reads the roots this repository
+// actually declares and puts them to git, rather than asserting on the strings
+// in adlc.json.
+//
+// The defect: docs/ and README.md were not on the declared list, so a change to
+// them was invisible to the dirty-tree guard and the gate collected evidence
+// over a tree with uncommitted prose in it — a state nobody can check out
+// again. Prose in this repository is source: docs/design.md states the decision
+// behind every constraint, and a gate that cannot see it edited will pass a
+// commit whose reasoning was never recorded.
+//
+// This test is red on the commit before docs and README.md were declared.
+func TestTheShippedRootsWatchTheDocumentation(t *testing.T) {
+	cfg, err := Load("../../adlc.json")
+	if err != nil {
+		t.Fatalf("load the shipped config: %v", err)
+	}
+	dir := docsRepo(t)
+
+	// Clean case first, and it is not a formality: declaring more roots must
+	// not make a tree with nothing uncommitted read dirty. A guard that reports
+	// every tree dirty is a permanent stop, and it would pass a firing case on
+	// its own.
+	if paths := scopedStatus(t, dir, cfg.SourceRoots); len(paths) != 0 {
+		t.Fatalf("a tree with nothing uncommitted must be clean under the shipped roots %v, got %v", cfg.SourceRoots, paths)
+	}
+
+	// Firing case: an uncommitted edit to README.md.
+	readme := filepath.Join(dir, "README.md")
+	if err := os.WriteFile(readme, []byte("# t\n\nan edit nobody committed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	paths := scopedStatus(t, dir, cfg.SourceRoots)
+	if len(paths) != 1 || !strings.Contains(paths[0], "README.md") {
+		t.Fatalf("an uncommitted edit to README.md must be visible to the shipped roots %v; got %v, so the gate would report a clean tree over it", cfg.SourceRoots, paths)
+	}
+
+	// The same for docs/, the other half of what this commit declared.
+	if err := os.WriteFile(filepath.Join(dir, "docs", "design.md"), []byte("# design\n\nan edit nobody committed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if paths := scopedStatus(t, dir, cfg.SourceRoots); len(paths) != 2 {
+		t.Errorf("an uncommitted edit under docs/ must be visible too, got %v", paths)
+	}
+
+	// The scope is doing the work and not the tree: a file under a directory
+	// nobody declared stays invisible, which is why widening the declared list
+	// was the whole of the fix.
+	if err := os.MkdirAll(filepath.Join(dir, "vendor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vendor", "third_party.go"), []byte("package vendor\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if paths := scopedStatus(t, dir, cfg.SourceRoots); len(paths) != 2 {
+		t.Errorf("an undeclared directory must not be walked, got %v", paths)
 	}
 }
