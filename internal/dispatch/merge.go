@@ -94,6 +94,20 @@ func (d *Dispatcher) Merge(ctx context.Context) (MergeResult, error) {
 			}
 			res.Returned = append(res.Returned, it.ID)
 
+		case out.Reason == "merge_conflict":
+			// Not retryable either, and for the same reason as the clobber
+			// above: a rebase that conflicts against a fixed trunk conflicts
+			// identically every time it is tried. Requeuing it to
+			// ready_to_merge made the merge lane attempt the same impossible
+			// rebase on every tick, forever, while the item looked to every
+			// surface like work that nobody had got round to. It goes back to a
+			// builder, which is the only actor that can resolve a conflict.
+			if err := d.leaveMerging(it, authority.StateInProgress,
+				authority.ReasonMergeConflict, out.Detail); err != nil {
+				return res, err
+			}
+			res.Returned = append(res.Returned, it.ID)
+
 		case out.Reason == "merge_gate_failed" && !out.Retryable:
 			// Green before the rebase and red after it is a real conflict with
 			// what landed in between, not a transient.

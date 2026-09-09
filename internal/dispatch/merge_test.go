@@ -145,3 +145,52 @@ func TestAnEmptyMergeQueueSaysWhyItDidNothing(t *testing.T) {
 		t.Fatal("an empty pass must explain itself; silence reads as a stopped queue")
 	}
 }
+
+// A branch that cannot rebase goes back to a builder, not round the queue again.
+//
+// A rebase that conflicts against a fixed trunk conflicts identically every
+// time it is tried, so requeuing it to ready_to_merge made the merge lane
+// attempt the same impossible rebase on every tick, forever — while the item
+// looked, on every surface, exactly like work nobody had got round to. The
+// fleet must never get stuck, and an infinite retry is the shape a stall takes
+// when nothing errors.
+func TestABranchThatCannotRebaseGoesBackToABuilder(t *testing.T) {
+	ws, routing := specialists()
+	h := newHarness(t, ws, routing)
+	h.segment(t, "S1", "seg", "", 0)
+	h.item(t, "S1-001", "S1", "ui", "ready_to_merge")
+	gitRepo(t, h, "S1-001", "adlc/p-merge")
+	h.Cfg.Dispatch.Trunk = "main"
+
+	// The trunk changes the same line the branch changed, so no rebase of that
+	// branch onto this trunk can succeed.
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = h.D.Repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	write(t, filepath.Join(h.D.Repo, "thing.txt"), "something else entirely\n")
+	git("add", "-A")
+	git("commit", "-m", "the trunk moved under it")
+
+	res, err := h.D.Merge(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Requeued) != 0 {
+		t.Errorf("an impossible rebase was queued to be attempted again: %+v", res.Requeued)
+	}
+	if len(res.Returned) != 1 || res.Returned[0] != "S1-001" {
+		t.Fatalf("the conflict should have gone back to a builder: %+v", res)
+	}
+	it, err := h.Led.Item("S1-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authority.State(it.State) != authority.StateInProgress {
+		t.Fatalf("only a builder can resolve a conflict, got %s", it.State)
+	}
+}
