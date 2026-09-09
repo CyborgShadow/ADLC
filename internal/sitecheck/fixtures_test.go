@@ -129,6 +129,27 @@ func pngNoise(t *testing.T, w, h int) []byte {
 	return buf.Bytes()
 }
 
+// littleSentence12 and littleSentence13 straddle the p.little budget by one
+// word each. They are named here because the on-disk fixture under
+// testdata/bad-html.sentence-budget carries the same thirteen-word sentence,
+// and a criterion demonstrated with one wording and tested with another is a
+// criterion demonstrated twice about two different things.
+const (
+	littleSentence12 = "Cats moved in on us before anybody in the world invited them."
+	littleSentence13 = "Cats moved in on us long before anybody in the world invited them."
+)
+
+// riffWebP is a WEBP header and nothing else: enough bytes for a decoder to
+// identify the format and refuse it, which is exactly the case the images
+// family has to call a failure. It is built here rather than checked in
+// because a .webp in the tree is a file the site may not ship — the admitted
+// formats are gif, jpeg and png, and the *.webp attribute in .gitattributes
+// records how one would be stored if it arrived, not permission to add one.
+func riffWebP() []byte {
+	b := []byte("RIFF\x24\x00\x00\x00WEBPVP8 \x18\x00\x00\x00")
+	return append(b, make([]byte, 0x18)...)
+}
+
 // goodSite is the conforming fixture. It is rebuilt on every call so that a
 // mutation made for one firing case cannot leak into another case's clean run.
 func goodSite(t *testing.T) fstest.MapFS {
@@ -172,4 +193,14 @@ func swap(t *testing.T, m fstest.MapFS, path, old, new string) fstest.MapFS {
 func setFile(m fstest.MapFS, path string, data []byte) fstest.MapFS {
 	m[path] = &fstest.MapFile{Data: data}
 	return m
+}
+
+// sentenceOf builds a sentence of exactly n whitespace-separated words, the
+// unit text.go counts in.
+func sentenceOf(n int) string {
+	words := make([]string, n)
+	for i := range words {
+		words[i] = "word"
+	}
+	return strings.Join(words, " ") + "."
 }

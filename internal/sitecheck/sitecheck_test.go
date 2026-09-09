@@ -1,7 +1,10 @@
 package sitecheck
 
 import (
+	"go/parser"
+	"go/token"
 	"io/fs"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -36,6 +39,9 @@ func ruleCases() map[string]ruleCase {
 
 		"images.size": {clean, func(t *testing.T) fstest.MapFS {
 			return setFile(goodSite(t), "img/cat-a.png", pngNoise(t, 400, 400))
+		}},
+		"images.decodable": {clean, func(t *testing.T) fstest.MapFS {
+			return setFile(goodSite(t), "img/cat-c.webp", riffWebP())
 		}},
 		"images.dimensions": {clean, func(t *testing.T) fstest.MapFS {
 			return setFile(goodSite(t), "img/cat-a.png", pngUniform(t, 1400, 300))
@@ -76,6 +82,12 @@ func ruleCases() map[string]ruleCase {
 		"html.img-alt": {clean, func(t *testing.T) fstest.MapFS {
 			return swap(t, goodSite(t), "index.html", `alt="A cat with a round face and wide eyes"`, `alt=""`)
 		}},
+		"html.img-src": {clean, func(t *testing.T) fstest.MapFS {
+			// A relative src to a file that is not there: it has an alt and it
+			// stays on this site, so html.img-alt and html.no-external-ref both
+			// pass it.
+			return swap(t, goodSite(t), "index.html", `src="img/cat-b.png"`, `src="img/cat-c.png"`)
+		}},
 		"html.viewport": {clean, func(t *testing.T) fstest.MapFS {
 			return swap(t, goodSite(t), "index.html", `<meta name="viewport" content="width=device-width, initial-scale=1">`, "")
 		}},
@@ -89,9 +101,12 @@ func ruleCases() map[string]ruleCase {
 			return swap(t, goodSite(t), "index.html", `href="style.css"`, `href="https://cdn.example.com/style.css"`)
 		}},
 		"html.sentence-budget": {clean, func(t *testing.T) fstest.MapFS {
+			// Thirteen words, one over the budget. A firing case well clear of
+			// the line would still fire if the budget were quietly edited to
+			// 20; this one would not.
 			return swap(t, goodSite(t), "index.html",
 				"<p class=\"little\">Cats moved in on us before we invited them.</p>",
-				"<p class=\"little\">Cats moved in on us before anybody thought to invite them, which is a thing worth saying slowly.</p>")
+				"<p class=\"little\">"+littleSentence13+"</p>")
 		}},
 	}
 }
@@ -370,5 +385,241 @@ func TestCSSScannerSeesInsideAtRules(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Detail, "12px") {
 		t.Errorf("finding does not name the offending value: %q", got[0].Detail)
+	}
+}
+
+// TestTheFamilySetIsExactlyTheFourDeclared holds the roster's shape: the rules
+// added for the html img src, the unreadable header and the sentence budgets
+// each land in a family that already exists. A fifth family would be reachable
+// from no command anybody has written down — every plan that runs these rules
+// runs them through -rule html or -rule images — so it would be a rule that
+// exists and is never selected.
+func TestTheFamilySetIsExactlyTheFourDeclared(t *testing.T) {
+	if got := strings.Join(Families, ","); got != "credits,images,css,html" {
+		t.Errorf("Families = %q, want credits,images,css,html", got)
+	}
+	allowed := map[string]bool{"core": true}
+	for _, f := range Families {
+		allowed[f] = true
+	}
+	for _, r := range Rules() {
+		if !allowed[r.Family] {
+			t.Errorf("rule %s is in family %q, which -rule cannot select", r.ID, r.Family)
+		}
+	}
+}
+
+// TestAnUnreadableHeaderIsAFailureAndNeverASkip measures the premise rather
+// than assuming it. The hole this rule fills is not that DecodeConfig errors —
+// it is that it errors and hands back a zero-valued Config at the same time, so
+// a checker that reads the dimensions and ignores the error measures 0x0 and
+// finds it comfortably inside a 1280 px ceiling.
+func TestAnUnreadableHeaderIsAFailureAndNeverASkip(t *testing.T) {
+	cfg, err := decodeImageHeader(riffWebP())
+	if err == nil {
+		t.Fatal("a WEBP header decoded: this test no longer measures what it claims to")
+	}
+	if err.Error() != "image: unknown format" {
+		t.Errorf("decode error = %q, want %q", err.Error(), "image: unknown format")
+	}
+	if cfg.Width != 0 || cfg.Height != 0 {
+		t.Fatalf("config = %dx%d, want 0x0", cfg.Width, cfg.Height)
+	}
+	if cfg.Width <= maxImageEdge && cfg.Height <= maxImageEdge {
+		t.Logf("0x0 is inside the %d px ceiling, which is why the error cannot be dropped", maxImageEdge)
+	}
+
+	fsys := setFile(goodSite(t), "img/cat-c.webp", riffWebP())
+	if got := runRule(t, "images.dimensions", fsys); len(got) != 0 {
+		t.Errorf("images.dimensions reported on a file it could not measure (%s); images.decodable owns that", joinFindings(got))
+	}
+	got := runRule(t, "images.decodable", fsys)
+	if len(got) != 1 {
+		t.Fatalf("images.decodable gave %d findings (%s), want 1", len(got), joinFindings(got))
+	}
+	if got[0].Path != "img/cat-c.webp" {
+		t.Errorf("finding names path %q, want img/cat-c.webp", got[0].Path)
+	}
+	for _, want := range []string{"image: unknown format", "gif, jpeg, png"} {
+		if !strings.Contains(got[0].Detail, want) {
+			t.Errorf("finding detail %q does not carry %q", got[0].Detail, want)
+		}
+	}
+
+	res, err := Check(fsys, nil)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if res.OK() {
+		t.Error("a site holding an image nothing could measure passed")
+	}
+}
+
+// TestTheAdmittedImageFormatsAreNamedInExactlyOnePlace reads this package's own
+// imports rather than its behaviour, because behaviour cannot answer the
+// question here: image.DecodeConfig consults one process-wide registry, and
+// this test binary imports image/png itself to build fixtures, so a test that
+// encodes and decodes a sample would report a format as supported after the
+// package's own import of it had been deleted. Dropping _ "image/gif" from
+// images.go passes such a test and ships a checker that calls every GIF
+// unreadable.
+//
+// What is asserted is the criterion itself: the decoder imports and
+// admittedImageFormats are the same set, they live in one file, and nothing
+// here reaches for a decoder outside the standard library.
+func TestTheAdmittedImageFormatsAreNamedInExactlyOnePlace(t *testing.T) {
+	if len(admittedImageFormats) == 0 {
+		t.Fatal("no admitted formats: a checker that decodes nothing measures nothing")
+	}
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("reading the package directory: %v", err)
+	}
+	imported := map[string]bool{}
+	var files []string
+	read := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		read++
+		f, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		found := false
+		for _, spec := range f.Imports {
+			p := strings.Trim(spec.Path.Value, `"`)
+			if strings.Contains(p, "golang.org/x/image") {
+				t.Errorf("%s imports %s: a fourth decoder is a module dependency, and go.mod is not this package's to change", name, p)
+			}
+			if format, ok := strings.CutPrefix(p, "image/"); ok && format != "color" {
+				imported[format] = true
+				found = true
+			}
+		}
+		if found {
+			files = append(files, name)
+		}
+	}
+	// A run that discovered zero units of work has failed: an empty read would
+	// otherwise agree with an empty list and report green over nothing.
+	if read == 0 {
+		t.Fatal("parsed no source files in this package")
+	}
+
+	if len(files) != 1 {
+		t.Errorf("image decoders are imported in %v, want exactly one file: two lists of admitted formats drift, and the drift is silent in both directions", files)
+	}
+	want := map[string]bool{}
+	for _, f := range admittedImageFormats {
+		want[f] = true
+	}
+	for f := range want {
+		if !imported[f] {
+			t.Errorf("%q is admitted but no decoder for it is imported: the checker will call every such file unreadable", f)
+		}
+	}
+	for f := range imported {
+		if !want[f] {
+			t.Errorf("image/%s is imported but not named in admittedImageFormats: a finding will tell the reader that format is not allowed while the checker quietly measures it", f)
+		}
+	}
+
+	// The refusing half, measured rather than assumed: a format outside the set
+	// has no decoder, so its header is unreadable and images.decodable owns it.
+	if _, err := decodeImageHeader(riffWebP()); err == nil {
+		t.Error("webp decoded: the admitted set is wider than the list says")
+	}
+}
+
+// TestTheSentenceBudgetsFireAtTheWordAfterTheBudget walks both sides of each
+// line, because the defect a budget dies of is an off-by-one nobody can see
+// from either side alone: a rule comparing >= refuses the sentence the budget
+// allows, and one comparing > budget+1 admits the sentence it forbids. Both
+// look identical to a fixture written comfortably clear of the line.
+// TestSentenceBudgetsAreThoseInTheCriteria holds the numbers themselves; this
+// holds where the rule fires relative to them.
+func TestTheSentenceBudgetsFireAtTheWordAfterTheBudget(t *testing.T) {
+	cases := []struct {
+		class string
+		words int
+		fires bool
+	}{
+		{"little", littleSentenceWords, false},
+		{"little", littleSentenceWords + 1, true},
+		{"big", bigSentenceWords, false},
+		{"big", bigSentenceWords + 1, true},
+	}
+	for _, c := range cases {
+		fsys := fstest.MapFS{
+			"index.html": &fstest.MapFile{Data: []byte(
+				`<section class="fact" data-topic="purring"><p class="` + c.class + `">` +
+					sentenceOf(c.words) + `</p></section>`)},
+			"img/a.png": &fstest.MapFile{Data: pngUniform(t, 10, 10)},
+		}
+		got := runRule(t, "html.sentence-budget", fsys)
+		if c.fires && len(got) == 0 {
+			t.Errorf("p.%s with %d words did not fire", c.class, c.words)
+		}
+		if !c.fires && len(got) != 0 {
+			t.Errorf("p.%s with %d words fired: %s", c.class, c.words, joinFindings(got))
+		}
+		if c.fires && len(got) > 0 && !strings.Contains(got[0].Detail, "purring") {
+			t.Errorf("finding does not name the paragraph it fired on: %q", got[0].Detail)
+		}
+	}
+
+	// The wording the on-disk fixture and the criterion both use, counted here
+	// so a reworded fixture cannot quietly stop being the boundary case.
+	if n := wordCount(strings.TrimSuffix(littleSentence13, ".")); n != 13 {
+		t.Errorf("littleSentence13 has %d words, want 13", n)
+	}
+	if n := wordCount(strings.TrimSuffix(littleSentence12, ".")); n != 12 {
+		t.Errorf("littleSentence12 has %d words, want 12", n)
+	}
+}
+
+// TestImgSrcIsResolvedAgainstThePageThatCarriesIt covers what no fixture does:
+// a page in a subdirectory, and a root-relative src. Resolving both against the
+// tree root, or both against the page, is wrong in one of the two cases and
+// silent in the other.
+func TestImgSrcIsResolvedAgainstThePageThatCarriesIt(t *testing.T) {
+	for _, c := range []struct{ page, ref, want string }{
+		{"index.html", "img/cat-a.png", "img/cat-a.png"},
+		{"pages/about.html", "img/cat-a.png", "pages/img/cat-a.png"},
+		{"pages/about.html", "../img/cat-a.png", "img/cat-a.png"},
+		{"pages/about.html", "/img/cat-a.png", "img/cat-a.png"},
+		{"index.html", "img/cat-a.png?v=2", "img/cat-a.png"},
+		{"index.html", "img/cat-a.png#top", "img/cat-a.png"},
+	} {
+		if got := resolveRef(c.page, c.ref); got != c.want {
+			t.Errorf("resolveRef(%q, %q) = %q, want %q", c.page, c.ref, got, c.want)
+		}
+	}
+
+	// A page one directory down, whose src is correct from the tree root and
+	// wrong from the page. The whole point of resolving relative to the page is
+	// that this is a finding.
+	fsys := goodSite(t)
+	fsys["pages/about.html"] = &fstest.MapFile{Data: []byte(
+		`<img src="img/cat-a.png" alt="a cat">`)}
+	got := runRule(t, "html.img-src", fsys)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings (%s), want 1", len(got), joinFindings(got))
+	}
+	if !strings.Contains(got[0].Detail, "pages/img/cat-a.png") {
+		t.Errorf("finding does not name what the src resolved to: %q", got[0].Detail)
+	}
+
+	// An off-site src is html.no-external-ref's finding, not this one's.
+	external := swap(t, goodSite(t), "index.html", `src="img/cat-b.png"`, `src="https://cdn.example.com/cat-b.png"`)
+	if got := runRule(t, "html.img-src", external); len(got) != 0 {
+		t.Errorf("html.img-src also fired on an off-site src: %s", joinFindings(got))
+	}
+	if got := runRule(t, "html.no-external-ref", external); len(got) == 0 {
+		t.Error("nothing reported an off-site img src")
 	}
 }

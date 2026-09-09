@@ -2,6 +2,7 @@ package sitecheck
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -179,6 +180,48 @@ func checkHTMLImgAlt(s *site) []Finding {
 		}
 	}
 	return out
+}
+
+// checkHTMLImgSrc resolves every img src against the tree that was walked. The
+// defect is invisible to the two rules that already read a src: html.img-alt
+// asks only that the alt text is non-empty, html.no-external-ref asks only that
+// the src stays on this site, and a relative src naming a file that is not
+// there satisfies both. What the reader gets is a broken-image icon with
+// excellent alt text, and every command in the plan exits 0 over it.
+func checkHTMLImgSrc(s *site) []Finding {
+	var out []Finding
+	for _, f := range s.htmls {
+		for _, img := range f.root.tags("img") {
+			src := strings.TrimSpace(img.attrs["src"])
+			if src == "" {
+				out = append(out, Finding{RuleID: "html.img-src", Path: f.path,
+					Detail: fmt.Sprintf("<img alt=%q> has no src, so it names no file to resolve", img.attrs["alt"])})
+				continue
+			}
+			if schemeRef.MatchString(src) {
+				continue // html.no-external-ref owns an off-site src; two rules on one defect is noise
+			}
+			target := resolveRef(f.path, src)
+			if !s.files[target] {
+				out = append(out, Finding{RuleID: "html.img-src", Path: f.path,
+					Detail: fmt.Sprintf("<img src=%q> resolves to %q, which is not a file in the checked tree", src, target)})
+			}
+		}
+	}
+	return out
+}
+
+// resolveRef turns a reference on a page into a path in the checked tree. A
+// leading "/" is the site root rather than the machine's, and the query and
+// fragment are dropped because neither names a different file.
+func resolveRef(page, ref string) string {
+	if i := strings.IndexAny(ref, "?#"); i >= 0 {
+		ref = ref[:i]
+	}
+	if strings.HasPrefix(ref, "/") {
+		return path.Clean(strings.TrimPrefix(ref, "/"))
+	}
+	return path.Clean(path.Join(path.Dir(page), ref))
 }
 
 func checkHTMLViewport(s *site) []Finding {

@@ -1,29 +1,11 @@
 package sitecheck
 
 import (
-	"bytes"
-	"image"
 	"io/fs"
 	"path"
 	"sort"
 	"strings"
-
-	// Registered so image.DecodeConfig can measure the formats a static site
-	// actually ships. A format with no decoder here is reported as unmeasurable
-	// rather than skipped — see checkImagesDimensions.
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 )
-
-// imageFile is one discovered image. cfgErr is kept rather than dropped: an
-// image nobody could measure is UNKNOWN, and UNKNOWN satisfies nothing.
-type imageFile struct {
-	path   string
-	size   int64
-	cfg    image.Config
-	cfgErr error
-}
 
 type textFile struct {
 	path string
@@ -34,6 +16,12 @@ type textFile struct {
 // than an fs.FS so that a rule cannot reach for a file the loader did not
 // account for, and so twenty rules do not re-read the same page twenty times.
 type site struct {
+	// files is every path the walk saw, image or not. It is what a reference on
+	// a page is resolved against: a rule that answered "does this file exist"
+	// by reaching back into the fs.FS could resolve a path the loader never
+	// walked, and would then disagree with the rest of the package about what
+	// the checked tree contains.
+	files   map[string]bool
 	images  []imageFile
 	credits *creditsFile
 	htmls   []*htmlFile
@@ -41,9 +29,10 @@ type site struct {
 }
 
 // imageExts is what counts as an image file for discovery and for the credits
-// bijection. It is deliberately wider than the set of formats we can decode:
-// shipping a .webp with no credit row should be a bijection failure, not an
-// invisible file.
+// bijection. It is deliberately wider than admittedImageFormats, and is not a
+// second statement of that set: shipping a .webp with no credit row should be a
+// bijection failure and an images.decodable failure naming the format, not an
+// invisible file no rule ever mentions.
 var imageExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
 	".webp": true, ".avif": true, ".svg": true,
@@ -52,7 +41,7 @@ var imageExts = map[string]bool{
 const creditsPath = "img/CREDITS.tsv"
 
 func loadSite(fsys fs.FS) (*site, error) {
-	s := &site{}
+	s := &site{files: map[string]bool{}}
 	var creditsBody string
 	creditsFound := false
 
@@ -63,6 +52,7 @@ func loadSite(fsys fs.FS) (*site, error) {
 		if d.IsDir() {
 			return nil
 		}
+		s.files[p] = true
 		ext := strings.ToLower(path.Ext(p))
 		switch {
 		case p == creditsPath:
@@ -79,7 +69,7 @@ func loadSite(fsys fs.FS) (*site, error) {
 				return err
 			}
 			img.size = int64(len(b))
-			img.cfg, _, img.cfgErr = image.DecodeConfig(bytes.NewReader(b))
+			img.cfg, img.cfgErr = decodeImageHeader(b)
 			s.images = append(s.images, img)
 		case ext == ".html" || ext == ".htm":
 			b, err := fs.ReadFile(fsys, p)

@@ -65,6 +65,7 @@ var rules = []Rule{
 	{ID: "credits.source-url", Family: "credits", check: checkCreditsSourceURL},
 
 	{ID: "images.size", Family: "images", check: checkImagesSize},
+	{ID: "images.decodable", Family: "images", check: checkImagesDecodable},
 	{ID: "images.dimensions", Family: "images", check: checkImagesDimensions},
 
 	{ID: "css.font-size", Family: "css", check: checkCSSFontSize},
@@ -78,6 +79,7 @@ var rules = []Rule{
 	{ID: "html.data-source", Family: "html", check: checkHTMLDataSource},
 	{ID: "html.uncertain", Family: "html", check: checkHTMLUncertain},
 	{ID: "html.img-alt", Family: "html", check: checkHTMLImgAlt},
+	{ID: "html.img-src", Family: "html", check: checkHTMLImgSrc},
 	{ID: "html.viewport", Family: "html", check: checkHTMLViewport},
 	{ID: "html.no-script", Family: "html", check: checkHTMLNoScript},
 	{ID: "html.no-form", Family: "html", check: checkHTMLNoForm},
