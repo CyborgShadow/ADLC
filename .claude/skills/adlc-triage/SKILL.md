@@ -72,10 +72,10 @@ Three things, and only three, ever need a person:
    AWAITING YOUR APPROVAL with the plan digest. These are reviewed, green and stopped.
    Approvals page.
 
-Note: the AWAITING YOUR APPROVAL block in `report fleet` prints a suggested command
-(`adlc approve ...`) that **is not a command this binary has**. Do not repeat it. The real
-one, if the user asks, is `adlc approval decide -id <approval-id> -verdict approve
--approver "<their name>"` — but say it and let them run it; this skill decides nothing.
+Note: the AWAITING YOUR APPROVAL block prints the command for each open request, keyed on
+the approval id rather than the item's, because `approval decide` answers one request and an
+item can carry more than one. Quote that line as it stands and let them run it; this skill
+decides nothing.
 
 ### Lanes that have quietly stopped
 
@@ -120,7 +120,7 @@ expected; one that is not is worth asking about.
 ### Money
 
 `report fleet` prints 24-hour and total spend. Four things can appear beside those two
-figures, and each one means the number next to it is not the whole story:
+figures:
 
 - `no daily cap configured — unlimited, which is not the same as zero`, on the 24-hour
   line. Say it plainly if it appears.
