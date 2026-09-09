@@ -73,27 +73,59 @@ func (f *findingsList) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 || string(b) == "null" {
 		return nil
 	}
+	// A finding reads like a sentence, so a worker writes the whole thing as one
+	// and puts a bare string where the list belongs. There is no list to
+	// re-shape, so this is refused -- and the refusal has to name the subfield
+	// itself, because the decoder's own message ("cannot unmarshal string into
+	// Go value of type []jsontext.Value") names an internal type the worker
+	// cannot map back to anything it wrote. criteriaList above already names
+	// its field; a worker deserves the same answer on either side.
+	if b[0] != '[' {
+		return fmt.Errorf(`outputs.findings is a list of finding objects, not %s; one finding is still a list of one`,
+			describeJSON(b))
+	}
 	var arr []json.RawMessage
 	if err := json.Unmarshal(b, &arr); err != nil {
 		return err
 	}
-	for _, el := range arr {
+	for i, el := range arr {
 		el = bytes.TrimSpace(el)
 		if len(el) > 0 && el[0] == '"' {
 			var s string
 			if err := json.Unmarshal(el, &s); err != nil {
-				return err
+				return fmt.Errorf("outputs.findings[%d]: %w", i, err)
 			}
 			*f = append(*f, Finding{Evidence: s})
 			continue
 		}
 		var one Finding
 		if err := json.Unmarshal(el, &one); err != nil {
-			return err
+			return fmt.Errorf("outputs.findings[%d]: %w", i, err)
 		}
 		*f = append(*f, one)
 	}
 	return nil
+}
+
+// describeJSON names what a worker actually wrote, in the words it would use
+// about it. A refusal that quotes the value back is unreadable when the value
+// is a page of prose, and one that quotes a Go type is unactionable.
+func describeJSON(b []byte) string {
+	if len(b) == 0 {
+		return "nothing"
+	}
+	switch b[0] {
+	case '"':
+		return "a single string"
+	case '{':
+		return "an object"
+	case 't', 'f':
+		return "a boolean"
+	case 'n':
+		return "null"
+	default:
+		return "a number"
+	}
 }
 
 // statusWords are the spellings of a criterion verdict that mean one of the

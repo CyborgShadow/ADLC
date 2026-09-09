@@ -117,6 +117,44 @@ criterion arrives looking satisfied. A word from no vocabulary at all is refused
 `outputs.criteria`, and the whole run with it. A criterion with no command behind it is the one
 somebody needs to see, so say so.
 
+Where your role reports defects, `outputs.findings` is an array of **objects** — never one string,
+and never a list of sentences:
+
+```json
+"outputs": {
+  "findings": [
+    { "severity": "blocker", "location": "internal/gate/run.go:88", "criterion": "AC-2",
+      "evidence": "what you ran and what it showed",
+      "required_change": "the smallest edit that clears it" }
+  ]
+}
+```
+
+`severity` is one of `blocker`, `major`, `minor`, `note`, on the same terms as a criterion's
+`status`: an unambiguous synonym is read onto the declared word and the re-reading is recorded,
+and where two vocabularies disagree it goes to the heavier value, so `critical` is read as
+`blocker` and `warning` as `major`. A word from no vocabulary is refused. `location`, `evidence`
+and `required_change` are what separate a finding from a complaint — without `required_change` the
+next run re-derives a fix you were already holding.
+
+**A wrong shape in any `outputs` subfield discards the whole envelope**, and with it your verdict,
+your commands and the account of the work you were reporting on. It does not degrade to an empty
+subfield: the run is refused as `malformed_envelope` and has to be done again. Reporting nothing
+would have cost less. `files_changed` and `deferred` are lists of strings, `notes_md` a single
+string, `work_items` a list of objects, and `criteria` and `findings` are lists even when you have
+one — put a string where an object belongs, or an object where a list belongs, and none of it is
+read.
+
+Two departures are re-read rather than refused, and neither is free. `outputs.criteria` may be an
+object keyed by criterion id. And a finding may be written as prose *inside* the list, where the
+sentence becomes `evidence` and the severity you did not state is taken from your own verdict — so
+a blocker written as a sentence on a passing run is recorded as a `note`, with no location and no
+required change. It parsed, and it no longer says what you meant.
+
+The refusal usually names the subfield, but not always: `outputs.criteria` written as a list of
+strings is refused by the JSON decoder in its own words, which name a Go type rather than the
+field. Where the message does not tell you the shape, the one stated here is the definition.
+
 {{rigour}}
 
 {{what_went_wrong}}

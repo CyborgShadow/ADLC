@@ -202,3 +202,103 @@ func TestCriterionStatusIsAClosedVocabulary(t *testing.T) {
 		t.Errorf("the failing criterion should be reachable through FailedCriteria(), got %d", len(again.FailedCriteria()))
 	}
 }
+
+// AC-3's firing half, and the reason it is worth having on top of the
+// re-shaping tests next door: shapes.go decides which wrong shapes are read
+// rather than refused, and everything it does NOT tolerate still discards the
+// whole envelope — the verdict, the commands and the account of the work go
+// with it. That is what agents/_preamble.md now tells every role, and this is
+// what holds the file to it. Each refusal must name its subfield, because a
+// worker cannot reshape a field the refusal did not identify.
+func TestAWrongShapeInOutputsDiscardsTheEnvelopeAndNamesTheSubfield(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		// The one this item exists for: a finding reads like a sentence, so it
+		// gets written as one, in place of the list rather than inside it.
+		{"a finding written as one bare string",
+			`{"findings":"the gate is reading the wrong tree"}`, "outputs.findings"},
+		{"findings as a number", `{"findings":42}`, "outputs.findings"},
+		// Inside the list, prose is tolerated (shapes_test.go) but a value that
+		// is neither prose nor an object is not, and the index says which one.
+		{"a finding that is neither prose nor an object",
+			`{"findings":[{"severity":"note","evidence":"a"},42]}`, "outputs.findings[1]"},
+		{"files_changed as objects",
+			`{"files_changed":[{"path":"internal/gate/run.go"}]}`, "outputs.files_changed"},
+		{"deferred as objects", `{"deferred":[{"why":"out of scope"}]}`, "outputs.deferred"},
+		{"notes_md as a list", `{"notes_md":["one","two"]}`, "outputs.notes_md"},
+		{"work_items as strings", `{"work_items":["build the thing"]}`, "outputs.work_items"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(outputs(tc.body)))
+			if err == nil {
+				t.Fatalf("%s must be refused, not read as an empty subfield", tc.name)
+			}
+			if _, ok := err.(ErrMalformed); !ok {
+				t.Fatalf("the refusal must be retryable rather than fatal, got %T", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the refusal must name %s so the next attempt knows what to reshape, got %q", tc.want, err)
+			}
+			// Naming the subfield is not enough on its own. The decoder's own
+			// message for these reaches for the type it was decoding into, and
+			// "[]jsontext.Value" is not something a worker can map back to
+			// anything it wrote — it reads as an internal fault rather than as
+			// its own envelope being the wrong shape.
+			if strings.Contains(err.Error(), "jsontext") {
+				t.Errorf("the refusal leaks the decoder's internal type instead of describing the shape: %q", err)
+			}
+		})
+	}
+
+	// The clean case, without which every row above still passes on the day
+	// Parse starts refusing everything it is handed: the same five subfields,
+	// each in its declared shape, in one envelope that parses intact.
+	t.Run("the declared shapes all parse", func(t *testing.T) {
+		e, err := Parse([]byte(outputs(`{
+			"findings":[{"severity":"blocker","location":"internal/gate/run.go:88",
+				"criterion":"AC-2","evidence":"observed exit 1","required_change":"run the check in the run's own tree"}],
+			"files_changed":["internal/gate/run.go"],
+			"deferred":["the second scanner"],
+			"notes_md":"one paragraph",
+			"work_items":[{"title":"build the thing"}]}`)))
+		if err != nil {
+			t.Fatalf("the declared shapes must parse: %v", err)
+		}
+		if len(e.Outputs.Findings) != 1 || len(e.Outputs.FilesChanged) != 1 ||
+			len(e.Outputs.Deferred) != 1 || e.Outputs.Notes != "one paragraph" ||
+			len(e.Outputs.WorkItems) != 1 {
+			t.Errorf("a declared envelope lost a subfield in parsing: %+v", e.Outputs)
+		}
+		if n := e.Normalised(); len(n) != 0 {
+			t.Errorf("nothing here needed re-shaping, yet: %v", n)
+		}
+	})
+}
+
+// Outputs decodes through custom unmarshallers, and an envelope is read back
+// after it is written — by the ledger that stored it and by the story that
+// replays it. A severity that survives Parse but not the round trip would
+// downgrade a blocker to nothing at the point nobody is looking.
+func TestAFindingSurvivesBeingWrittenOutAndReadBack(t *testing.T) {
+	e, err := Parse([]byte(outputs(`{"findings":[{"severity":"major",
+		"location":"internal/gate/run.go:88","criterion":"AC-2",
+		"evidence":"observed exit 1","required_change":"run the check in the run's own tree"}]}`)))
+	if err != nil {
+		t.Fatalf("a well-formed findings array must parse: %v", err)
+	}
+	f := e.Outputs.Findings[0]
+	if f.Severity != "major" || f.Location != "internal/gate/run.go:88" || f.Required == "" {
+		t.Fatalf("the declared fields did not survive parsing: %+v", f)
+	}
+
+	round, err := json.Marshal(e.Outputs)
+	if err != nil {
+		t.Fatalf("marshal outputs: %v", err)
+	}
+	var back Outputs
+	if err := json.Unmarshal(round, &back); err != nil {
+		t.Fatalf("unmarshal outputs: %v", err)
+	}
+	if len(back.Findings) != 1 || back.Findings[0] != f {
+		t.Errorf("the finding did not survive the round trip: %+v", back.Findings)
+	}
+}
