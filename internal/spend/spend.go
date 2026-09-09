@@ -64,14 +64,12 @@ func (m Micros) String() string {
 // block answers it explicitly. Cost prices four zeros at the going rate and
 // returns a confident zero, which is the trap this item exists about: a surface
 // spending money on behalf of a run it cannot vouch for goes through CostOf
-// instead. Teaching the dispatcher and the CLI to say WHICH unknown they hit
-// needs both of those files, outside this item's file scope, and is open as
-// S1-017-Q2.
+// instead.
 //
 // The value returned alongside a false ok is zero rather than Unknown, because
 // callers record it in the ledger's cost column and a sentinel written there
-// would be read back as money. The flag is what carries the meaning; a caller
-// that ignores it turns an unknown cost into a free one.
+// would be read back as money. The flag is what carries the meaning, and
+// CostFrom below says what ignoring it costs.
 func Cost(b config.Budget, model string, u ledger.Usage) (Micros, bool) {
 	c, src := CostFrom(b, model, u)
 	return c, src != config.PriceUnpriced
@@ -185,9 +183,9 @@ func CheckRun(b config.Budget, cost Micros) Verdict {
 // Report is a spend summary for the fleet report.
 //
 // Today and AllTime are sums of what the record could price, so they are lower
-// bounds whenever Unmeasured or Unpriced is non-zero. The counts travel beside
-// the figures rather than being folded into them: a surface that prints the
-// number without the count prints a total that is not one.
+// bounds whenever Unmeasured or Unpriced is non-zero: a surface that prints a
+// figure without the count beside it prints a total that is not one. Summarise
+// says why the counts stay beside the figures rather than being folded in.
 type Report struct {
 	Today       Micros
 	AllTime     Micros
